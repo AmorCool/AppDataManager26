@@ -1,0 +1,9 @@
+Package: com.aosaid.appdatamgr
+Name: AppData Manager
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Professional app data wipe & backup tool for rootless jailbreak. Compatible with Dopamine 3.0 and iOS 15-18.
+Maintainer: aosaid3224 <aosaid3224@github.com>
+Author: aosaid3224 <aosaid3224@github.com>
+Section: Utilities
+Depends: firmware (>= 15.0)
