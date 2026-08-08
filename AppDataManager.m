@@ -287,30 +287,96 @@
 }
 
 - (BOOL)restoreAppData:(NSString *)bundleID fromBackup:(NSString *)backupPath {
-    if (!bundleID || !backupPath) return NO;
-    NSString *dataPath = [self dataPathForBundleID:bundleID];
-    if (!dataPath || ![[NSFileManager defaultManager] fileExistsAtPath:backupPath]) {
+    if (!bundleID || !backupPath) {
+        NSLog(@"[AppDataManager] ❌ Invalid parameters for restore");
         return NO;
     }
 
-    [self wipeAppData:bundleID];
+    NSString *dataPath = [self dataPathForBundleID:bundleID];
+    if (!dataPath) {
+        NSLog(@"[AppDataManager] ❌ Could not find data path for %@", bundleID);
+        return NO;
+    }
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *contents = [fm contentsOfDirectoryAtPath:backupPath error:nil];
+    if (![fm fileExistsAtPath:backupPath]) {
+        NSLog(@"[AppDataManager] ❌ Backup path does not exist: %@", backupPath);
+        return NO;
+    }
 
-    BOOL success = YES;
+    // 1. Wipe existing data
+    NSLog(@"[AppDataManager] 🧹 Wiping existing data for %@...", bundleID);
+    [self wipeAppData:bundleID];
+
+    // 2. Ensure data directory exists (create if wiped completely)
+    if (![fm fileExistsAtPath:dataPath]) {
+        NSError *createErr = nil;
+        BOOL created = [fm createDirectoryAtPath:dataPath 
+                     withIntermediateDirectories:YES 
+                                      attributes:@{NSFileOwnerAccountName: @"mobile", 
+                                                   NSFileGroupOwnerAccountName: @"mobile"} 
+                                           error:&createErr];
+        if (!created) {
+            NSLog(@"[AppDataManager] ❌ Failed to create data directory: %@", createErr);
+            return NO;
+        }
+        NSLog(@"[AppDataManager] 📁 Created data directory: %@", dataPath);
+    }
+
+    // 3. Copy backup contents to data directory
+    NSError *contentsErr = nil;
+    NSArray *contents = [fm contentsOfDirectoryAtPath:backupPath error:&contentsErr];
+    if (contentsErr) {
+        NSLog(@"[AppDataManager] ❌ Error reading backup: %@", contentsErr);
+        return NO;
+    }
+
+    if (contents.count == 0) {
+        NSLog(@"[AppDataManager] ⚠️ Backup is empty");
+        return YES; // Nothing to restore
+    }
+
+    NSLog(@"[AppDataManager] 📦 Restoring %lu items from backup...", (unsigned long)contents.count);
+
+    BOOL allSuccess = YES;
+    NSUInteger successCount = 0;
+
     for (NSString *item in contents) {
-        NSString *src = [backupPath stringByAppendingPathComponent:item];
-        NSString *dst = [dataPath stringByAppendingPathComponent:item];
-        NSError *error = nil;
-        if (![fm copyItemAtPath:src toPath:dst error:&error]) {
-            NSLog(@"[AppDataManager] ⚠️ Restore failed for %@: %@", item, error);
-            success = NO;
+        NSString *srcPath = [backupPath stringByAppendingPathComponent:item];
+        NSString *dstPath = [dataPath stringByAppendingPathComponent:item];
+
+        // Remove destination if already exists (from failed previous attempt)
+        if ([fm fileExistsAtPath:dstPath]) {
+            NSError *removeErr = nil;
+            [fm removeItemAtPath:dstPath error:&removeErr];
+            if (removeErr) {
+                NSLog(@"[AppDataManager] ⚠️ Could not remove existing %@: %@", item, removeErr);
+            }
+        }
+
+        // Copy item
+        NSError *copyErr = nil;
+        BOOL copied = [fm copyItemAtPath:srcPath toPath:dstPath error:&copyErr];
+
+        if (copied) {
+            successCount++;
+            // Set proper ownership for restored files
+            NSDictionary *attrs = @{NSFileOwnerAccountName: @"mobile", 
+                                    NSFileGroupOwnerAccountName: @"mobile"};
+            [fm setAttributes:attrs ofItemAtPath:dstPath error:nil];
+        } else {
+            NSLog(@"[AppDataManager] ⚠️ Failed to restore %@: %@", item, copyErr);
+            allSuccess = NO;
         }
     }
 
-    NSLog(@"[AppDataManager] %@ Restored %@ from %@", success ? @"✅" : @"⚠️", bundleID, backupPath);
-    return success;
+    NSLog(@"[AppDataManager] %@ Restored %lu/%lu items for %@", 
+          allSuccess ? @"✅" : @"⚠️", 
+          (unsigned long)successCount, 
+          (unsigned long)contents.count, 
+          bundleID);
+
+    return allSuccess;
 }
 - (BOOL)deleteBackup:(NSString *)backupPath {
     if (!backupPath) return NO;
