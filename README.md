@@ -4,6 +4,7 @@
 
 [![iOS](https://img.shields.io/badge/iOS-15.0%2B-blue)](https://developer.apple.com/ios/)
 [![Jailbreak](https://img.shields.io/badge/Jailbreak-Rootless-green)](https://github.com/opa334/Dopamine)
+[![Dopamine](https://img.shields.io/badge/Dopamine-3.0-purple)](https://ellekit.space/dopamine/)
 [![Architecture](https://img.shields.io/badge/Arch-arm64%20arm64e-orange)](https://developer.apple.com/documentation/xcode/building_a_universal_mac_binary_with_xcode)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -11,14 +12,15 @@
 
 ## ✨ Features
 
-- 📱 **List All Apps** — View all installed applications with data sizes
+- 📱 **List All Apps** — View all installed applications with real-time data sizes
 - 🗑 **Wipe App Data** — Permanently delete app data (Documents, Library, Caches)
+- 🛡 **System App Protection** — Prevents accidental wiping of critical system apps
 - 📦 **Backup & Restore** — Create backups before wiping and restore anytime
 - 🔍 **Search** — Quickly find apps by name or bundle ID
 - 🌙 **Dark Mode** — Full support for iOS Dark Mode
 - 📊 **Data Size** — Real-time calculation of app data sizes
 - ⚡ **Rootless Compatible** — Works with Dopamine 3.0 and all rootless jailbreaks
-- 🛡 **Safe** — Confirmation dialogs for destructive actions
+- 🍎 **iOS 18 Support** — Fully compatible with iOS 18.3.1
 
 ---
 
@@ -41,6 +43,10 @@
 
 2. Search for **"AppData Manager"**
 3. Tap **Install**
+
+### Direct Download
+
+Visit: [aosaid3224-ops.github.io/repo](https://aosaid3224-ops.github.io/repo/)
 
 ### Manual Installation
 
@@ -66,39 +72,44 @@ uicache -p /var/jb/Applications/AppDataManager.app
 - iOS 15.0+ SDK
 - Xcode Command Line Tools
 
-### Build Steps
+### Quick Build
 
 ```bash
 # Clone the repository
 git clone https://github.com/aosaid3224-ops/AppDataManager.git
 cd AppDataManager
 
-# Build for rootless jailbreak
+# Build for Dopamine 3.0 / Rootless
+./build.sh
+```
+
+### Manual Build
+
+```bash
 make clean
 make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
-
-# The .deb file will be in the packages/ directory
 ```
+
+The `.deb` file will be in the `packages/` directory.
 
 ---
 
 ## 📋 Compatibility
 
-| Jailbreak | iOS Version | Status |
-|-----------|-------------|--------|
-| Dopamine 3.0 | iOS 15.0 - 18.7.1 | ✅ Fully Supported |
-| Dopamine 2.x | iOS 15.0 - 16.6.1 | ✅ Supported |
-| Palera1n | iOS 15.0 - 17.x | ✅ Supported |
-| XinaA15 | iOS 15.0 - 15.4.1 | ⚠️ Untested |
-| Checkra1n | iOS 12.0 - 14.8.1 | ❌ Not Supported (Rootful) |
+| Jailbreak | iOS Version | Device | Status |
+|-----------|-------------|--------|--------|
+| **Dopamine 3.0** | iOS 15.0 - 18.7.1 | A8 - A17, M1-M2 | ✅ Fully Supported |
+| Dopamine 2.x | iOS 15.0 - 16.6.1 | A8 - A16 | ✅ Supported |
+| Palera1n | iOS 15.0 - 17.x | A8 - A11 | ✅ Supported |
+| XinaA15 | iOS 15.0 - 15.4.1 | A12+ | ⚠️ Untested |
 
 ---
 
 ## ⚠️ Important Notes
 
 - **This app runs unsandboxed** with root privileges
+- **System apps are protected** — wipe action is disabled for critical system apps
 - **Always backup before wiping** — data deletion is permanent
-- **Do NOT wipe system apps** (SpringBoard, Settings, etc.) — may cause bootloops
 - **Use at your own risk**
 
 ---
@@ -110,6 +121,8 @@ AppDataManager/
 ├── Makefile                          # Theos build configuration
 ├── control                           # Package metadata
 ├── entitlements.plist                # Sandbox bypass entitlements
+├── build.sh                          # Automated build script
+├── install.sh                        # Direct install script
 ├── main.m                            # Entry point
 ├── AppDelegate.h/m                   # App delegate
 ├── ViewController.h/m                # Main app list UI
@@ -127,9 +140,9 @@ AppDataManager/
 
 ## 🙏 Credits
 
-- [opa334](https://github.com/opa334) — Dopamine Jailbreak
+- [opa334](https://github.com/opa334) — Dopamine Jailbreak & libroot
 - [Theos](https://theos.dev) — Build system
-- [libroot](https://github.com/opa334/libroot) — Rootless compatibility
+- [ElleKit](https://ellekit.space) — Tweak injection
 
 ---
 
