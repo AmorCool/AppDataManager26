@@ -10,6 +10,11 @@
     navController.navigationBar.prefersLargeTitles = YES;
 
     self.window.rootViewController = navController;
+    // Force RTL for Arabic interface
+    [[UIView appearance] setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
+    [[UITableView appearance] setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
+    [[UINavigationBar appearance] setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
+
     [self.window makeKeyAndVisible];
 
     return YES;
