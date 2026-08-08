@@ -1,20 +1,46 @@
 #import "AppDelegate.h"
-#import "ViewController.h"
+#import "MainViewController.h"
+#import "BackupManagerViewController.h"
+#import "SettingsViewController.h"
+
+@interface AppDelegate ()
+@end
 
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
 
-    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:[[ViewController alloc] init]];
-    navController.navigationBar.prefersLargeTitles = YES;
+    // Create tab bar controller
+    UITabBarController *tabBarController = [[UITabBarController alloc] init];
 
-    self.window.rootViewController = navController;
-    // Force RTL for Arabic interface
-    [[UIView appearance] setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
-    [[UITableView appearance] setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
-    [[UINavigationBar appearance] setSemanticContentAttribute:UISemanticContentAttributeForceRightToLeft];
+    // Apps tab
+    MainViewController *mainVC = [[MainViewController alloc] init];
+    UINavigationController *mainNav = [[UINavigationController alloc] initWithRootViewController:mainVC];
+    mainNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Apps" 
+                                                         image:[UIImage systemImageNamed:@"square.grid.2x2"] 
+                                                 selectedImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];
 
+    // Backups tab
+    BackupManagerViewController *backupVC = [[BackupManagerViewController alloc] init];
+    UINavigationController *backupNav = [[UINavigationController alloc] initWithRootViewController:backupVC];
+    backupNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Backups" 
+                                                          image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] 
+                                                  selectedImage:[UIImage systemImageNamed:@"clock.arrow.circlepath"]];
+
+    // Settings tab
+    SettingsViewController *settingsVC = [[SettingsViewController alloc] init];
+    UINavigationController *settingsNav = [[UINavigationController alloc] initWithRootViewController:settingsVC];
+    settingsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Settings" 
+                                                            image:[UIImage systemImageNamed:@"gearshape"] 
+                                                    selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
+
+    tabBarController.viewControllers = @[mainNav, backupNav, settingsNav];
+    tabBarController.tabBar.tintColor = [UIColor colorWithRed:0.4 green:0.3 blue:0.9 alpha:1.0];
+    tabBarController.tabBar.barTintColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.08 alpha:1.0];
+    tabBarController.tabBar.unselectedItemTintColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+
+    self.window.rootViewController = tabBarController;
     [self.window makeKeyAndVisible];
 
     return YES;
