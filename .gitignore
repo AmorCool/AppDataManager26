@@ -1,0 +1,17 @@
+# Theos
+.theos/
+obj/
+packages/
+*.deb
+
+# Xcode
+.DS_Store
+xcuserdata/
+*.xcworkspace/
+build/
+DerivedData/
+
+# IDE
+*.swp
+*.swo
+*~
