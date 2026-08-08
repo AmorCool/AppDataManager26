@@ -100,6 +100,8 @@ jobs:
           cp "$DEB_FILE" "repo/pool/main/iphoneos-arm64/$DEB_BASENAME"
 
           cd repo
+
+          # Generate Packages
           dpkg-deb -I "../$DEB_FILE" > Packages
           echo "" >> Packages
           echo "Filename: pool/main/iphoneos-arm64/$DEB_BASENAME" >> Packages
@@ -107,20 +109,34 @@ jobs:
           echo "MD5sum: $DEB_MD5" >> Packages
           echo "SHA256: $DEB_SHA256" >> Packages
 
+          # Generate Release
+          cat > Release << EOF
+Origin: aosaid3224 Repo
+Label: aosaid3224
+Suite: stable
+Version: 1.0
+Codename: ios
+Architectures: iphoneos-arm64
+Components: main
+Description: AppData Manager Official Repo - Dopamine 3.0 / Rootless Compatible
+EOF
+
+          # Compress Packages
           bzip2 -k -c Packages > Packages.bz2
           xz -c Packages > Packages.xz
 
-          cat Packages
+          echo "=== Repo Structure ==="
+          find . -type f | sort
           cd ..
 
       - name: Verify repo
         run: |
-          test -f repo/Packages || exit 1
-          test -f repo/Packages.bz2 || exit 1
-          test -f repo/Packages.xz || exit 1
-          test -f repo/Release || exit 1
-          test -f repo/pool/main/iphoneos-arm64/*.deb || exit 1
-          grep -q "Size: 0" repo/Packages && exit 1 || true
+          test -f repo/Packages || { echo "Packages missing"; exit 1; }
+          test -f repo/Packages.bz2 || { echo "Packages.bz2 missing"; exit 1; }
+          test -f repo/Packages.xz || { echo "Packages.xz missing"; exit 1; }
+          test -f repo/Release || { echo "Release missing"; exit 1; }
+          test -f repo/pool/main/iphoneos-arm64/*.deb || { echo ".deb missing"; exit 1; }
+          grep -q "Size: 0" repo/Packages && { echo "Placeholder Size detected"; exit 1; } || true
           echo "Repo OK"
 
       - name: Upload artifacts
@@ -136,6 +152,11 @@ jobs:
       - name: Summary
         run: |
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
-          echo "BUILD SUCCESS"
+          echo "=========================================="
+          echo "  BUILD SUCCESS"
+          echo "=========================================="
           echo "Package: $(basename $DEB_FILE)"
           echo "Size: $(stat -f%z "$DEB_FILE") bytes"
+          echo ""
+          echo "Repo files:"
+          ls -la repo/
