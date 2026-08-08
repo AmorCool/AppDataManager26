@@ -121,25 +121,38 @@ jobs:
           fi
           echo "Found: $DEB_FILE"
           echo ""
+
           echo "--- dpkg-deb -I ---"
           dpkg-deb -I "$DEB_FILE" || { echo "❌ dpkg-deb -I failed"; exit 1; }
           echo ""
-          echo "--- dpkg-deb -c (first 30 lines) ---"
-          dpkg-deb -c "$DEB_FILE" | head -30 || { echo "❌ dpkg-deb -c failed"; exit 1; }
+
+          echo "--- Extracting contents (once) ---"
+          dpkg-deb -c "$DEB_FILE" > /tmp/deb-contents.txt
+          echo "Total entries: $(wc -l < /tmp/deb-contents.txt)"
           echo ""
+          echo "--- First 30 entries ---"
+          head -30 /tmp/deb-contents.txt
+          echo ""
+
           echo "--- Content checks ---"
-          dpkg-deb -c "$DEB_FILE" | grep -q "Applications/AppDataManager.app/AppDataManager" || { echo "❌ Binary missing"; exit 1; }
+          grep -q "Applications/AppDataManager.app/AppDataManager" /tmp/deb-contents.txt || { echo "❌ Binary missing"; exit 1; }
           echo "✅ Binary present"
-          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/postinst" || { echo "❌ postinst missing"; exit 1; }
+
+          grep -q "DEBIAN/postinst" /tmp/deb-contents.txt || { echo "❌ postinst missing"; grep -i postinst /tmp/deb-contents.txt || true; exit 1; }
           echo "✅ postinst present"
-          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/prerm" || { echo "❌ prerm missing"; exit 1; }
+
+          grep -q "DEBIAN/prerm" /tmp/deb-contents.txt || { echo "❌ prerm missing"; grep -i prerm /tmp/deb-contents.txt || true; exit 1; }
           echo "✅ prerm present"
-          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/control" || { echo "❌ control missing"; exit 1; }
+
+          grep -q "DEBIAN/control" /tmp/deb-contents.txt || { echo "❌ control missing"; exit 1; }
           echo "✅ control present"
+
           dpkg-deb -I "$DEB_FILE" | grep -q "Architecture: iphoneos-arm64" || { echo "❌ Wrong architecture"; exit 1; }
           echo "✅ Architecture is iphoneos-arm64"
+
           dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
           echo "✅ Package name correct"
+
           echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
           echo "DEB_BASENAME=$(basename $DEB_FILE)" >> $GITHUB_ENV
           echo ""
