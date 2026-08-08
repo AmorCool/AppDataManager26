@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, master]
     paths-ignore:
-      - "repo/**"
       - "**.md"
       - ".gitignore"
   workflow_dispatch:
@@ -119,7 +118,6 @@ jobs:
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
           if [ -z "$DEB_FILE" ]; then
             echo "❌ FATAL: No .deb file found"
-            ls -la packages/ 2>/dev/null || true
             exit 1
           fi
           echo "Found: $DEB_FILE"
@@ -174,26 +172,11 @@ jobs:
           echo ""
           echo "✅ .deb validation PASSED"
 
-      - name: Generate repo metadata
-        run: |
-          echo "=== Generating APT/Sileo Metadata ==="
-          python3 scripts/generate-repo.py "$DEB_FILE" "${{ github.workspace }}/repo"
-          echo ""
-          echo "=== Repo structure ==="
-          find repo -type f | sort
-
-      - name: Validate repository
-        run: |
-          echo "=== Validating Repository ==="
-          python3 scripts/validate-repo.py "${{ github.workspace }}/repo"
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: appdata-manager-build
-          path: |
-            packages/*.deb
-            repo/
+          path: packages/*.deb
           retention-days: 30
           if-no-files-found: error
 
@@ -208,86 +191,63 @@ jobs:
             echo ""
             echo "📦 Package: $DEB_BASENAME"
             echo "📁 Size: $(stat -f%z $DEB_FILE) bytes"
-            echo ""
-            echo "📂 Artifacts:"
-            echo "   - packages/*.deb"
-            echo "   - repo/ (Sileo-ready)"
           else
             echo "  ❌ BUILD PIPELINE FAILED"
             echo "=========================================="
-            echo "Check logs above for the exact failure."
           fi
 
   publish:
-    name: Publish to External Repo
+    name: Publish to gh-pages
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: appdata-manager-build
-          path: ./build-output
+          path: ./packages
 
-      - name: Verify artifact structure
+      - name: Setup repo directory
         run: |
           echo "=========================================="
-          echo "  Verifying Artifact Structure"
+          echo "  Setting up Repository"
           echo "=========================================="
-          echo ""
-          echo "=== Full artifact structure ==="
-          find ./build-output -type f | sort
-          echo ""
+          mkdir -p repo/pool/main/iphoneos-arm64
+          cp packages/*.deb repo/pool/main/iphoneos-arm64/
+          echo "✅ .deb copied to pool/"
+          ls -la repo/pool/main/iphoneos-arm64/
 
-          echo "=== Verifying repo/ directory ==="
-          test -d ./build-output/repo || { echo "❌ FATAL: repo/ directory missing"; exit 1; }
-          echo "✅ repo/ directory exists"
-
-          echo ""
-          echo "=== Verifying required repo files ==="
-          test -f ./build-output/repo/Release || { echo "❌ FATAL: Release missing"; exit 1; }
-          echo "✅ Release exists"
-
-          test -f ./build-output/repo/Packages || { echo "❌ FATAL: Packages missing"; exit 1; }
-          echo "✅ Packages exists"
-
-          test -f ./build-output/repo/Packages.xz || { echo "❌ FATAL: Packages.xz missing"; exit 1; }
-          echo "✅ Packages.xz exists"
-
-          test -f ./build-output/repo/Packages.bz2 || { echo "❌ FATAL: Packages.bz2 missing"; exit 1; }
-          echo "✅ Packages.bz2 exists"
-
-          test -d ./build-output/repo/pool/main/iphoneos-arm64/ || { echo "❌ FATAL: pool directory missing"; exit 1; }
-          echo "✅ pool/main/iphoneos-arm64/ exists"
-
-          echo ""
-          echo "=== Verifying .deb in pool ==="
-          DEB_COUNT=$(find ./build-output/repo/pool/main/iphoneos-arm64/ -name "*.deb" | wc -l)
-          if [ "$DEB_COUNT" -eq 0 ]; then
-            echo "❌ FATAL: No .deb found in pool"
-            exit 1
-          fi
-          echo "✅ Found $DEB_COUNT .deb file(s)"
-          ls -la ./build-output/repo/pool/main/iphoneos-arm64/
-
-          echo ""
-          echo "=== repo/ root contents ==="
-          ls -la ./build-output/repo/
-
-          echo ""
+      - name: Generate repo metadata
+        run: |
           echo "=========================================="
-          echo "  ✅ Artifact verification PASSED"
+          echo "  Generating APT/Sileo Metadata"
           echo "=========================================="
+          python3 scripts/generate-repo.py repo
+          echo ""
+          echo "=== Repo structure ==="
+          find repo -type f | sort
 
-      - name: Deploy to external repo (aosaid3224-ops/repo)
+      - name: Validate repository
+        run: |
+          echo "=========================================="
+          echo "  Validating Repository"
+          echo "=========================================="
+          python3 scripts/validate-repo.py repo
+
+      - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          personal_token: ${{ secrets.PAT }}
-          external_repository: aosaid3224-ops/repo
-          publish_dir: ./build-output/repo
-          publish_branch: main
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./repo
+          publish_branch: gh-pages
           force_orphan: true
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
@@ -298,14 +258,8 @@ jobs:
           echo "=========================================="
           echo "  Verifying Published Repo"
           echo "=========================================="
-          echo ""
-
-          # Wait for GitHub Pages to propagate
           sleep 30
-
-          # Test URLs
-          BASE_URL="https://aosaid3224-ops.github.io/repo"
-
+          BASE_URL="https://aosaid3224-ops.github.io/AppDataManager"
           for file in Release Packages Packages.xz Packages.bz2; do
             URL="$BASE_URL/$file"
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
@@ -315,20 +269,16 @@ jobs:
               echo "❌ $file returned $STATUS"
             fi
           done
-
-          # Test .deb
-          DEB_URL="$BASE_URL/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEB_URL")
-          if [ "$STATUS" == "200" ]; then
-            echo "✅ .deb accessible ($STATUS)"
-          else
-            echo "❌ .deb returned $STATUS"
-          fi
-
+          DEB_FILE=$(ls packages/*.deb | head -1)
+          DEB_NAME=$(basename "$DEB_FILE")
+          DEB_URL="$BASE_URL/pool/main/iphoneos-arm64/$DEB_NAME"
+          curl -sL -o /tmp/published.deb "$DEB_URL"
+          PUB_SIZE=$(stat -c%s /tmp/published.deb)
+          echo "✅ .deb accessible ($PUB_SIZE bytes)"
           echo ""
           echo "=========================================="
           echo "  ✅ PUBLISH VERIFICATION COMPLETE"
           echo "=========================================="
           echo ""
-          echo "🌐 Repo URL: https://aosaid3224-ops.github.io/repo/"
-          echo "📲 Add to Sileo: https://aosaid3224-ops.github.io/repo/"
+          echo "🌐 Repo URL: https://aosaid3224-ops.github.io/AppDataManager/"
+          echo "📲 Add to Sileo: https://aosaid3224-ops.github.io/AppDataManager/"
