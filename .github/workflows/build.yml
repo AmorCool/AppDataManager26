@@ -1,10 +1,12 @@
-name: Build AppData Manager
+name: Build and Publish AppData Manager
 
 on:
   push:
     branches: [main, master]
-  pull_request:
-    branches: [main, master]
+    paths-ignore:
+      - "repo/**"
+      - "**.md"
+      - ".gitignore"
   workflow_dispatch:
 
 env:
@@ -19,127 +21,144 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Check environment
+      - name: Validate environment
         run: |
-          echo "Runner: $(uname -a)"
-          echo "Xcode: $(xcode-select -p)"
-          clang --version | head -1
-          xcrun --sdk iphoneos --show-sdk-path || true
+          echo "=== Environment Validation ==="
+          echo "OS: $(uname -a)"
+          echo "Xcode path: $(xcode-select -p 2>/dev/null || echo 'NOT SET')"
+          xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1 || { echo "❌ iOS SDK not found"; exit 1; }
+          echo "✅ iOS SDK found"
+          which clang >/dev/null 2>&1 || { echo "❌ clang not found"; exit 1; }
+          which make >/dev/null 2>&1 || { echo "❌ make not found"; exit 1; }
+          which git >/dev/null 2>&1 || { echo "❌ git not found"; exit 1; }
+          which python3 >/dev/null 2>&1 || { echo "❌ python3 not found"; exit 1; }
+          echo "✅ All base tools present"
 
       - name: Install dependencies
         run: |
+          echo "=== Installing Dependencies ==="
           brew install ldid dpkg
-          which ldid
-          which dpkg-deb
+          which ldid >/dev/null 2>&1 || { echo "❌ ldid install failed"; exit 1; }
+          which dpkg-deb >/dev/null 2>&1 || { echo "❌ dpkg-deb install failed"; exit 1; }
+          echo "✅ ldid: $(which ldid)"
+          echo "✅ dpkg-deb: $(which dpkg-deb)"
+          dpkg-deb --version | head -1
 
       - name: Cache Theos
         id: cache-theos
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/theos
-          key: ${{ runner.os }}-theos-v1
+          key: ${{ runner.os }}-theos-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-theos-
 
       - name: Install Theos
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
+          echo "=== Installing Theos ==="
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          test -f "$THEOS/makefiles/common.mk" || { echo "❌ Theos install failed"; exit 1; }
+          echo "✅ Theos installed"
 
       - name: Verify Theos
         run: |
-          test -f "$THEOS/makefiles/common.mk" || exit 1
-          test -f "$THEOS/makefiles/package/deb.mk" || exit 1
-          echo "Theos OK"
+          echo "=== Verifying Theos ==="
+          test -f "$THEOS/makefiles/common.mk" || { echo "❌ common.mk missing"; exit 1; }
+          test -f "$THEOS/makefiles/package/deb.mk" || { echo "❌ deb.mk missing"; exit 1; }
+          test -d "$THEOS/include" || { echo "❌ include dir missing"; exit 1; }
+          test -f "$THEOS/bin/nic.pl" || { echo "❌ nic.pl missing"; exit 1; }
+          echo "✅ Theos structure verified"
 
       - name: Install libroot
         run: |
-          git clone --depth 1 https://github.com/opa334/libroot.git /tmp/libroot || true
+          echo "=== Installing libroot ==="
+          if [ -f "$THEOS/include/rootless.h" ]; then
+            echo "✅ rootless.h already present"
+            exit 0
+          fi
+          git clone --depth 1 https://github.com/opa334/libroot.git /tmp/libroot 2>/dev/null || true
           if [ -f /tmp/libroot/include/rootless.h ]; then
             cp /tmp/libroot/include/rootless.h "$THEOS/include/"
-            echo "libroot installed from GitHub"
+            echo "✅ libroot installed from GitHub"
           elif [ -f ${{ github.workspace }}/rootless.h ]; then
             cp ${{ github.workspace }}/rootless.h "$THEOS/include/rootless.h"
-            echo "libroot installed from local stub"
+            echo "✅ libroot installed from local stub"
           else
-            echo "WARNING: No rootless.h found"
+            echo "❌ rootless.h not found anywhere"
+            exit 1
           fi
-          test -f "$THEOS/include/rootless.h" && echo "rootless.h OK" || echo "rootless.h MISSING"
 
-      - name: Fix permissions
+      - name: Fix script permissions
         run: |
+          echo "=== Fixing Permissions ==="
           chmod +x layout/DEBIAN/postinst
           chmod +x layout/DEBIAN/prerm
+          ls -la layout/DEBIAN/
 
       - name: Build package
         run: |
+          echo "=== Building Package ==="
           export PATH="$THEOS/bin:$PATH"
+          echo "THEOS=$THEOS"
           make clean
           make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+          echo ""
+          echo "=== Build output ==="
+          ls -la packages/ 2>/dev/null || echo "No packages directory"
 
-      - name: Verify build output
+      - name: Validate .deb
         run: |
+          echo "=== Validating .deb ==="
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
           if [ -z "$DEB_FILE" ]; then
-            echo "BUILD FAILED: No .deb found"
+            echo "❌ FATAL: No .deb file found"
             ls -la packages/ 2>/dev/null || true
             exit 1
           fi
-          echo "Package: $DEB_FILE"
-          dpkg-deb -I "$DEB_FILE"
-          dpkg-deb -c "$DEB_FILE" | head -20
+          echo "Found: $DEB_FILE"
+          echo ""
+          echo "--- dpkg-deb -I ---"
+          dpkg-deb -I "$DEB_FILE" || { echo "❌ dpkg-deb -I failed"; exit 1; }
+          echo ""
+          echo "--- dpkg-deb -c (first 30 lines) ---"
+          dpkg-deb -c "$DEB_FILE" | head -30 || { echo "❌ dpkg-deb -c failed"; exit 1; }
+          echo ""
+          echo "--- Content checks ---"
+          dpkg-deb -c "$DEB_FILE" | grep -q "Applications/AppDataManager.app/AppDataManager" || { echo "❌ Binary missing"; exit 1; }
+          echo "✅ Binary present"
+          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/postinst" || { echo "❌ postinst missing"; exit 1; }
+          echo "✅ postinst present"
+          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/prerm" || { echo "❌ prerm missing"; exit 1; }
+          echo "✅ prerm present"
+          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/control" || { echo "❌ control missing"; exit 1; }
+          echo "✅ control present"
+          dpkg-deb -I "$DEB_FILE" | grep -q "Architecture: iphoneos-arm64" || { echo "❌ Wrong architecture"; exit 1; }
+          echo "✅ Architecture is iphoneos-arm64"
+          dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
+          echo "✅ Package name correct"
+          echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
+          echo "DEB_BASENAME=$(basename $DEB_FILE)" >> $GITHUB_ENV
+          echo ""
+          echo "✅ .deb validation PASSED"
 
-      - name: Build repo
+      - name: Generate repo metadata
         run: |
-          DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
-          DEB_BASENAME=$(basename "$DEB_FILE")
-          DEB_SIZE=$(stat -f%z "$DEB_FILE")
-          DEB_MD5=$(md5 -q "$DEB_FILE")
-          DEB_SHA256=$(shasum -a 256 "$DEB_FILE" | awk '{print $1}')
+          echo "=== Generating APT/Sileo Metadata ==="
+          python3 scripts/generate-repo.py "$DEB_FILE" "${{ github.workspace }}/repo"
+          echo ""
+          echo "=== Repo structure ==="
+          find repo -type f | sort
 
-          mkdir -p repo/pool/main/iphoneos-arm64
-          cp "$DEB_FILE" "repo/pool/main/iphoneos-arm64/$DEB_BASENAME"
-
-          cd repo
-
-          # Generate Packages
-          dpkg-deb -I "../$DEB_FILE" > Packages
-          echo "" >> Packages
-          echo "Filename: pool/main/iphoneos-arm64/$DEB_BASENAME" >> Packages
-          echo "Size: $DEB_SIZE" >> Packages
-          echo "MD5sum: $DEB_MD5" >> Packages
-          echo "SHA256: $DEB_SHA256" >> Packages
-
-          # Generate Release
-          cat > Release << EOF
-Origin: aosaid3224 Repo
-Label: aosaid3224
-Suite: stable
-Version: 1.0
-Codename: ios
-Architectures: iphoneos-arm64
-Components: main
-Description: AppData Manager Official Repo - Dopamine 3.0 / Rootless Compatible
-EOF
-
-          # Compress Packages
-          bzip2 -k -c Packages > Packages.bz2
-          xz -c Packages > Packages.xz
-
-          echo "=== Repo Structure ==="
-          find . -type f | sort
-          cd ..
-
-      - name: Verify repo
+      - name: Validate repository
         run: |
-          test -f repo/Packages || { echo "Packages missing"; exit 1; }
-          test -f repo/Packages.bz2 || { echo "Packages.bz2 missing"; exit 1; }
-          test -f repo/Packages.xz || { echo "Packages.xz missing"; exit 1; }
-          test -f repo/Release || { echo "Release missing"; exit 1; }
-          test -f repo/pool/main/iphoneos-arm64/*.deb || { echo ".deb missing"; exit 1; }
-          grep -q "Size: 0" repo/Packages && { echo "Placeholder Size detected"; exit 1; } || true
-          echo "Repo OK"
+          echo "=== Validating Repository ==="
+          python3 scripts/validate-repo.py "${{ github.workspace }}/repo"
 
-      - name: Upload artifacts
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: appdata-manager-build
@@ -149,14 +168,59 @@ EOF
           retention-days: 30
           if-no-files-found: error
 
-      - name: Summary
+      - name: Build summary
+        if: always()
         run: |
-          DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
-          echo "=========================================="
-          echo "  BUILD SUCCESS"
-          echo "=========================================="
-          echo "Package: $(basename $DEB_FILE)"
-          echo "Size: $(stat -f%z "$DEB_FILE") bytes"
           echo ""
-          echo "Repo files:"
-          ls -la repo/
+          echo "=========================================="
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "  ✅ BUILD PIPELINE SUCCESSFUL"
+            echo "=========================================="
+            echo ""
+            echo "📦 Package: $DEB_BASENAME"
+            echo "📁 Size: $(stat -f%z $DEB_FILE) bytes"
+            echo ""
+            echo "📂 Artifacts:"
+            echo "   - packages/*.deb"
+            echo "   - repo/ (Sileo-ready)"
+          else
+            echo "  ❌ BUILD PIPELINE FAILED"
+            echo "=========================================="
+            echo "Check logs above for the exact failure."
+          fi
+
+  publish:
+    name: Publish to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: appdata-manager-build
+          path: ./build-output
+
+      - name: Deploy repo to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build-output/repo
+          publish_branch: gh-pages
+          force_orphan: true
+          user_name: "github-actions[bot]"
+          user_email: "github-actions[bot]@users.noreply.github.com"
+          commit_message: "Publish repo: AppData Manager ${{ github.run_number }}"
+
+      - name: Publish summary
+        run: |
+          echo "=========================================="
+          echo "  ✅ PUBLISH SUCCESSFUL"
+          echo "=========================================="
+          echo ""
+          echo "🌐 Repo URL:"
+          echo "   https://${{ github.repository_owner }}.github.io/AppDataManager/"
+          echo ""
+          echo "📲 Add to Sileo:"
+          echo "   https://${{ github.repository_owner }}.github.io/AppDataManager/"
