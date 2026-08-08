@@ -62,7 +62,7 @@ jobs:
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
           echo "=== Installing Theos ==="
-          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          rm -rf "$THEOS" && git clone --recursive https://github.com/theos/theos.git "$THEOS"
           test -f "$THEOS/makefiles/common.mk" || { echo "❌ Theos install failed"; exit 1; }
           echo "✅ Theos installed"
 
