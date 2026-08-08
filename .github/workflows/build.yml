@@ -110,13 +110,42 @@ jobs:
           echo "=== Build output ==="
           ls -la packages/ 2>/dev/null || echo "No packages directory"
 
+      - name: Inject maintainer scripts
+        run: |
+          echo "=== Injecting maintainer scripts ==="
+          DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
+          if [ -z "$DEB_FILE" ]; then
+            echo "❌ No .deb found"
+            exit 1
+          fi
+          echo "Original: $DEB_FILE"
+
+          # Extract .deb
+          rm -rf /tmp/deb-fix
+          mkdir -p /tmp/deb-fix
+          dpkg-deb -x "$DEB_FILE" /tmp/deb-fix
+          dpkg-deb -e "$DEB_FILE" /tmp/deb-fix/DEBIAN
+
+          # Copy maintainer scripts
+          cp layout/DEBIAN/postinst /tmp/deb-fix/DEBIAN/
+          cp layout/DEBIAN/prerm /tmp/deb-fix/DEBIAN/
+          chmod +x /tmp/deb-fix/DEBIAN/postinst
+          chmod +x /tmp/deb-fix/DEBIAN/prerm
+
+          # Rebuild .deb
+          dpkg-deb --build /tmp/deb-fix "$DEB_FILE"
+
+          echo "✅ Scripts injected and .deb rebuilt"
+          echo ""
+          echo "=== Verifying injected scripts ==="
+          dpkg-deb -c "$DEB_FILE" | grep "DEBIAN/"
+
       - name: Validate .deb
         run: |
           echo "=== Validating .deb ==="
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
           if [ -z "$DEB_FILE" ]; then
             echo "❌ FATAL: No .deb file found"
-            ls -la packages/ 2>/dev/null || true
             exit 1
           fi
           echo "Found: $DEB_FILE"
