@@ -158,3 +158,5 @@ This project is licensed under the MIT License.
 <!-- Build trigger: 2026-08-08 -->
 
 <!-- CI trigger: production pipeline v1 -->
+
+<!-- CI trigger: fix broken pipe v2 -->
