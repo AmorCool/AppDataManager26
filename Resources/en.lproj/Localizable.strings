@@ -1,0 +1,59 @@
+/* AppData Manager - English Localizations */
+
+/* Navigation titles */
+"AppData Manager" = "AppData Manager";
+"Backup Manager" = "Backup Manager";
+"All Backups" = "All Backups";
+
+/* Actions */
+"Wipe Data" = "Wipe Data";
+"Backup" = "Backup";
+"Restore" = "Restore";
+"Delete" = "Delete";
+"Cancel" = "Cancel";
+"OK" = "OK";
+
+/* Alerts */
+"About" = "About";
+"Warning" = "Warning";
+"Error" = "Error";
+"Success" = "Success";
+"Confirm Wipe" = "Confirm Wipe";
+"Confirm Backup" = "Confirm Backup";
+"Confirm Restore" = "Confirm Restore";
+"Confirm Delete" = "Confirm Delete";
+
+/* Messages */
+"This will permanently delete all data for %@. This action cannot be undone." = "This will permanently delete all data for %@. This action cannot be undone.";
+"This will create a backup of all data for %@." = "This will create a backup of all data for %@.";
+"This will replace current data with this backup for %@. Continue?" = "This will replace current data with this backup for %@. Continue?";
+"This backup will be permanently deleted." = "This backup will be permanently deleted.";
+"No backups found" = "No backups found";
+
+/* Results */
+"✅ Data wiped successfully!" = "✅ Data wiped successfully!";
+"✅ Backup created successfully!" = "✅ Backup created successfully!";
+"✅ Restore completed!" = "✅ Restore completed!";
+"✅ Backup deleted!" = "✅ Backup deleted!";
+"❌ Failed to wipe data!" = "❌ Failed to wipe data!";
+"❌ Failed to create backup!" = "❌ Failed to create backup!";
+"❌ Restore failed!" = "❌ Restore failed!";
+"❌ Failed to delete!" = "❌ Failed to delete!";
+
+/* Backup options */
+"Backup Options" = "Backup Options";
+"🔄 Restore Backup" = "🔄 Restore Backup";
+"🗑 Delete Backup" = "🗑 Delete Backup";
+"🔄 Restore" = "🔄 Restore";
+"🗑 Delete" = "🗑 Delete";
+
+/* Search */
+"Search apps..." = "Search apps...";
+
+/* App types */
+"System" = "System";
+"User" = "User";
+
+/* Cell identifiers */
+"AppCell" = "AppCell";
+"BackupCell" = "BackupCell";
