@@ -6,5 +6,5 @@ Description: Professional app data wipe & backup tool. Rootless/Dopamine 3.0 com
 Maintainer: aosaid3224 <aosaid3224@github.com>
 Author: aosaid3224 <aosaid3224@github.com>
 Section: Utilities
-Depends: firmware (>= 15.0), libroot
+Depends: firmware (>= 15.0)
 Priority: optional
