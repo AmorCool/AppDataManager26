@@ -311,5 +311,17 @@
     NSLog(@"[AppDataManager] %@ Restored %@ from %@", success ? @"✅" : @"⚠️", bundleID, backupPath);
     return success;
 }
+- (BOOL)deleteBackup:(NSString *)backupPath {
+    if (!backupPath) return NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    BOOL success = [fm removeItemAtPath:backupPath error:&error];
+    if (success) {
+        NSLog(@"[AppDataManager] ✅ Deleted backup: %@", backupPath);
+    } else {
+        NSLog(@"[AppDataManager] ❌ Failed to delete backup: %@", error);
+    }
+    return success;
+}
 
 @end
