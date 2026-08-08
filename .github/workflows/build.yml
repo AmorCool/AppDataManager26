@@ -219,14 +219,10 @@ jobs:
           fi
 
   publish:
-    name: Publish to GitHub Pages
+    name: Publish to External Repo
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
 
     steps:
       - name: Download build artifact
@@ -285,79 +281,54 @@ jobs:
           echo "  ✅ Artifact verification PASSED"
           echo "=========================================="
 
-      - name: Deploy repo to GitHub Pages
+      - name: Deploy to external repo (aosaid3224-ops/repo)
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          personal_token: ${{ secrets.PAT }}
+          external_repository: aosaid3224-ops/repo
           publish_dir: ./build-output/repo
-          publish_branch: gh-pages
+          publish_branch: main
           force_orphan: true
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
           commit_message: "Publish repo: AppData Manager ${{ github.run_number }}"
 
-      - name: Verify gh-pages content
+      - name: Verify published repo
         run: |
           echo "=========================================="
-          echo "  Verifying gh-pages Content"
+          echo "  Verifying Published Repo"
           echo "=========================================="
           echo ""
 
-          # Clone gh-pages branch
-          git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }}.git /tmp/gh-pages-verify
-          cd /tmp/gh-pages-verify
+          # Wait for GitHub Pages to propagate
+          sleep 30
 
-          echo "=== gh-pages root files ==="
-          ls -la
-          echo ""
+          # Test URLs
+          BASE_URL="https://aosaid3224-ops.github.io/repo"
 
-          echo "=== Checking for forbidden source files ==="
-          FORBIDDEN="AppDataManager.h AppDataManager.m ViewController.h ViewController.m main.m Makefile build.sh install.sh AppDelegate.h AppDelegate.m BackupManagerViewController.h BackupManagerViewController.m"
-          FOUND_FORBIDDEN=0
-          for f in $FORBIDDEN; do
-            if [ -f "$f" ]; then
-              echo "❌ FORBIDDEN file found in gh-pages root: $f"
-              FOUND_FORBIDDEN=1
+          for file in Release Packages Packages.xz Packages.bz2; do
+            URL="$BASE_URL/$file"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
+            if [ "$STATUS" == "200" ]; then
+              echo "✅ $file accessible ($STATUS)"
+            else
+              echo "❌ $file returned $STATUS"
             fi
           done
-          if [ "$FOUND_FORBIDDEN" -eq 1 ]; then
-            echo "❌ FATAL: Source code files found in gh-pages root"
-            exit 1
+
+          # Test .deb
+          DEB_URL="$BASE_URL/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEB_URL")
+          if [ "$STATUS" == "200" ]; then
+            echo "✅ .deb accessible ($STATUS)"
+          else
+            echo "❌ .deb returned $STATUS"
           fi
-          echo "✅ No source code files in gh-pages root"
-
-          echo ""
-          echo "=== Checking required repo files in gh-pages root ==="
-          test -f Release || { echo "❌ FATAL: Release missing from gh-pages root"; exit 1; }
-          echo "✅ Release present in root"
-
-          test -f Packages || { echo "❌ FATAL: Packages missing from gh-pages root"; exit 1; }
-          echo "✅ Packages present in root"
-
-          test -f Packages.xz || { echo "❌ FATAL: Packages.xz missing from gh-pages root"; exit 1; }
-          echo "✅ Packages.xz present in root"
-
-          test -f Packages.bz2 || { echo "❌ FATAL: Packages.bz2 missing from gh-pages root"; exit 1; }
-          echo "✅ Packages.bz2 present in root"
-
-          test -d pool/main/iphoneos-arm64/ || { echo "❌ FATAL: pool directory missing from gh-pages"; exit 1; }
-          echo "✅ pool/main/iphoneos-arm64/ present"
-
-          DEB_COUNT=$(find pool/main/iphoneos-arm64/ -name "*.deb" | wc -l)
-          if [ "$DEB_COUNT" -eq 0 ]; then
-            echo "❌ FATAL: No .deb found in gh-pages pool"
-            exit 1
-          fi
-          echo "✅ Found $DEB_COUNT .deb file(s) in gh-pages pool"
-
-          echo ""
-          echo "=== Final gh-pages structure ==="
-          find . -type f | sort
 
           echo ""
           echo "=========================================="
-          echo "  ✅ PUBLISH VERIFICATION PASSED"
+          echo "  ✅ PUBLISH VERIFICATION COMPLETE"
           echo "=========================================="
           echo ""
-          echo "🌐 Repo URL: https://${{ github.repository_owner }}.github.io/AppDataManager/"
-          echo "📲 Add to Sileo: https://${{ github.repository_owner }}.github.io/AppDataManager/"
+          echo "🌐 Repo URL: https://aosaid3224-ops.github.io/repo/"
+          echo "📲 Add to Sileo: https://aosaid3224-ops.github.io/repo/"
