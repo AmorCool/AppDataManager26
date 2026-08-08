@@ -164,3 +164,5 @@ This project is licensed under the MIT License.
 <!-- CI trigger: fix validation v3 -->
 
 <!-- CI trigger: PAT secret added, Pages enabled -->
+
+<!-- CI trigger: v5 production pipeline with GITHUB_TOKEN and gh-pages validation -->
