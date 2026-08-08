@@ -284,7 +284,7 @@
 }
 
 - (void)showInfo {
-    NSString *info = @"AppData Manager v1.1.1\n\n"
+    NSString *info = @"AppData Manager v1.1.2\n\n"
                       @"A professional tool for managing app data on jailbroken iOS devices.\n\n"
                       @"Features:\n"
                       @"• Wipe app data\n"
