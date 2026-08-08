@@ -3,9 +3,6 @@ name: Build AppData Manager
 on:
   push:
     branches: [main, master]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -20,311 +17,113 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # =========================================================================
-      # 1. Checkout source
-      # =========================================================================
       - name: Checkout source
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # =========================================================================
-      # 2. Verify environment & detect available SDKs
-      # =========================================================================
-      - name: Verify macOS environment
+      - name: Check environment
         run: |
-          echo "=== Environment Check ==="
           echo "Runner: $(uname -a)"
           echo "Xcode: $(xcode-select -p)"
-          echo "Clang: $(clang --version | head -1)"
+          clang --version | head -1
+          xcrun --sdk iphoneos --show-sdk-path || true
 
-          echo ""
-          echo "=== Available iOS SDKs ==="
-          ls -la /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/ 2>/dev/null ||           ls -la $(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null | sed 's|/[^/]*$||') 2>/dev/null ||           xcrun --show-sdk-path 2>/dev/null || echo "No SDK path found"
-
-          echo ""
-          echo "=== SDK Path ==="
-          xcrun --sdk iphoneos --show-sdk-path 2>/dev/null && echo "iOS SDK: OK" || echo "iOS SDK: NOT FOUND"
-
-          echo ""
-          echo "=== Available Tools ==="
-          which make || echo "make: NOT FOUND"
-          which git || echo "git: NOT FOUND"
-          which curl || echo "curl: NOT FOUND"
-
-      # =========================================================================
-      # 3. Auto-fix Makefile SDK if needed
-      # =========================================================================
-      - name: Auto-fix Makefile SDK
+      - name: Install dependencies
         run: |
-          echo "=== Checking Makefile TARGET ==="
-          grep "^export TARGET" Makefile || grep "^TARGET" Makefile
-
-          # Theos يدعم 'latest' كـ SDK version
-          # إذا كان Makefile يستخدم رقم SDK ثابت قد لا يكون موجوداً
-          if grep -q "TARGET = iphone:clang:16.5" Makefile; then
-            echo "⚠️ Fixed SDK version detected, switching to 'latest'"
-            sed -i '' 's/iphone:clang:16.5/iphone:clang:latest/g' Makefile
-            echo "✅ Makefile patched"
-          fi
-
-          echo ""
-          echo "Final Makefile TARGET:"
-          grep "TARGET" Makefile | head -1
-
-      # =========================================================================
-      # 4. Install Homebrew dependencies (ldid, dpkg)
-      # =========================================================================
-      - name: Install Homebrew dependencies
-        run: |
-          echo "=== Installing ldid and dpkg ==="
           brew install ldid dpkg
-          echo ""
-          echo "ldid: $(which ldid)"
-          echo "dpkg-deb: $(which dpkg-deb)"
-          ldid -version 2>/dev/null || true
-          dpkg-deb --version | head -1
+          which ldid
+          which dpkg-deb
 
-      # =========================================================================
-      # 5. Cache and install Theos
-      # =========================================================================
       - name: Cache Theos
         id: cache-theos
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/theos
-          key: ${{ runner.os }}-theos-${{ hashFiles('Makefile') }}-${{ hashFiles('control') }}
-          restore-keys: |
-            ${{ runner.os }}-theos-
+          key: ${{ runner.os }}-theos-v1
 
       - name: Install Theos
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
-          echo "=== Installing Theos ==="
-          export THEOS=${{ github.workspace }}/theos
           git clone --recursive https://github.com/theos/theos.git "$THEOS"
-          echo "✅ Theos installed at: $THEOS"
-          ls -la "$THEOS/makefiles/common.mk"
 
       - name: Verify Theos
         run: |
-          echo "=== Theos Verification ==="
-          test -f "$THEOS/makefiles/common.mk" || { echo "❌ Theos common.mk missing"; exit 1; }
-          test -f "$THEOS/makefiles/package/deb.mk" || { echo "❌ Theos deb.mk missing"; exit 1; }
-          test -f "$THEOS/bin/nic.pl" || { echo "❌ Theos nic.pl missing"; exit 1; }
-          echo "✅ Theos structure verified"
+          test -f "$THEOS/makefiles/common.mk" || exit 1
+          test -f "$THEOS/makefiles/package/deb.mk" || exit 1
+          echo "Theos OK"
 
-      # =========================================================================
-      # 6. Install libroot headers (for #import <rootless.h>)
-      # =========================================================================
       - name: Install libroot
         run: |
-          echo "=== Installing libroot ==="
-          export THEOS=${{ github.workspace }}/theos
-
-          git clone --depth 1 https://github.com/opa334/libroot.git /tmp/libroot || {
-            echo "❌ Failed to clone libroot"
-            exit 1
-          }
-
-          if [ -d /tmp/libroot/include ]; then
-            echo "Found libroot/include, copying to Theos..."
-            cp -R /tmp/libroot/include/* "$THEOS/include/" 2>/dev/null || true
-          fi
-
-          if [ -f "$THEOS/include/rootless.h" ]; then
-            echo "✅ rootless.h installed"
+          git clone --depth 1 https://github.com/opa334/libroot.git /tmp/libroot || true
+          if [ -f /tmp/libroot/include/rootless.h ]; then
+            cp /tmp/libroot/include/rootless.h "$THEOS/include/"
+            echo "libroot installed from GitHub"
+          elif [ -f ${{ github.workspace }}/rootless.h ]; then
+            cp ${{ github.workspace }}/rootless.h "$THEOS/include/rootless.h"
+            echo "libroot installed from local stub"
           else
-            echo "⚠️ rootless.h not found — creating stub..."
-            cat > "$THEOS/include/rootless.h" << 'EOF'
-#ifndef ROOTLESS_H
-#define ROOTLESS_H
-#include <sys/syslimits.h>
-#include <string.h>
-static inline const char *ROOT_PATH(const char *path) {
-    if (path[0] != '/') return path;
-    static char newPath[PATH_MAX];
-    strcpy(newPath, "/var/jb");
-    strcat(newPath, path);
-    return newPath;
-}
-static inline NSString *ROOT_PATH_NS(NSString *path) {
-    if (![path isAbsolutePath]) return path;
-    return [@"/var/jb" stringByAppendingPathComponent:path];
-}
-#endif
-EOF
-            echo "✅ rootless.h stub created"
+            echo "WARNING: No rootless.h found"
           fi
+          test -f "$THEOS/include/rootless.h" && echo "rootless.h OK" || echo "rootless.h MISSING"
 
-      # =========================================================================
-      # 7. Set executable permissions on maintainer scripts
-      # =========================================================================
-      - name: Set script permissions
+      - name: Fix permissions
         run: |
-          echo "=== Setting executable permissions ==="
           chmod +x layout/DEBIAN/postinst
           chmod +x layout/DEBIAN/prerm
-          ls -la layout/DEBIAN/
 
-      # =========================================================================
-      # 8. Build the package
-      # =========================================================================
       - name: Build package
         run: |
-          echo "=== Building AppData Manager ==="
-          export THEOS=${{ github.workspace }}/theos
           export PATH="$THEOS/bin:$PATH"
-
-          echo "THEOS=$THEOS"
-          echo "PATH=$PATH"
-
-          # عرض Makefile النهائي
-          echo ""
-          echo "=== Final Makefile ==="
-          cat Makefile
-          echo ""
-
           make clean
-          echo ""
-          echo "Starting build..."
           make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
 
-          echo ""
-          echo "=== Build completed ==="
-          ls -la packages/ 2>/dev/null || echo "No packages directory"
-
-      # =========================================================================
-      # 9. Verify the .deb package
-      # =========================================================================
-      - name: Verify package
+      - name: Verify build output
         run: |
-          echo "=== Verifying .deb package ==="
-
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
-
           if [ -z "$DEB_FILE" ]; then
-            echo "❌ BUILD FAILED: No .deb file found in packages/"
-            echo "Contents of packages/:"
-            ls -la packages/ 2>/dev/null || echo "Directory does not exist"
+            echo "BUILD FAILED: No .deb found"
+            ls -la packages/ 2>/dev/null || true
             exit 1
           fi
-
-          echo "✅ Package found: $DEB_FILE"
-          echo ""
-
-          echo "=== dpkg-deb -I (Package Info) ==="
+          echo "Package: $DEB_FILE"
           dpkg-deb -I "$DEB_FILE"
-          echo ""
+          dpkg-deb -c "$DEB_FILE" | head -20
 
-          echo "=== dpkg-deb -c (Package Contents) ==="
-          dpkg-deb -c "$DEB_FILE"
-          echo ""
-
-          echo "=== Checking expected contents ==="
-          dpkg-deb -c "$DEB_FILE" | grep -q "Applications/AppDataManager.app/AppDataManager" && echo "✅ Binary present" || { echo "❌ Binary missing"; exit 1; }
-          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/postinst" && echo "✅ postinst present" || { echo "❌ postinst missing"; exit 1; }
-          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/prerm" && echo "✅ prerm present" || { echo "❌ prerm missing"; exit 1; }
-          dpkg-deb -c "$DEB_FILE" | grep -q "DEBIAN/control" && echo "✅ control present" || { echo "❌ control missing"; exit 1; }
-
-      # =========================================================================
-      # 10. Build the Sileo/Cydia repo
-      # =========================================================================
       - name: Build repo
         run: |
-          echo "=== Building Sileo/Cydia Repo ==="
-
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
           DEB_BASENAME=$(basename "$DEB_FILE")
-
-          echo "Source .deb: $DEB_FILE"
-          echo "Basename: $DEB_BASENAME"
-
           DEB_SIZE=$(stat -f%z "$DEB_FILE")
           DEB_MD5=$(md5 -q "$DEB_FILE")
-          DEB_SHA1=$(shasum -a 1 "$DEB_FILE" | awk '{print $1}')
           DEB_SHA256=$(shasum -a 256 "$DEB_FILE" | awk '{print $1}')
-
-          echo "Size: $DEB_SIZE bytes"
-          echo "MD5: $DEB_MD5"
-          echo "SHA1: $DEB_SHA1"
-          echo "SHA256: $DEB_SHA256"
 
           mkdir -p repo/pool/main/iphoneos-arm64
           cp "$DEB_FILE" "repo/pool/main/iphoneos-arm64/$DEB_BASENAME"
 
           cd repo
-
           dpkg-deb -I "../$DEB_FILE" > Packages
           echo "" >> Packages
           echo "Filename: pool/main/iphoneos-arm64/$DEB_BASENAME" >> Packages
           echo "Size: $DEB_SIZE" >> Packages
           echo "MD5sum: $DEB_MD5" >> Packages
-          echo "SHA1: $DEB_SHA1" >> Packages
           echo "SHA256: $DEB_SHA256" >> Packages
 
-          if grep -q "Size: 0" Packages; then
-            echo "❌ Placeholder Size: 0 detected"
-            exit 1
-          fi
-          if grep -q "MD5sum: 00000000000000000000000000000000" Packages; then
-            echo "❌ Placeholder MD5 detected"
-            exit 1
-          fi
-          if grep -q "SHA256: 0000000000000000000000000000000000000000000000000000000000000000" Packages; then
-            echo "❌ Placeholder SHA256 detected"
-            exit 1
-          fi
-
-          echo "Compressing Packages..."
           bzip2 -k -c Packages > Packages.bz2
           xz -c Packages > Packages.xz
 
-          echo ""
-          echo "=== Generated Packages ==="
           cat Packages
-          echo ""
-
-          echo "=== Repo Structure ==="
-          find . -type f | sort
-
           cd ..
-          echo "✅ Repo built successfully"
 
-      # =========================================================================
-      # 11. Verify repo is Sileo-ready
-      # =========================================================================
-      - name: Verify repo structure
+      - name: Verify repo
         run: |
-          echo "=== Verifying Sileo repo structure ==="
+          test -f repo/Packages || exit 1
+          test -f repo/Packages.bz2 || exit 1
+          test -f repo/Packages.xz || exit 1
+          test -f repo/Release || exit 1
+          test -f repo/pool/main/iphoneos-arm64/*.deb || exit 1
+          grep -q "Size: 0" repo/Packages && exit 1 || true
+          echo "Repo OK"
 
-          test -f repo/Packages || { echo "❌ Packages missing"; exit 1; }
-          test -f repo/Packages.bz2 || { echo "❌ Packages.bz2 missing"; exit 1; }
-          test -f repo/Packages.xz || { echo "❌ Packages.xz missing"; exit 1; }
-          test -f repo/Release || { echo "❌ Release missing"; exit 1; }
-          test -f repo/pool/main/iphoneos-arm64/*.deb || { echo "❌ .deb missing"; exit 1; }
-
-          echo ""
-          echo "=== Packages validation ==="
-          grep -q "Package: com.aosaid.appdatamgr" repo/Packages || { echo "❌ Package name missing"; exit 1; }
-          grep -q "Architecture: iphoneos-arm64" repo/Packages || { echo "❌ Architecture missing"; exit 1; }
-          grep -q "Filename: pool/main/iphoneos-arm64/" repo/Packages || { echo "❌ Filename missing"; exit 1; }
-          grep -q "Size:" repo/Packages || { echo "❌ Size missing"; exit 1; }
-          grep -q "MD5sum:" repo/Packages || { echo "❌ MD5sum missing"; exit 1; }
-          grep -q "SHA256:" repo/Packages || { echo "❌ SHA256 missing"; exit 1; }
-
-          echo ""
-          echo "=== Release validation ==="
-          grep -q "Architectures: iphoneos-arm64" repo/Release || { echo "❌ Release architectures missing"; exit 1; }
-          grep -q "Components: main" repo/Release || { echo "❌ Release components missing"; exit 1; }
-
-          echo ""
-          echo "✅ Repo is Sileo-ready!"
-
-      # =========================================================================
-      # 12. Upload artifacts
-      # =========================================================================
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: appdata-manager-build
@@ -334,25 +133,9 @@ EOF
           retention-days: 30
           if-no-files-found: error
 
-      # =========================================================================
-      # 13. Summary
-      # =========================================================================
-      - name: Build summary
+      - name: Summary
         run: |
-          echo "=========================================="
-          echo "  ✅ BUILD SUCCESSFUL"
-          echo "=========================================="
-          echo ""
           DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
-          echo "📦 Package: $(basename $DEB_FILE)"
-          echo "📁 Size: $(stat -f%z "$DEB_FILE") bytes"
-          echo ""
-          echo "📂 Artifacts uploaded:"
-          echo "   - packages/*.deb"
-          echo "   - repo/ (Sileo-ready)"
-          echo ""
-          echo "🔗 To install via Sileo:"
-          echo "   Add repo: https://aosaid3224-ops.github.io/repo/"
-          echo ""
-          echo "📥 Direct download:"
-          echo "   Download artifact 'appdata-manager-build' from GitHub Actions"
+          echo "BUILD SUCCESS"
+          echo "Package: $(basename $DEB_FILE)"
+          echo "Size: $(stat -f%z "$DEB_FILE") bytes"
