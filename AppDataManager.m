@@ -1,6 +1,7 @@
 #import "AppDataManager.h"
 #import <rootless.h>
 #import <dlfcn.h>
+#import <objc/runtime.h>
 
 @implementation AppDataManager
 
