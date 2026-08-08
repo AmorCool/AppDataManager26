@@ -57,7 +57,7 @@
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"AppData Manager";
-        cell.detailTextLabel.text = @"v1.1.2";
+        cell.detailTextLabel.text = @"v1.2.0";
     } else {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Developer";
