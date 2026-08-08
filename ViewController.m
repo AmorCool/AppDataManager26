@@ -284,27 +284,15 @@
 }
 
 - (void)showInfo {
-    NSString *info = @"AppData Manager v1.0.0
-
-"
-                      @"A professional tool for managing app data on jailbroken iOS devices.
-
-"
-                      @"Features:
-"
-                      @"• Wipe app data
-"
-                      @"• Backup & Restore
-"
-                      @"• System app protection
-"
-                      @"• Rootless compatible
-"
-                      @"• Dopamine 3.0 support
-"
-                      @"• iOS 18 support
-
-"
+    NSString *info = @"AppData Manager v1.1.0\n\n"
+                      @"A professional tool for managing app data on jailbroken iOS devices.\n\n"
+                      @"Features:\n"
+                      @"• Wipe app data\n"
+                      @"• Backup & Restore\n"
+                      @"• System app protection\n"
+                      @"• Rootless compatible\n"
+                      @"• Dopamine 3.0 support\n"
+                      @"• iOS 18 support\n\n"
                       @"Developer: @Zainqkvd";
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"About", @"About title") 
