@@ -2,22 +2,6 @@
 #import <rootless.h>
 #import <dlfcn.h>
 
-// Private API Headers
-@interface LSApplicationProxy : NSObject
-+ (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
-@property (nonatomic, readonly) NSString *localizedName;
-@property (nonatomic, readonly) NSString *bundleIdentifier;
-@property (nonatomic, readonly) NSString *applicationIdentifier;
-@property (nonatomic, readonly) NSArray *iconDataSources;
-@property (nonatomic, readonly) NSString *applicationType;
-@end
-
-@interface LSApplicationWorkspace : NSObject
-+ (instancetype)defaultWorkspace;
-- (NSArray *)allInstalledApplications;
-- (NSArray *)allApplications;
-@end
-
 @implementation AppDataManager
 
 + (instancetype)sharedManager {
@@ -30,29 +14,67 @@
 }
 
 - (NSArray<NSDictionary *> *)allInstalledApplications {
-    LSApplicationWorkspace *workspace = [LSApplicationWorkspace defaultWorkspace];
-    NSArray *apps = [workspace allInstalledApplications];
+    // iOS 18: Use objc_getClass for stealth and robustness
+    Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
+    if (!LSApplicationWorkspace_class) {
+        NSLog(@"[AppDataManager] ❌ LSApplicationWorkspace not available");
+        return @[];
+    }
+
+    id workspace = [LSApplicationWorkspace_class performSelector:@selector(defaultWorkspace)];
+    if (!workspace) {
+        NSLog(@"[AppDataManager] ❌ LSApplicationWorkspace defaultWorkspace returned nil");
+        return @[];
+    }
+
+    NSArray *apps = nil;
+    @try {
+        apps = [workspace performSelector:@selector(allInstalledApplications)];
+    } @catch (NSException *e) {
+        NSLog(@"[AppDataManager] ⚠️ Exception getting apps: %@", e);
+        return @[];
+    }
+
+    if (!apps || apps.count == 0) {
+        NSLog(@"[AppDataManager] ⚠️ No apps returned");
+        return @[];
+    }
 
     NSMutableArray *appList = [NSMutableArray array];
-    for (LSApplicationProxy *app in apps) {
-        if (app.bundleIdentifier && app.localizedName) {
-            NSString *appType = @"User";
-            if ([app respondsToSelector:@selector(applicationType)]) {
-                appType = app.applicationType ?: @"User";
+    for (id app in apps) {
+        @try {
+            NSString *bundleID = nil;
+            NSString *name = nil;
+
+            if ([app respondsToSelector:@selector(bundleIdentifier)]) {
+                bundleID = [app performSelector:@selector(bundleIdentifier)];
+            }
+            if ([app respondsToSelector:@selector(localizedName)]) {
+                name = [app performSelector:@selector(localizedName)];
             }
 
-            unsigned long long size = [self dataSizeForBundleID:app.bundleIdentifier];
+            if (!bundleID || !name) continue;
+
+            NSString *appType = @"User";
+            if ([app respondsToSelector:@selector(applicationType)]) {
+                appType = [app performSelector:@selector(applicationType)] ?: @"User";
+            }
+
+            unsigned long long size = [self dataSizeForBundleID:bundleID];
             NSString *sizeStr = [self formatBytes:size];
 
             [appList addObject:@{
-                @"name": app.localizedName,
-                @"bundleID": app.bundleIdentifier,
+                @"name": name,
+                @"bundleID": bundleID,
                 @"type": appType,
                 @"size": @(size),
                 @"sizeString": sizeStr,
-                @"hasBackup": @([self availableBackupsForBundleID:app.bundleIdentifier].count > 0),
-                @"isSystemApp": @([self isSystemApp:app.bundleIdentifier])
+                @"hasBackup": @([self availableBackupsForBundleID:bundleID].count > 0),
+                @"isSystemApp": @([self isSystemApp:bundleID])
             }];
+        } @catch (NSException *e) {
+            NSLog(@"[AppDataManager] ⚠️ Exception processing app: %@", e);
+            continue;
         }
     }
 
@@ -62,6 +84,7 @@
 }
 
 - (BOOL)isSystemApp:(NSString *)bundleID {
+    if (!bundleID) return NO;
     NSArray *systemApps = @[@"com.apple.springboard", @"com.apple.Preferences", 
                             @"com.apple.mobilesafari", @"com.apple.MobileSMS",
                             @"com.apple.mobilephone", @"com.apple.camera",
@@ -72,35 +95,47 @@
 }
 
 - (NSString *)dataPathForBundleID:(NSString *)bundleID {
-    dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_NOW);
+    if (!bundleID) return nil;
 
-    Class MCMAppDataContainer = NSClassFromString(@"MCMAppDataContainer");
-    if (MCMAppDataContainer) {
-        NSError *error = nil;
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-        id container = [MCMAppDataContainer performSelector:@selector(containerWithIdentifier:error:)
-                                                  withObject:bundleID
-                                                  withObject:error];
-        #pragma clang diagnostic pop
-        if (container) {
-            return [container valueForKey:@"path"];
-        }
-    }
-
-    // Fallback: البحث اليدوي في المسارات المعروفة
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *dataRoot = @"/var/mobile/Containers/Data/Application";
-    NSArray *folders = [fm contentsOfDirectoryAtPath:dataRoot error:nil];
-
-    for (NSString *folder in folders) {
-        NSString *plistPath = [dataRoot stringByAppendingPathComponent:[folder stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]];
-        if ([fm fileExistsAtPath:plistPath]) {
-            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:bundleID]) {
-                return [dataRoot stringByAppendingPathComponent:folder];
+    // Method 1: MobileContainerManager (iOS 15-18)
+    @try {
+        void *handle = dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_LAZY);
+        if (handle) {
+            Class MCMAppDataContainer = NSClassFromString(@"MCMAppDataContainer");
+            if (MCMAppDataContainer && [MCMAppDataContainer respondsToSelector:@selector(containerWithIdentifier:error:)]) {
+                NSError *error = nil;
+                id container = [MCMAppDataContainer performSelector:@selector(containerWithIdentifier:error:)
+                                                          withObject:bundleID
+                                                          withObject:error];
+                if (container && [container respondsToSelector:@selector(path)]) {
+                    NSString *path = [container performSelector:@selector(path)];
+                    if (path && [[NSFileManager defaultManager] fileExistsAtPath:path]) {
+                        return path;
+                    }
+                }
             }
         }
+    } @catch (NSException *e) {
+        NSLog(@"[AppDataManager] ⚠️ MobileContainerManager failed: %@", e);
+    }
+
+    // Method 2: Manual plist search
+    @try {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *dataRoot = @"/var/mobile/Containers/Data/Application";
+        NSArray *folders = [fm contentsOfDirectoryAtPath:dataRoot error:nil];
+
+        for (NSString *folder in folders) {
+            NSString *plistPath = [dataRoot stringByAppendingPathComponent:[folder stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]];
+            if ([fm fileExistsAtPath:plistPath]) {
+                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+                if ([plist[@"MCMMetadataIdentifier"] isEqualToString:bundleID]) {
+                    return [dataRoot stringByAppendingPathComponent:folder];
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[AppDataManager] ⚠️ Manual search failed: %@", e);
     }
 
     return nil;
@@ -115,10 +150,14 @@
     unsigned long long totalSize = 0;
 
     for (NSString *item in contents) {
-        NSString *fullPath = [path stringByAppendingPathComponent:item];
-        NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
-        if (attrs) {
-            totalSize += [attrs fileSize];
+        @try {
+            NSString *fullPath = [path stringByAppendingPathComponent:item];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+            if (attrs) {
+                totalSize += [attrs fileSize];
+            }
+        } @catch (NSException *e) {
+            continue;
         }
     }
 
@@ -154,6 +193,7 @@
 }
 
 - (BOOL)backupAppData:(NSString *)bundleID {
+    if (!bundleID) return NO;
     NSString *dataPath = [self dataPathForBundleID:bundleID];
     if (!dataPath) return NO;
 
@@ -177,7 +217,7 @@
 }
 
 - (BOOL)wipeAppData:(NSString *)bundleID {
-    // حماية تطبيقات النظام
+    if (!bundleID) return NO;
     if ([self isSystemApp:bundleID]) {
         NSLog(@"[AppDataManager] ⛔ Cannot wipe system app: %@", bundleID);
         return NO;
@@ -199,9 +239,10 @@
     for (NSString *item in contents) {
         if ([item hasPrefix:@"."]) continue;
         NSString *fullPath = [dataPath stringByAppendingPathComponent:item];
-        BOOL success = [fm removeItemAtPath:fullPath error:&error];
+        NSError *err = nil;
+        BOOL success = [fm removeItemAtPath:fullPath error:&err];
         if (!success) {
-            NSLog(@"[AppDataManager] ⚠️ Failed to remove %@: %@", item, error);
+            NSLog(@"[AppDataManager] ⚠️ Failed to remove %@: %@", item, err);
             allSuccess = NO;
         }
     }
@@ -211,6 +252,7 @@
 }
 
 - (NSArray<NSDictionary *> *)availableBackupsForBundleID:(NSString *)bundleID {
+    if (!bundleID) return @[];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *backupDir = [self backupDirectory];
     NSArray *contents = [fm contentsOfDirectoryAtPath:backupDir error:nil];
@@ -244,6 +286,7 @@
 }
 
 - (BOOL)restoreAppData:(NSString *)bundleID fromBackup:(NSString *)backupPath {
+    if (!bundleID || !backupPath) return NO;
     NSString *dataPath = [self dataPathForBundleID:bundleID];
     if (!dataPath || ![[NSFileManager defaultManager] fileExistsAtPath:backupPath]) {
         return NO;
@@ -265,16 +308,7 @@
         }
     }
 
-    return success;
-}
-
-- (BOOL)deleteBackup:(NSString *)backupPath {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSError *error = nil;
-    BOOL success = [fm removeItemAtPath:backupPath error:&error];
-    if (!success) {
-        NSLog(@"[AppDataManager] ❌ Failed to delete backup: %@", error);
-    }
+    NSLog(@"[AppDataManager] %@ Restored %@ from %@", success ? @"✅" : @"⚠️", bundleID, backupPath);
     return success;
 }
 
