@@ -26,7 +26,7 @@
     self = [super init];
     if (self) {
         self.bundleID = nil;
-        self.appName = @"All Backups";
+        self.appName = NSLocalizedString(@"All Backups", @"All backups title");
         self.showAllBackups = YES;
     }
     return self;
@@ -34,7 +34,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = self.showAllBackups ? @"Backup Manager" : self.appName;
+    self.title = self.showAllBackups ? NSLocalizedString(@"Backup Manager", @"Backup manager title") : self.appName;
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     self.manager = [AppDataManager sharedManager];
 
@@ -93,7 +93,7 @@
 
 - (void)showEmptyState {
     UILabel *label = [[UILabel alloc] init];
-    label.text = @"No backups found";
+    label.text = NSLocalizedString(@"No backups found", @"No backups message");
     label.textColor = [UIColor secondaryLabelColor];
     label.font = [UIFont systemFontOfSize:18 weight:UIFontWeightMedium];
     label.textAlignment = NSTextAlignmentCenter;
@@ -166,25 +166,25 @@
 }
 
 - (void)showBackupActions:(NSDictionary *)backup {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Backup Options" 
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Backup Options", @"Backup options title") 
                                                                    message:backup[@"name"]
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     // استعادة
-    [alert addAction:[UIAlertAction actionWithTitle:@"🔄 Restore" 
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"🔄 Restore", @"Restore button") 
                                               style:UIAlertActionStyleDefault 
                                             handler:^(UIAlertAction *action) {
         [self confirmRestore:backup];
     }]];
 
     // حذف
-    [alert addAction:[UIAlertAction actionWithTitle:@"🗑 Delete" 
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"🗑 Delete", @"Delete button") 
                                               style:UIAlertActionStyleDestructive 
                                             handler:^(UIAlertAction *action) {
         [self deleteBackup:backup[@"path"]];
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button") style:UIAlertActionStyleCancel handler:nil]];
 
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[self.tableView indexPathForSelectedRow]];
@@ -198,11 +198,11 @@
 - (void)confirmRestore:(NSDictionary *)backup {
     NSString *bundleID = [[backup[@"name"] componentsSeparatedByString:@"_"] firstObject];
 
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"🔄 Restore Backup" 
-                                                                     message:[NSString stringWithFormat:@"This will replace current data with this backup for %@. Continue?", bundleID]
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"🔄 Restore Backup", @"Restore backup action") 
+                                                                     message:[NSString stringWithFormat:NSLocalizedString(@"This will replace current data with this backup for %@. Continue?", @"Restore confirmation message"), bundleID]
                                                               preferredStyle:UIAlertControllerStyleAlert];
 
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button") style:UIAlertActionStyleCancel handler:nil]];
     [confirm addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self restoreBackup:backup forBundleID:bundleID];
     }]];
@@ -223,18 +223,18 @@
             [spinner stopAnimating];
             [spinner removeFromSuperview];
 
-            NSString *msg = success ? @"✅ Restore completed!" : @"❌ Restore failed!";
+            NSString *msg = success ? NSLocalizedString(@"✅ Restore completed!", @"Restore success") : NSLocalizedString(@"❌ Restore failed!", @"Restore failure");
             [self showToast:msg];
         });
     });
 }
 
 - (void)confirmDeleteBackup:(NSDictionary *)backup atIndexPath:(NSIndexPath *)indexPath {
-    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"🗑 Delete Backup" 
-                                                                     message:@"This backup will be permanently deleted." 
+    UIAlertController *confirm = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"🗑 Delete Backup", @"Delete backup action") 
+                                                                     message:NSLocalizedString(@"This backup will be permanently deleted.", @"Delete confirmation message") 
                                                               preferredStyle:UIAlertControllerStyleAlert];
 
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button") style:UIAlertActionStyleCancel handler:nil]];
     [confirm addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         [self deleteBackup:backup[@"path"]];
     }]];
@@ -246,9 +246,9 @@
     BOOL success = [self.manager deleteBackup:path];
     if (success) {
         [self loadBackups];
-        [self showToast:@"✅ Backup deleted!"];
+        [self showToast:NSLocalizedString(@"✅ Backup deleted!", @"Delete success")];
     } else {
-        [self showToast:@"❌ Failed to delete!"];
+        [self showToast:NSLocalizedString(@"❌ Failed to delete!", @"Delete failure")];
     }
 }
 
