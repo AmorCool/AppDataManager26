@@ -32,14 +32,12 @@
     self.navigationController.navigationBar.prefersLargeTitles = YES;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
 
-    // زر النسخ الاحتياطي
     UIBarButtonItem *backupBtn = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"archivebox.fill"]
                                                                    style:UIBarButtonItemStylePlain
                                                                   target:self
                                                                   action:@selector(showBackupManager)];
     self.navigationItem.rightBarButtonItem = backupBtn;
 
-    // زر الإعدادات/المعلومات
     UIBarButtonItem *infoBtn = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"]
                                                                   style:UIBarButtonItemStylePlain
                                                                  target:self
@@ -131,12 +129,21 @@
     cell.textLabel.text = app[@"name"];
     cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
 
-    NSString *detail = [NSString stringWithFormat:@"%@ • %@", app[@"bundleID"], app[@"sizeString"]];
+    // تغيير لون التطبيقات النظامية
+    if ([app[@"isSystemApp"] boolValue]) {
+        cell.textLabel.textColor = [UIColor systemRedColor];
+    } else {
+        cell.textLabel.textColor = [UIColor labelColor];
+    }
+
+    NSString *detail = [NSString stringWithFormat:@"%@ • %@%@", 
+                        app[@"bundleID"], 
+                        app[@"sizeString"],
+                        [app[@"isSystemApp"] boolValue] ? @" • SYSTEM" : @""];
     cell.detailTextLabel.text = detail;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
 
-    // أيقونة نسخ احتياطي
     if ([app[@"hasBackup"] boolValue]) {
         UIImageView *backupIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"archivebox"]];
         backupIcon.tintColor = [UIColor systemGreenColor];
@@ -179,12 +186,13 @@
     NSString *name = app[@"name"];
     NSString *bundleID = app[@"bundleID"];
     NSString *sizeStr = app[@"sizeString"];
+    BOOL isSystem = [app[@"isSystemApp"] boolValue];
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:name
-                                                                   message:[NSString stringWithFormat:@"Bundle ID: %@\nData Size: %@", bundleID, sizeStr]
+                                                                   message:[NSString stringWithFormat:@"Bundle ID: %@\nData Size: %@%@", bundleID, sizeStr, isSystem ? @"\n⚠️ SYSTEM APP - Wipe Disabled" : @""]
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
-    // نسخ احتياطي
+    // نسخ احتياطي (متاح للجميع)
     [alert addAction:[UIAlertAction actionWithTitle:@"📦 Backup Data" 
                                               style:UIAlertActionStyleDefault 
                                             handler:^(UIAlertAction *action) {
@@ -200,12 +208,14 @@
         }]];
     }
 
-    // مسح البيانات
-    [alert addAction:[UIAlertAction actionWithTitle:@"🗑 Wipe Data" 
-                                              style:UIAlertActionStyleDestructive 
-                                            handler:^(UIAlertAction *action) {
-        [self confirmWipe:bundleID name:name];
-    }]];
+    // مسح البيانات (غير متاح للتطبيقات النظامية)
+    if (!isSystem) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"🗑 Wipe Data" 
+                                                  style:UIAlertActionStyleDestructive 
+                                                handler:^(UIAlertAction *action) {
+            [self confirmWipe:bundleID name:name];
+        }]];
+    }
 
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
 
@@ -254,7 +264,7 @@
             [spinner removeFromSuperview];
 
             if (success && [action isEqualToString:@"Wipe"]) {
-                [self loadApps]; // تحديث القائمة
+                [self loadApps];
             }
 
             [self showToast:message];
@@ -279,8 +289,10 @@
                       @"Features:\n"
                       @"• Wipe app data\n"
                       @"• Backup & Restore\n"
+                      @"• System app protection\n"
                       @"• Rootless compatible\n"
-                      @"• Dopamine 3.0 support\n\n"
+                      @"• Dopamine 3.0 support\n"
+                      @"• iOS 18 support\n\n"
                       @"Developer: aosaid3224";
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"About" 
