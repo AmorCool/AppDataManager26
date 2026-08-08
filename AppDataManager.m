@@ -9,7 +9,7 @@
 @property (nonatomic, readonly) NSString *bundleIdentifier;
 @property (nonatomic, readonly) NSString *applicationIdentifier;
 @property (nonatomic, readonly) NSArray *iconDataSources;
-@property (nonatomic, readonly) NSString *applicationType; // User, System, Internal
+@property (nonatomic, readonly) NSString *applicationType;
 @end
 
 @interface LSApplicationWorkspace : NSObject
@@ -50,7 +50,8 @@
                 @"type": appType,
                 @"size": @(size),
                 @"sizeString": sizeStr,
-                @"hasBackup": @([self availableBackupsForBundleID:app.bundleIdentifier].count > 0)
+                @"hasBackup": @([self availableBackupsForBundleID:app.bundleIdentifier].count > 0),
+                @"isSystemApp": @([self isSystemApp:app.bundleIdentifier])
             }];
         }
     }
@@ -58,6 +59,16 @@
     return [appList sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"name"] compare:b[@"name"]];
     }];
+}
+
+- (BOOL)isSystemApp:(NSString *)bundleID {
+    NSArray *systemApps = @[@"com.apple.springboard", @"com.apple.Preferences", 
+                            @"com.apple.mobilesafari", @"com.apple.MobileSMS",
+                            @"com.apple.mobilephone", @"com.apple.camera",
+                            @"com.apple.mobilemail", @"com.apple.Maps",
+                            @"com.apple.mobilecal", @"com.apple.mobileslideshow",
+                            @"com.apple.AppStore", @"com.apple.ios.StoreKitUIService"];
+    return [systemApps containsObject:bundleID];
 }
 
 - (NSString *)dataPathForBundleID:(NSString *)bundleID {
@@ -77,7 +88,7 @@
         }
     }
 
-    // Fallback
+    // Fallback: البحث اليدوي في المسارات المعروفة
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *dataRoot = @"/var/mobile/Containers/Data/Application";
     NSArray *folders = [fm contentsOfDirectoryAtPath:dataRoot error:nil];
@@ -166,6 +177,12 @@
 }
 
 - (BOOL)wipeAppData:(NSString *)bundleID {
+    // حماية تطبيقات النظام
+    if ([self isSystemApp:bundleID]) {
+        NSLog(@"[AppDataManager] ⛔ Cannot wipe system app: %@", bundleID);
+        return NO;
+    }
+
     NSString *dataPath = [self dataPathForBundleID:bundleID];
     if (!dataPath) return NO;
 
@@ -180,7 +197,7 @@
 
     BOOL allSuccess = YES;
     for (NSString *item in contents) {
-        if ([item hasPrefix:@"."]) continue; // تجاهل الملفات المخفية
+        if ([item hasPrefix:@"."]) continue;
         NSString *fullPath = [dataPath stringByAppendingPathComponent:item];
         BOOL success = [fm removeItemAtPath:fullPath error:&error];
         if (!success) {
@@ -222,7 +239,7 @@
     }
 
     return [backups sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-        return [b[@"date"] compare:a[@"date"]]; // الأحدث أولاً
+        return [b[@"date"] compare:a[@"date"]];
     }];
 }
 
