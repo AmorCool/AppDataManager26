@@ -122,26 +122,22 @@ jobs:
           echo "Found: $DEB_FILE"
           echo ""
 
-          # dpkg-deb -I: package info + control files listing
           echo "--- dpkg-deb -I ---"
           dpkg-deb -I "$DEB_FILE" || { echo "❌ dpkg-deb -I failed"; exit 1; }
           echo ""
 
-          # dpkg-deb -c: data archive contents
           echo "--- dpkg-deb -c (data archive) ---"
           dpkg-deb -c "$DEB_FILE" > /tmp/deb-data.txt
           wc -l /tmp/deb-data.txt
           head -30 /tmp/deb-data.txt
           echo ""
 
-          # dpkg-deb -e: extract control files to verify postinst/prerm
           echo "--- Extracting control files (dpkg-deb -e) ---"
           rm -rf /tmp/deb-control
           dpkg-deb -e "$DEB_FILE" /tmp/deb-control
           ls -la /tmp/deb-control/
           echo ""
 
-          # Verify control files exist
           echo "--- Control file checks ---"
           test -f /tmp/deb-control/control || { echo "❌ control missing"; exit 1; }
           echo "✅ control present"
@@ -152,27 +148,23 @@ jobs:
           test -f /tmp/deb-control/prerm || { echo "❌ prerm missing"; exit 1; }
           echo "✅ prerm present ($(wc -c < /tmp/deb-control/prerm) bytes)"
 
-          # Verify executability
           test -x /tmp/deb-control/postinst || { echo "❌ postinst not executable"; exit 1; }
           echo "✅ postinst is executable"
 
           test -x /tmp/deb-control/prerm || { echo "❌ prerm not executable"; exit 1; }
           echo "✅ prerm is executable"
 
-          # Data archive checks
           echo ""
           echo "--- Data archive checks ---"
           grep -q "Applications/AppDataManager.app/AppDataManager" /tmp/deb-data.txt || { echo "❌ Binary missing"; exit 1; }
           echo "✅ Binary present in data archive"
 
-          # Architecture check
           dpkg-deb -I "$DEB_FILE" | grep -q "Architecture: iphoneos-arm64" || { echo "❌ Wrong architecture"; exit 1; }
           echo "✅ Architecture is iphoneos-arm64"
 
           dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
           echo "✅ Package name correct"
 
-          # Export for next steps
           echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
           echo "DEB_BASENAME=$(basename $DEB_FILE)" >> $GITHUB_ENV
 
@@ -239,7 +231,7 @@ jobs:
       - name: Deploy repo to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.PAT }}
           publish_dir: ./build-output/repo
           publish_branch: gh-pages
           force_orphan: true
