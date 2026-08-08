@@ -17,7 +17,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"AppData Manager";
+    self.title = NSLocalizedString(@"AppData Manager", @"App title");
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     self.manager = [AppDataManager sharedManager];
 
@@ -49,7 +49,7 @@
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Search apps...";
+    self.searchController.searchBar.placeholder = NSLocalizedString(@"Search apps...", @"Search placeholder");
     self.searchController.searchBar.searchTextField.backgroundColor = [UIColor secondarySystemBackgroundColor];
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
@@ -196,7 +196,7 @@
     [alert addAction:[UIAlertAction actionWithTitle:@"📦 Backup Data" 
                                               style:UIAlertActionStyleDefault 
                                             handler:^(UIAlertAction *action) {
-        [self performAction:@"Backup" forApp:bundleID name:name];
+        [self performAction:NSLocalizedString(@"Backup", @"Backup action") forApp:bundleID name:name];
     }]];
 
     // استعراض النسخ الاحتياطية
@@ -217,7 +217,7 @@
         }]];
     }
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button") style:UIAlertActionStyleCancel handler:nil]];
 
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
         UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[self.tableView indexPathForSelectedRow]];
@@ -233,9 +233,9 @@
                                                                      message:[NSString stringWithFormat:@"This will permanently delete ALL data for %@. This action cannot be undone!", name]
                                                               preferredStyle:UIAlertControllerStyleAlert];
 
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [confirm addAction:[UIAlertAction actionWithTitle:@"Wipe Data" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-        [self performAction:@"Wipe" forApp:bundleID name:name];
+    [confirm addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button") style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Wipe Data", @"Wipe action") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [self performAction:NSLocalizedString(@"Wipe", @"Wipe button") forApp:bundleID name:name];
     }]];
 
     [self presentViewController:confirm animated:YES completion:nil];
@@ -251,10 +251,10 @@
         BOOL success = NO;
         NSString *message = @"";
 
-        if ([action isEqualToString:@"Backup"]) {
+        if ([action isEqualToString:NSLocalizedString(@"Backup", @"Backup action")]) {
             success = [self.manager backupAppData:bundleID];
             message = success ? [NSString stringWithFormat:@"✅ Backup created for %@!", name] : [NSString stringWithFormat:@"❌ Failed to backup %@", name];
-        } else if ([action isEqualToString:@"Wipe"]) {
+        } else if ([action isEqualToString:NSLocalizedString(@"Wipe", @"Wipe button")]) {
             success = [self.manager wipeAppData:bundleID];
             message = success ? [NSString stringWithFormat:@"✅ Data wiped for %@!", name] : [NSString stringWithFormat:@"❌ Failed to wipe %@", name];
         }
@@ -263,7 +263,7 @@
             [spinner stopAnimating];
             [spinner removeFromSuperview];
 
-            if (success && [action isEqualToString:@"Wipe"]) {
+            if (success && [action isEqualToString:NSLocalizedString(@"Wipe", @"Wipe button")]) {
                 [self loadApps];
             }
 
