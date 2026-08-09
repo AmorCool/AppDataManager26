@@ -1,7 +1,7 @@
 #import "AppDataManager.h"
-#import <rootless.h>
-#import <dlfcn.h>
 #import <objc/runtime.h>
+#import <dlfcn.h>
+#import "rootless.h"
 
 @implementation AppDataManager
 
@@ -14,8 +14,7 @@
     return shared;
 }
 
-- (NSArray<NSDictionary *> *)allInstalledApplications {
-    // iOS 18: Use objc_getClass for stealth and robustness
+- (NSArray *)allInstalledApplications {
     Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
     if (!LSApplicationWorkspace_class) {
         NSLog(@"[AppDataManager] ❌ LSApplicationWorkspace not available");
@@ -86,7 +85,7 @@
 
 - (BOOL)isSystemApp:(NSString *)bundleID {
     if (!bundleID) return NO;
-    NSArray *systemApps = @[@"com.apple.springboard", @"com.apple.Preferences", 
+    NSArray *systemApps = @[@"com.apple.springboard", @"com.apple.Preferences",
                             @"com.apple.mobilesafari", @"com.apple.MobileSMS",
                             @"com.apple.mobilephone", @"com.apple.camera",
                             @"com.apple.mobilemail", @"com.apple.Maps",
@@ -98,7 +97,6 @@
 - (NSString *)dataPathForBundleID:(NSString *)bundleID {
     if (!bundleID) return nil;
 
-    // Method 1: MobileContainerManager (iOS 15-18)
     @try {
         void *handle = dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_LAZY);
         if (handle) {
@@ -106,8 +104,8 @@
             if (MCMAppDataContainer && [MCMAppDataContainer respondsToSelector:@selector(containerWithIdentifier:error:)]) {
                 NSError *error = nil;
                 id container = [MCMAppDataContainer performSelector:@selector(containerWithIdentifier:error:)
-                                                          withObject:bundleID
-                                                          withObject:error];
+                                                        withObject:bundleID
+                                                        withObject:error];
                 if (container && [container respondsToSelector:@selector(path)]) {
                     NSString *path = [container performSelector:@selector(path)];
                     if (path && [[NSFileManager defaultManager] fileExistsAtPath:path]) {
@@ -120,7 +118,6 @@
         NSLog(@"[AppDataManager] ⚠️ MobileContainerManager failed: %@", e);
     }
 
-    // Method 2: Manual plist search
     @try {
         NSFileManager *fm = [NSFileManager defaultManager];
         NSString *dataRoot = @"/var/mobile/Containers/Data/Application";
@@ -185,10 +182,10 @@
     NSString *backupPath = ROOT_PATH_NS(@"/var/mobile/Documents/AppDataBackups");
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:backupPath]) {
-        [fm createDirectoryAtPath:backupPath 
-      withIntermediateDirectories:YES 
-                       attributes:@{NSFileOwnerAccountName: @"mobile", NSFileGroupOwnerAccountName: @"mobile"} 
-                            error:nil];
+        [fm createDirectoryAtPath:backupPath
+        withIntermediateDirectories:YES
+                         attributes:@{NSFileOwnerAccountName: @"mobile", NSFileGroupOwnerAccountName: @"mobile"}
+                              error:nil];
     }
     return backupPath;
 }
@@ -252,7 +249,7 @@
     return allSuccess;
 }
 
-- (NSArray<NSDictionary *> *)availableBackupsForBundleID:(NSString *)bundleID {
+- (NSArray *)availableBackupsForBundleID:(NSString *)bundleID {
     if (!bundleID) return @[];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *backupDir = [self backupDirectory];
@@ -304,18 +301,16 @@
         return NO;
     }
 
-    // 1. Wipe existing data
     NSLog(@"[AppDataManager] 🧹 Wiping existing data for %@...", bundleID);
     [self wipeAppData:bundleID];
 
-    // 2. Ensure data directory exists (create if wiped completely)
     if (![fm fileExistsAtPath:dataPath]) {
         NSError *createErr = nil;
-        BOOL created = [fm createDirectoryAtPath:dataPath 
-                     withIntermediateDirectories:YES 
-                                      attributes:@{NSFileOwnerAccountName: @"mobile", 
-                                                   NSFileGroupOwnerAccountName: @"mobile"} 
-                                           error:&createErr];
+        BOOL created = [fm createDirectoryAtPath:dataPath
+                    withIntermediateDirectories:YES
+                                     attributes:@{NSFileOwnerAccountName: @"mobile",
+                                                  NSFileGroupOwnerAccountName: @"mobile"}
+                                          error:&createErr];
         if (!created) {
             NSLog(@"[AppDataManager] ❌ Failed to create data directory: %@", createErr);
             return NO;
@@ -323,7 +318,6 @@
         NSLog(@"[AppDataManager] 📁 Created data directory: %@", dataPath);
     }
 
-    // 3. Copy backup contents to data directory
     NSError *contentsErr = nil;
     NSArray *contents = [fm contentsOfDirectoryAtPath:backupPath error:&contentsErr];
     if (contentsErr) {
@@ -333,7 +327,7 @@
 
     if (contents.count == 0) {
         NSLog(@"[AppDataManager] ⚠️ Backup is empty");
-        return YES; // Nothing to restore
+        return YES;
     }
 
     NSLog(@"[AppDataManager] 📦 Restoring %lu items from backup...", (unsigned long)contents.count);
@@ -345,23 +339,17 @@
         NSString *srcPath = [backupPath stringByAppendingPathComponent:item];
         NSString *dstPath = [dataPath stringByAppendingPathComponent:item];
 
-        // Remove destination if already exists (from failed previous attempt)
         if ([fm fileExistsAtPath:dstPath]) {
             NSError *removeErr = nil;
             [fm removeItemAtPath:dstPath error:&removeErr];
-            if (removeErr) {
-                NSLog(@"[AppDataManager] ⚠️ Could not remove existing %@: %@", item, removeErr);
-            }
         }
 
-        // Copy item
         NSError *copyErr = nil;
         BOOL copied = [fm copyItemAtPath:srcPath toPath:dstPath error:&copyErr];
 
         if (copied) {
             successCount++;
-            // Set proper ownership for restored files
-            NSDictionary *attrs = @{NSFileOwnerAccountName: @"mobile", 
+            NSDictionary *attrs = @{NSFileOwnerAccountName: @"mobile",
                                     NSFileGroupOwnerAccountName: @"mobile"};
             [fm setAttributes:attrs ofItemAtPath:dstPath error:nil];
         } else {
@@ -370,14 +358,15 @@
         }
     }
 
-    NSLog(@"[AppDataManager] %@ Restored %lu/%lu items for %@", 
-          allSuccess ? @"✅" : @"⚠️", 
-          (unsigned long)successCount, 
-          (unsigned long)contents.count, 
+    NSLog(@"[AppDataManager] %@ Restored %lu/%lu items for %@",
+          allSuccess ? @"✅" : @"⚠️",
+          (unsigned long)successCount,
+          (unsigned long)contents.count,
           bundleID);
 
     return allSuccess;
 }
+
 - (BOOL)deleteBackup:(NSString *)backupPath {
     if (!backupPath) return NO;
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -389,6 +378,80 @@
         NSLog(@"[AppDataManager] ❌ Failed to delete backup: %@", error);
     }
     return success;
+}
+
+#pragma mark - NEW UI Support Methods
+
+- (UIImage *)iconForBundleID:(NSString *)bundleID {
+    if (!bundleID) return nil;
+    Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+    if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+        id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+        if (proxy && [proxy respondsToSelector:@selector(iconDataForVariant:)]) {
+            NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:@(2)];
+            if (iconData) {
+                return [UIImage imageWithData:iconData];
+            }
+        }
+    }
+    return nil;
+}
+
+- (NSString *)versionForBundleID:(NSString *)bundleID {
+    if (!bundleID) return @"Unknown";
+    Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+    if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+        id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+        if (proxy && [proxy respondsToSelector:@selector(shortVersionString)]) {
+            return [proxy performSelector:@selector(shortVersionString)] ?: @"Unknown";
+        }
+    }
+    return @"Unknown";
+}
+
+- (NSString *)documentsPathForBundleID:(NSString *)bundleID {
+    NSString *dataPath = [self dataPathForBundleID:bundleID];
+    if (!dataPath) return nil;
+    return [dataPath stringByAppendingPathComponent:@"Documents"];
+}
+
+- (NSUInteger)documentsCountForBundleID:(NSString *)bundleID {
+    NSString *docsPath = [self documentsPathForBundleID:bundleID];
+    if (!docsPath) return 0;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *contents = [fm contentsOfDirectoryAtPath:docsPath error:nil];
+    return contents.count;
+}
+
+- (NSDate *)lastBackupDateForBundleID:(NSString *)bundleID {
+    NSArray *backups = [self availableBackupsForBundleID:bundleID];
+    if (backups.count == 0) return nil;
+    return backups[0][@"date"];
+}
+
+- (unsigned long long)totalBackupsSize {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *backupDir = [self backupDirectory];
+    NSArray *contents = [fm contentsOfDirectoryAtPath:backupDir error:nil];
+    unsigned long long total = 0;
+    for (NSString *item in contents) {
+        NSString *fullPath = [backupDir stringByAppendingPathComponent:item];
+        NSArray *subpaths = [fm subpathsAtPath:fullPath];
+        for (NSString *sub in subpaths) {
+            NSDictionary *attrs = [fm attributesOfItemAtPath:[fullPath stringByAppendingPathComponent:sub] error:nil];
+            total += [attrs fileSize];
+        }
+    }
+    return total;
+}
+
+- (unsigned long long)totalAppsDataSize {
+    NSArray *apps = [self allInstalledApplications];
+    unsigned long long total = 0;
+    for (NSDictionary *app in apps) {
+        total += [app[@"size"] unsignedLongLongValue];
+    }
+    return total;
 }
 
 @end
