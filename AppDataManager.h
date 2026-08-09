@@ -35,4 +35,7 @@
 - (unsigned long long)totalBackupsSize;
 - (unsigned long long)totalAppsDataSize;
 
+// Format bytes helper
+- (NSString *)formatBytes:(unsigned long long)bytes;
+
 @end
