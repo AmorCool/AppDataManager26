@@ -80,7 +80,9 @@
 
 أضف المستودع التالي إلى Sileo:
 
+```
 https://aosaid3224-ops.github.io/repo/
+```
 
 بعد إضافة المستودع:
 
@@ -96,7 +98,9 @@ https://aosaid3224-ops.github.io/repo/
 
 يمكن الحصول على أحدث حزمة من مستودع المشروع:
 
+```
 https://aosaid3224-ops.github.io/repo/
+```
 
 ⸻
 
@@ -111,18 +115,24 @@ https://aosaid3224-ops.github.io/repo/
 
 البناء السريع
 
+```bash
 git clone https://github.com/aosaid3224-ops/AppDataManager.git
 cd AppDataManager
 ./build.sh
+```
 
 البناء اليدوي
 
+```bash
 make clean
 make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+```
 
 ستجد الحزمة الناتجة داخل:
 
+```
 packages/
+```
 
 ⸻
 
@@ -130,19 +140,27 @@ packages/
 
 بعد بناء الحزمة:
 
+```bash
 scp packages/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb root@<your-iphone-ip>:/tmp/
+```
 
 الاتصال بالجهاز:
 
+```bash
 ssh root@<your-iphone-ip>
+```
 
 تثبيت الحزمة:
 
+```bash
 dpkg -i /tmp/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb
+```
 
 تحديث تسجيل التطبيق:
 
+```bash
 uicache -p /var/jb/Applications/AppDataManager.app
+```
 
 قد يتغير اسم الحزمة أو مسار التطبيق في الإصدارات المستقبلية.
 
@@ -206,6 +224,7 @@ WORKFLOW.md
 
 بنية المشروع
 
+```
 AppDataManager/
 ├── Makefile
 ├── control
@@ -232,6 +251,7 @@ AppDataManager/
 │       └── prerm
 │
 └── README.md
+```
 
 ⸻
 
@@ -252,7 +272,9 @@ ZAIN
 
 للتواصل والدعم عبر X (Twitter):
 
+```
 @Zainqkvd
+```
 
 AppData Manager هو مشروع متخصص في إدارة بيانات التطبيقات على أجهزة iOS العاملة ضمن بيئات Jailbreak.
 
