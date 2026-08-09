@@ -453,21 +453,69 @@
     UIImage *cached = [self.iconCache objectForKey:bundleID];
     if (cached) return cached;
 
-    Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
-    if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
-        id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
-        if (proxy && [proxy respondsToSelector:@selector(iconDataForVariant:)]) {
-            NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:@(2)];
-            if (iconData) {
-                UIImage *icon = [UIImage imageWithData:iconData];
-                if (icon) {
-                    [self.iconCache setObject:icon forKey:bundleID];
-                    return icon;
+    UIImage *icon = nil;
+
+    // Method 1: Private API _applicationIconImageForBundleIdentifier (iOS 15-26)
+    @try {
+        if ([UIImage respondsToSelector:@selector(_applicationIconImageForBundleIdentifier:format:scale:)]) {
+            icon = [UIImage _applicationIconImageForBundleIdentifier:bundleID format:10 scale:[UIScreen mainScreen].scale];
+        }
+    } @catch (NSException *e) {}
+
+    // Method 2: LSApplicationProxy icon variant
+    if (!icon) {
+        @try {
+            Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+            if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+                id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+                if (proxy && [proxy respondsToSelector:@selector(iconDataForVariant:)]) {
+                    NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:@(2)];
+                    if (iconData) {
+                        icon = [UIImage imageWithData:iconData];
+                    }
                 }
             }
-        }
+        } @catch (NSException *e) {}
     }
-    return nil;
+
+    // Method 3: Get icon from app bundle
+    if (!icon) {
+        @try {
+            NSString *appPath = nil;
+            Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+            if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+                id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+                if (proxy && [proxy respondsToSelector:@selector(bundleURL)]) {
+                    NSURL *bundleURL = [proxy performSelector:@selector(bundleURL)];
+                    appPath = [bundleURL path];
+                }
+            }
+
+            if (appPath) {
+                NSBundle *bundle = [NSBundle bundleWithPath:appPath];
+                if (bundle) {
+                    NSDictionary *info = [bundle infoDictionary];
+                    NSArray *iconFiles = info[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"];
+                    if (!iconFiles) {
+                        iconFiles = info[@"CFBundleIconFiles"];
+                    }
+                    if (iconFiles && iconFiles.count > 0) {
+                        NSString *iconName = [iconFiles lastObject];
+                        NSString *iconPath = [appPath stringByAppendingPathComponent:[iconName stringByAppendingString:@".png"]];
+                        if ([[NSFileManager defaultManager] fileExistsAtPath:iconPath]) {
+                            icon = [UIImage imageWithContentsOfFile:iconPath];
+                        }
+                    }
+                }
+            }
+        } @catch (NSException *e) {}
+    }
+
+    if (icon) {
+        [self.iconCache setObject:icon forKey:bundleID];
+    }
+
+    return icon;
 }
 
 - (NSString *)versionForBundleID:(NSString *)bundleID {
