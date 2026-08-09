@@ -1,4 +1,4 @@
 #import <UIKit/UIKit.h>
 
-@interface MainViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
+@interface MainViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UISearchResultsUpdating>
 @end
