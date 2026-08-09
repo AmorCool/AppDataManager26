@@ -4,8 +4,12 @@
 
 + (instancetype)sharedManager;
 
-// جلب كل التطبيقات المثبتة
+// جلب كل التطبيقات المثبتة (سريع - بدون حساب الحجم)
 - (NSArray *)allInstalledApplications;
+
+// حساب الأحجام في الخلفية
+- (void)calculateSizesForApps:(NSArray *)apps completion:(void (^)(void))completion;
+- (void)calculateSizeForBundleID:(NSString *)bundleID completion:(void (^)(unsigned long long size, NSString *sizeString))completion;
 
 // مسار بيانات التطبيق (Sandbox)
 - (NSString *)dataPathForBundleID:(NSString *)bundleID;
@@ -26,7 +30,7 @@
 // حذف نسخة احتياطية
 - (BOOL)deleteBackup:(NSString *)backupPath;
 
-// === NEW: UI Support Methods ===
+// === UI Support Methods ===
 - (UIImage *)iconForBundleID:(NSString *)bundleID;
 - (NSString *)versionForBundleID:(NSString *)bundleID;
 - (NSString *)documentsPathForBundleID:(NSString *)bundleID;
@@ -37,5 +41,8 @@
 
 // Format bytes helper
 - (NSString *)formatBytes:(unsigned long long)bytes;
+
+// Cache management
+- (void)clearCache;
 
 @end
