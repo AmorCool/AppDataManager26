@@ -357,8 +357,7 @@
     ];
 
     self.pieChart.centerLabel.attributedText = [[NSAttributedString alloc] initWithString:
-        [NSString stringWithFormat:@"%@
-%@", [self.manager formatBytes:backupsSize + appsSize], @"Total"]
+        [NSString stringWithFormat:@"%@\n%@", [self.manager formatBytes:backupsSize + appsSize], @"Total"]
         attributes:@{
             NSFontAttributeName: [UIFont systemFontOfSize:11],
             NSForegroundColorAttributeName: [UIColor colorWithWhite:0.5 alpha:1.0]
