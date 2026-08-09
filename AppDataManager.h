@@ -45,4 +45,7 @@
 // Cache management
 - (void)clearCache;
 
+// System app protection
+- (BOOL)isSystemApp:(NSString *)bundleID;
+
 @end
