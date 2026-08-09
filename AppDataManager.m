@@ -464,7 +464,6 @@
             BOOL copied = [fm copyItemAtPath:srcPath toPath:dstPath error:&err];
             if (copied) {
                 [fm setAttributes:@{NSFileOwnerAccountName: @"mobile", NSFileGroupOwnerAccountName: @"mobile"} ofItemAtPath:dstPath error:nil];
-                successCount++;
             } else {
                 allSuccess = NO;
             }
