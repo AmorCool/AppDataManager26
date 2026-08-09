@@ -1,3 +1,11 @@
+# 📱 AppData Manager
+
+> **🔄 [دليل تحديث ورفع الأداة → WORKFLOW.md](WORKFLOW.md)**
+> 
+> للمطورين: اضغط على الرابط أعلاه لفهم كيفية التحديث والرفع والمزامنة
+
+---
+
 # 🗑 AppData Manager
 
 **Professional App Data Management Tool for iOS Jailbreak**
