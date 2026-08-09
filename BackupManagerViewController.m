@@ -345,7 +345,7 @@
 - (void)updateChart {
     unsigned long long backupsSize = [self.manager totalBackupsSize];
     unsigned long long appsSize = [self.manager totalAppsDataSize];
-    unsigned long long freeSpace = 50ULL * 1024 * 1024 * 1024; // Approximate 50GB free placeholder
+    unsigned long long freeSpace = [self.manager totalFreeSpace];
 
     unsigned long long total = backupsSize + appsSize + freeSpace;
     if (total == 0) total = 1;
@@ -357,7 +357,7 @@
     ];
 
     self.pieChart.centerLabel.attributedText = [[NSAttributedString alloc] initWithString:
-        [NSString stringWithFormat:@"%@\n%@", [self.manager formatBytes:backupsSize + appsSize], @"Total"]
+        [NSString stringWithFormat:@"%@\n%@", [self.manager formatBytes:backupsSize + appsSize], @"المجموع"]
         attributes:@{
             NSFontAttributeName: [UIFont systemFontOfSize:11],
             NSForegroundColorAttributeName: [UIColor colorWithWhite:0.5 alpha:1.0]
