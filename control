@@ -1,6 +1,6 @@
 Package: com.aosaid.appdatamgr
 Name: AppData Manager
-Version: 1.2.2
+Version: 1.2.1
 Architecture: iphoneos-arm64
 Description: Professional app data wipe & backup tool. Rootless/Dopamine 3.0 compatible. iOS 15-26 supported.
 Maintainer: aosaid3224 <aosaid3224@github.com>
