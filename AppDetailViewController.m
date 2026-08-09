@@ -330,25 +330,17 @@
     [self.contentView addSubview:self.dataCard];
 
     self.dataTitleLabel = [[UILabel alloc] init];
-    self.dataTitleLabel.text = @"حجم البيانات";
-    self.dataTitleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    self.dataTitleLabel.text = @"إجمالي البيانات";
+    self.dataTitleLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
     self.dataTitleLabel.textColor = C_TEXT_TER;
     self.dataTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.dataCard addSubview:self.dataTitleLabel];
 
     self.dataSizeLabel = [[UILabel alloc] init];
     self.dataSizeLabel.text = @"—";
-    self.dataSizeLabel.font = [UIFont systemFontOfSize:32 weight:UIFontWeightBold];
     self.dataSizeLabel.textColor = C_TEXT_PRI;
     self.dataSizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.dataCard addSubview:self.dataSizeLabel];
-
-    self.dataUnitLabel = [[UILabel alloc] init];
-    self.dataUnitLabel.text = @"";
-    self.dataUnitLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    self.dataUnitLabel.textColor = C_TEXT_SEC;
-    self.dataUnitLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.dataCard addSubview:self.dataUnitLabel];
 
     self.ringView = [[StorageRingView alloc] initWithFrame:CGRectZero];
     self.ringView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -371,19 +363,16 @@
         [self.dataCard.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
         [self.dataCard.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
 
-        [self.dataTitleLabel.topAnchor constraintEqualToAnchor:self.dataCard.topAnchor constant:18],
+        [self.dataTitleLabel.topAnchor constraintEqualToAnchor:self.dataCard.topAnchor constant:16],
         [self.dataTitleLabel.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:18],
 
-        [self.dataSizeLabel.topAnchor constraintEqualToAnchor:self.dataTitleLabel.bottomAnchor constant:6],
+        [self.dataSizeLabel.topAnchor constraintEqualToAnchor:self.dataTitleLabel.bottomAnchor constant:4],
         [self.dataSizeLabel.leadingAnchor constraintEqualToAnchor:self.dataTitleLabel.leadingAnchor],
 
-        [self.dataUnitLabel.leadingAnchor constraintEqualToAnchor:self.dataSizeLabel.trailingAnchor constant:6],
-        [self.dataUnitLabel.bottomAnchor constraintEqualToAnchor:self.dataSizeLabel.bottomAnchor constant:-4],
-
-        [self.ringView.centerYAnchor constraintEqualToAnchor:self.dataSizeLabel.centerYAnchor constant:6],
+        [self.ringView.centerYAnchor constraintEqualToAnchor:self.dataSizeLabel.centerYAnchor constant:2],
         [self.ringView.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-18],
-        [self.ringView.widthAnchor constraintEqualToConstant:84],
-        [self.ringView.heightAnchor constraintEqualToConstant:84],
+        [self.ringView.widthAnchor constraintEqualToConstant:72],
+        [self.ringView.heightAnchor constraintEqualToConstant:72],
 
         [self.divider.topAnchor constraintEqualToAnchor:self.dataSizeLabel.bottomAnchor constant:18],
         [self.divider.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:18],
@@ -624,8 +613,18 @@
         NSDate *lb = [self.manager lastBackupDateForBundleID:bid];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.dataSizeLabel.text = num;
-            self.dataUnitLabel.text = unit;
+            NSMutableAttributedString *sizeAttr = [[NSMutableAttributedString alloc] init];
+            [sizeAttr appendAttributedString:[[NSAttributedString alloc] initWithString:num attributes:@{
+                NSFontAttributeName: [UIFont systemFontOfSize:26 weight:UIFontWeightSemibold],
+                NSForegroundColorAttributeName: C_TEXT_PRI
+            }]];
+            if (unit.length > 0) {
+                [sizeAttr appendAttributedString:[[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@" %@", unit] attributes:@{
+                    NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium],
+                    NSForegroundColorAttributeName: C_TEXT_SEC
+                }]];
+            }
+            self.dataSizeLabel.attributedText = sizeAttr;
             self.ringView.docRatio = dr; self.ringView.libRatio = lr; self.ringView.cacheRatio = cr;
             [self.ringView setNeedsDisplay];
 
