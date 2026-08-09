@@ -1,6 +1,7 @@
 #import "SettingsViewController.h"
+#import "AppDataManager.h"
 
-@interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource>
+@interface SettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
 @end
 
@@ -61,7 +62,7 @@
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"Version";
-        cell.detailTextLabel.text = @"1.2.2";
+        cell.detailTextLabel.text = @"1.3.0";
         cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.42 green:0.31 blue:0.90 alpha:1.0]];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"Clear All Backups", @"Export Backups", @"Import Backups"];
@@ -109,28 +110,43 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 1) {
         if (indexPath.row == 0) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚠️ Clear All Backups"
-                                                                           message:@"This will delete ALL backup files permanently. Are you sure?"
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚠️ مسح كل النسخ الاحتياطية"
+                                                                           message:@"سيتم حذف ALL ملفات النسخ الاحتياطية بشكل دائم. هل أنت متأكد؟"
                                                                     preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"Clear All" style:UIAlertActionStyleDestructive handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"مسح الكل" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    AppDataManager *mgr = [AppDataManager sharedManager];
+                    BOOL ok = [mgr deleteAllBackups];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self showToast:ok ? @"✅ تم مسح كل النسخ الاحتياطية" : @"❌ فشل المسح"];
+                    });
+                });
+            }]];
             [self presentViewController:alert animated:YES completion:nil];
-        } else {
-            [self showToast:@"ℹ️ Feature coming in next update"];
+        } else if (indexPath.row == 1) {
+            AppDataManager *mgr = [AppDataManager sharedManager];
+            NSString *path = [mgr backupDirectory];
+            UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+            pasteboard.string = path;
+            [self showToast:[NSString stringWithFormat:@"📁 مسار النسخ: %@", path]];
+        } else if (indexPath.row == 2) {
+            [self showToast:@"ℹ️ انسخ ملفات .backup إلى المجلد الموضح في Export"];
         }
     } else if (indexPath.section == 2) {
-        NSString *info = @"AppData Manager v1.2.2\n\n"
-                         @"Professional app data management tool\n"
-                         @"for jailbroken iOS devices.\n\n"
-                         @"• Dopamine 3.0 Compatible\n"
-                         @"• Rootless Jailbreak Support\n"
-                         @"• iOS 15 - iOS 26 Support\n\n"
-                         @"Developer: @Zainqkvd";
+        NSString *info = @"AppData Manager v1.3.0\n\n"
+            @"أداة احترافية لإدارة بيانات التطبيقات\n"
+            @"لأجهزة iOS Jailbreak.\n\n"
+            @"• متوافق مع Dopamine 3.0\n"
+            @"• دعم Rootless Jailbreak\n"
+            @"• دعم iOS 15 - iOS 26\n"
+            @"• نسخ احتياطي شامل (Group Containers)\n\n"
+            @"المطور: @Zainqkvd";
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"About"
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة"
                                                                        message:info
                                                                 preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"موافق" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
     }
 }
@@ -147,9 +163,9 @@
     toast.numberOfLines = 0;
 
     CGSize size = [message boundingRectWithSize:CGSizeMake(self.view.bounds.size.width - 60, CGFLOAT_MAX)
-                                        options:NSStringDrawingUsesLineFragmentOrigin
-                                     attributes:@{NSFontAttributeName: toast.font}
-                                        context:nil].size;
+                                          options:NSStringDrawingUsesLineFragmentOrigin
+                                       attributes:@{NSFontAttributeName: toast.font}
+                                          context:nil].size;
     toast.frame = CGRectMake(0, 0, size.width + 32, size.height + 24);
     toast.center = CGPointMake(self.view.center.x, self.view.bounds.size.height - 120);
 
