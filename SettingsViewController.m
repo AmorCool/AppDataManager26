@@ -61,7 +61,7 @@
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"Version";
-        cell.detailTextLabel.text = @"1.2.0";
+        cell.detailTextLabel.text = @"1.2.2";
         cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.42 green:0.31 blue:0.90 alpha:1.0]];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"Clear All Backups", @"Export Backups", @"Import Backups"];
@@ -76,7 +76,7 @@
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
         cell.textLabel.text = @"About";
-        cell.detailTextLabel.text = @"@aosaid3224";
+        cell.detailTextLabel.text = @"@Zainqkvd";
         cell.imageView.image = [[UIImage systemImageNamed:@"person.fill"] imageWithTintColor:[UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0]];
     }
 
@@ -119,13 +119,13 @@
             [self showToast:@"ℹ️ Feature coming in next update"];
         }
     } else if (indexPath.section == 2) {
-        NSString *info = @"AppData Manager v1.2.0\n\n"
+        NSString *info = @"AppData Manager v1.2.2\n\n"
                          @"Professional app data management tool\n"
                          @"for jailbroken iOS devices.\n\n"
                          @"• Dopamine 3.0 Compatible\n"
                          @"• Rootless Jailbreak Support\n"
                          @"• iOS 15 - iOS 26 Support\n\n"
-                         @"Developer: @aosaid3224";
+                         @"Developer: @Zainqkvd";
 
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"About"
                                                                        message:info
