@@ -3,6 +3,12 @@
 #import <dlfcn.h>
 #import "rootless.h"
 
+@interface AppDataManager ()
+@property (nonatomic, strong) NSCache *sizeCache;
+@property (nonatomic, strong) NSCache *iconCache;
+@property (nonatomic, strong) NSArray *cachedApps;
+@end
+
 @implementation AppDataManager
 
 + (instancetype)sharedManager {
@@ -14,7 +20,25 @@
     return shared;
 }
 
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _sizeCache = [[NSCache alloc] init];
+        _sizeCache.countLimit = 500;
+        _iconCache = [[NSCache alloc] init];
+        _iconCache.countLimit = 200;
+    }
+    return self;
+}
+
+#pragma mark - Fast App Listing (NO size calculation)
+
 - (NSArray *)allInstalledApplications {
+    // Return cached if available
+    if (self.cachedApps) {
+        return self.cachedApps;
+    }
+
     Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
     if (!LSApplicationWorkspace_class) {
         NSLog(@"[AppDataManager] ❌ LSApplicationWorkspace not available");
@@ -60,28 +84,64 @@
                 appType = [app performSelector:@selector(applicationType)] ?: @"User";
             }
 
-            unsigned long long size = [self dataSizeForBundleID:bundleID];
-            NSString *sizeStr = [self formatBytes:size];
+            // FAST: Do NOT calculate size here - use cached or placeholder
+            NSString *sizeStr = @"Calculating...";
+            NSNumber *cachedSize = [self.sizeCache objectForKey:bundleID];
+            if (cachedSize) {
+                sizeStr = [self formatBytes:[cachedSize unsignedLongLongValue]];
+            }
 
             [appList addObject:@{
                 @"name": name,
                 @"bundleID": bundleID,
                 @"type": appType,
-                @"size": @(size),
+                @"size": cachedSize ?: @(0),
                 @"sizeString": sizeStr,
                 @"hasBackup": @([self availableBackupsForBundleID:bundleID].count > 0),
                 @"isSystemApp": @([self isSystemApp:bundleID])
             }];
         } @catch (NSException *e) {
-            NSLog(@"[AppDataManager] ⚠️ Exception processing app: %@", e);
             continue;
         }
     }
 
-    return [appList sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+    NSArray *sorted = [appList sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"name"] compare:b[@"name"]];
     }];
+
+    self.cachedApps = sorted;
+    return sorted;
 }
+
+#pragma mark - Background Size Calculation
+
+- (void)calculateSizesForApps:(NSArray *)apps completion:(void (^)(void))completion {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        for (NSMutableDictionary *app in apps) {
+            NSString *bundleID = app[@"bundleID"];
+            unsigned long long size = [self dataSizeForBundleID:bundleID];
+            [self.sizeCache setObject:@(size) forKey:bundleID];
+            app[@"size"] = @(size);
+            app[@"sizeString"] = [self formatBytes:size];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion();
+        });
+    });
+}
+
+- (void)calculateSizeForBundleID:(NSString *)bundleID completion:(void (^)(unsigned long long size, NSString *sizeString))completion {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        unsigned long long size = [self dataSizeForBundleID:bundleID];
+        [self.sizeCache setObject:@(size) forKey:bundleID];
+        NSString *sizeStr = [self formatBytes:size];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(size, sizeStr);
+        });
+    });
+}
+
+#pragma mark - Core Methods
 
 - (BOOL)isSystemApp:(NSString *)bundleID {
     if (!bundleID) return NO;
@@ -163,6 +223,7 @@
 }
 
 - (NSString *)formatBytes:(unsigned long long)bytes {
+    if (bytes == 0) return @"0 B";
     NSArray *units = @[@"B", @"KB", @"MB", @"GB"];
     double size = (double)bytes;
     int unitIndex = 0;
@@ -244,6 +305,9 @@
             allSuccess = NO;
         }
     }
+
+    // Clear size cache after wipe
+    [self.sizeCache removeObjectForKey:bundleID];
 
     NSLog(@"[AppDataManager] %@ Wiped data for: %@", allSuccess ? @"✅" : @"⚠️", bundleID);
     return allSuccess;
@@ -380,17 +444,26 @@
     return success;
 }
 
-#pragma mark - NEW UI Support Methods
+#pragma mark - UI Support Methods (Cached & Async)
 
 - (UIImage *)iconForBundleID:(NSString *)bundleID {
     if (!bundleID) return nil;
+
+    // Check cache first
+    UIImage *cached = [self.iconCache objectForKey:bundleID];
+    if (cached) return cached;
+
     Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
     if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
         id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
         if (proxy && [proxy respondsToSelector:@selector(iconDataForVariant:)]) {
             NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:@(2)];
             if (iconData) {
-                return [UIImage imageWithData:iconData];
+                UIImage *icon = [UIImage imageWithData:iconData];
+                if (icon) {
+                    [self.iconCache setObject:icon forKey:bundleID];
+                    return icon;
+                }
             }
         }
     }
@@ -446,12 +519,19 @@
 }
 
 - (unsigned long long)totalAppsDataSize {
-    NSArray *apps = [self allInstalledApplications];
+    // Use cached apps if available
+    NSArray *apps = self.cachedApps ?: [self allInstalledApplications];
     unsigned long long total = 0;
     for (NSDictionary *app in apps) {
         total += [app[@"size"] unsignedLongLongValue];
     }
     return total;
+}
+
+- (void)clearCache {
+    self.cachedApps = nil;
+    [self.sizeCache removeAllObjects];
+    [self.iconCache removeAllObjects];
 }
 
 @end
