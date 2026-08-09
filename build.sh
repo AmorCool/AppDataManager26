@@ -9,15 +9,15 @@
 set -e
 
 echo "=========================================="
-echo "  📱 AppData Manager Build Script"
-echo "  Dopamine 3.0 / Rootless Compatible"
+echo " 📱 AppData Manager Build Script"
+echo " Dopamine 3.0 / Rootless Compatible"
 echo "=========================================="
 echo ""
 
 # التحقق من Theos
 if [ -z "$THEOS" ]; then
     echo "❌ ERROR: THEOS environment variable not set!"
-    echo "   Please install Theos: https://theos.dev/docs/installation"
+    echo " Please install Theos: https://theos.dev/docs/installation"
     exit 1
 fi
 
@@ -29,8 +29,8 @@ make clean
 # بناء للـ Rootless (Dopamine 3.0)
 echo ""
 echo "🔨 Building for Rootless Jailbreak..."
-echo "   Architecture: iphoneos-arm64"
-echo "   Target: iOS 15.0+"
+echo " Architecture: iphoneos-arm64"
+echo " Target: iOS 15.0+"
 echo ""
 
 make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
@@ -69,9 +69,9 @@ if [ -f "$DEB_FILE" ]; then
         echo "✅ Copied to repo!"
         echo ""
         echo "📝 Next steps for repo:"
-        echo "   1. cd ../repo"
-        echo "   2. ./update_repo.sh"
-        echo "   3. git add . && git commit -m 'Update package' && git push"
+        echo " 1. cd ../repo"
+        echo " 2. ./update_repo.sh"
+        echo " 3. git add . && git commit -m 'Update package' && git push"
     fi
 else
     echo "❌ Build failed!"
@@ -80,5 +80,5 @@ fi
 
 echo ""
 echo "=========================================="
-echo "  🎉 Done!"
+echo " 🎉 Done!"
 echo "=========================================="
