@@ -8,14 +8,14 @@
 set -e
 
 echo "=========================================="
-echo "  📱 AppData Manager - Direct Install"
-echo "  Dopamine 3.0 / Rootless"
+echo " 📱 AppData Manager - Direct Install"
+echo " Dopamine 3.0 / Rootless"
 echo "=========================================="
 
 # التحقق من صلاحيات Root
 if [ $(id -u) -ne 0 ]; then
     echo "❌ This script must be run as root!"
-    echo "   Run: sudo ./install.sh"
+    echo " Run: sudo ./install.sh"
     exit 1
 fi
 
@@ -24,7 +24,7 @@ DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
 
 if [ -z "$DEB_FILE" ]; then
     echo "❌ No .deb file found in packages/ directory!"
-    echo "   Please build first with: ./build.sh"
+    echo " Please build first with: ./build.sh"
     exit 1
 fi
 
@@ -45,7 +45,7 @@ uicache -p /var/jb/Applications/AppDataManager.app 2>/dev/null || uicache -p /Ap
 
 echo ""
 echo "=========================================="
-echo "  ✅ Installation Complete!"
+echo " ✅ Installation Complete!"
 echo "=========================================="
 echo "📲 Open 'AppData Manager' from home screen"
 echo ""
