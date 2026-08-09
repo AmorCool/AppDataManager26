@@ -1,3 +1,4 @@
+#import <notify.h>
 #import "AppDataManager.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
@@ -8,6 +9,138 @@
 @property (nonatomic, strong) NSCache *sizeCache;
 @property (nonatomic, strong) NSCache *iconCache;
 @property (nonatomic, strong) NSArray *cachedApps;
+- (BOOL)killApp:(NSString *)bundleID {
+    if (!bundleID) return NO;
+
+    NSLog(@"[AppDataManager] 💀 Killing app: %@", bundleID);
+
+    // Method 1: FrontBoardServices (iOS 13+)
+    @try {
+        void *fbHandle = dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY);
+        if (fbHandle) {
+            Class FBSSystemService_class = NSClassFromString(@"FBSSystemService");
+            if (FBSSystemService_class && [FBSSystemService_class respondsToSelector:@selector(sharedService)]) {
+                id service = [FBSSystemService_class performSelector:@selector(sharedService)];
+                if (service && [service respondsToSelector:@selector(terminateApplication:forReason:andReport:completion:)]) {
+                    [service performSelector:@selector(terminateApplication:forReason:andReport:completion:)
+                                  withObject:bundleID
+                                  withObject:@(1)
+                                  withObject:@(NO)
+                                  withObject:nil];
+                    NSLog(@"[AppDataManager] ✅ Killed via FrontBoardServices");
+                    return YES;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // Method 2: LSApplicationWorkspace closeApplication
+    @try {
+        Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
+        if (LSApplicationWorkspace_class && [LSApplicationWorkspace_class respondsToSelector:@selector(defaultWorkspace)]) {
+            id workspace = [LSApplicationWorkspace_class performSelector:@selector(defaultWorkspace)];
+            if (workspace && [workspace respondsToSelector:@selector(closeApplicationWithBundleID:)]) {
+                [workspace performSelector:@selector(closeApplicationWithBundleID:) withObject:bundleID];
+                NSLog(@"[AppDataManager] ✅ Killed via LSApplicationWorkspace");
+                return YES;
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // Method 3: killall by process name (fallback)
+    @try {
+        Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+        if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+            id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+            NSString *execName = nil;
+            if (proxy && [proxy respondsToSelector:@selector(execPath)]) {
+                NSString *execPath = [proxy performSelector:@selector(execPath)];
+                execName = [execPath lastPathComponent];
+            }
+            if (!execName) {
+                execName = [bundleID lastPathComponent];
+            }
+            if (execName) {
+                const char *nameC = [execName UTF8String];
+                if (nameC) {
+                    char cmd[512];
+                    snprintf(cmd, sizeof(cmd), "killall -9 "%s" 2>/dev/null", nameC);
+                    system(cmd);
+                    NSLog(@"[AppDataManager] ✅ Killed via killall: %@", execName);
+                    return YES;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    NSLog(@"[AppDataManager] ⚠️ Could not kill app: %@", bundleID);
+    return NO;
+}
+
+- (void)clearAppCaches:(NSString *)bundleID {
+    if (!bundleID) return;
+
+    // Clear URL cache and other system caches for this app
+    @try {
+        // Post notification to clear caches
+        notify_post([[NSString stringWithFormat:@"com.apple.%@.cachecleared", bundleID] UTF8String]);
+    } @catch (NSException *e) {}
+
+    // Clear common cache directories within the app container
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *paths = [self allDataPathsForBundleID:bundleID];
+    for (NSString *path in paths) {
+        NSString *cachesPath = [path stringByAppendingPathComponent:@"Library/Caches"];
+        if ([fm fileExistsAtPath:cachesPath]) {
+            NSArray *cacheContents = [fm contentsOfDirectoryAtPath:cachesPath error:nil];
+            for (NSString *item in cacheContents) {
+                NSString *fullPath = [cachesPath stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:nil];
+            }
+        }
+        NSString *tmpPath = [path stringByAppendingPathComponent:@"tmp"];
+        if ([fm fileExistsAtPath:tmpPath]) {
+            NSArray *tmpContents = [fm contentsOfDirectoryAtPath:tmpPath error:nil];
+            for (NSString *item in tmpContents) {
+                NSString *fullPath = [tmpPath stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:nil];
+            }
+        }
+    }
+}
+
+- (void)setFullPermissions:(NSString *)path {
+    if (!path) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    // Set owner and group
+    [fm setAttributes:@{
+        NSFileOwnerAccountName: @"mobile",
+        NSFileGroupOwnerAccountName: @"mobile"
+    } ofItemAtPath:path error:nil];
+
+    // Set permissions recursively using system chmod
+    const char *pathC = [path UTF8String];
+    if (pathC) {
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "chmod -R 755 "%s" 2>/dev/null", pathC);
+        system(cmd);
+        // Also try chown
+        snprintf(cmd, sizeof(cmd), "chown -R mobile:mobile "%s" 2>/dev/null", pathC);
+        system(cmd);
+    }
+
+    // For directories, ensure they're readable/writable
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:path isDirectory:&isDir] && isDir) {
+        NSArray *contents = [fm contentsOfDirectoryAtPath:path error:nil];
+        for (NSString *item in contents) {
+            NSString *fullPath = [path stringByAppendingPathComponent:item];
+            [self setFullPermissions:fullPath];
+        }
+    }
+}
+
 @end
 
 @implementation AppDataManager
@@ -146,6 +279,38 @@
     NSMutableArray *paths = [NSMutableArray array];
     NSFileManager *fm = [NSFileManager defaultManager];
 
+    // Method 1: Check app entitlements for group identifiers
+    @try {
+        Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+        if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+            id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+            if (proxy && [proxy respondsToSelector:@selector(groupContainerURLs)]) {
+                NSDictionary *groupURLs = [proxy performSelector:@selector(groupContainerURLs)];
+                for (NSString *groupID in groupURLs) {
+                    NSURL *url = groupURLs[groupID];
+                    NSString *path = [url path];
+                    if (path && [fm fileExistsAtPath:path]) {
+                        [paths addObject:path];
+                    }
+                }
+            }
+            // Also check entitlements directly
+            if (proxy && [proxy respondsToSelector:@selector(entitlements)]) {
+                NSDictionary *entitlements = [proxy performSelector:@selector(entitlements)];
+                NSArray *groupIDs = entitlements[@"com.apple.security.application-groups"];
+                if (groupIDs) {
+                    for (NSString *groupID in groupIDs) {
+                        NSString *groupPath = [self pathForGroupIdentifier:groupID];
+                        if (groupPath && ![paths containsObject:groupPath]) {
+                            [paths addObject:groupPath];
+                        }
+                    }
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // Method 2: Manual search in AppGroup with substring match
     NSString *groupRoot = @"/var/mobile/Containers/Shared/AppGroup";
     if ([fm fileExistsAtPath:groupRoot]) {
         NSArray *folders = [fm contentsOfDirectoryAtPath:groupRoot error:nil];
@@ -155,13 +320,22 @@
             if ([fm fileExistsAtPath:plistPath]) {
                 NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
                 NSString *identifier = plist[@"MCMMetadataIdentifier"];
-                if (identifier && [identifier rangeOfString:bundleID options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                    [paths addObject:[groupRoot stringByAppendingPathComponent:folder]];
+                // Match by substring OR exact match
+                if (identifier && (
+                    [identifier isEqualToString:bundleID] ||
+                    [identifier rangeOfString:bundleID options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                    [bundleID rangeOfString:identifier options:NSCaseInsensitiveSearch].location != NSNotFound
+                )) {
+                    NSString *fullPath = [groupRoot stringByAppendingPathComponent:folder];
+                    if (![paths containsObject:fullPath]) {
+                        [paths addObject:fullPath];
+                    }
                 }
             }
         }
     }
 
+    // Method 3: PluginKitPlugin containers
     NSString *pluginRoot = @"/var/mobile/Containers/Data/PluginKitPlugin";
     if ([fm fileExistsAtPath:pluginRoot]) {
         NSArray *folders = [fm contentsOfDirectoryAtPath:pluginRoot error:nil];
@@ -170,14 +344,41 @@
                 [folder stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]];
             if ([fm fileExistsAtPath:plistPath]) {
                 NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-                if ([plist[@"MCMMetadataIdentifier"] isEqualToString:bundleID]) {
-                    [paths addObject:[pluginRoot stringByAppendingPathComponent:folder]];
+                NSString *identifier = plist[@"MCMMetadataIdentifier"];
+                if (identifier && (
+                    [identifier isEqualToString:bundleID] ||
+                    [identifier rangeOfString:bundleID options:NSCaseInsensitiveSearch].location != NSNotFound
+                )) {
+                    NSString *fullPath = [pluginRoot stringByAppendingPathComponent:folder];
+                    if (![paths containsObject:fullPath]) {
+                        [paths addObject:fullPath];
+                    }
                 }
             }
         }
     }
 
     return paths;
+}
+
+- (NSString *)pathForGroupIdentifier:(NSString *)groupID {
+    if (!groupID) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *groupRoot = @"/var/mobile/Containers/Shared/AppGroup";
+    if (![fm fileExistsAtPath:groupRoot]) return nil;
+
+    NSArray *folders = [fm contentsOfDirectoryAtPath:groupRoot error:nil];
+    for (NSString *folder in folders) {
+        NSString *plistPath = [groupRoot stringByAppendingPathComponent:
+            [folder stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]];
+        if ([fm fileExistsAtPath:plistPath]) {
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+            if ([plist[@"MCMMetadataIdentifier"] isEqualToString:groupID]) {
+                return [groupRoot stringByAppendingPathComponent:folder];
+            }
+        }
+    }
+    return nil;
 }
 
 - (NSArray *)allDataPathsForBundleID:(NSString *)bundleID {
@@ -312,6 +513,11 @@
         return NO;
     }
 
+    // CRITICAL: Kill app first so it releases file locks and memory caches
+    [self killApp:bundleID];
+    // Give system time to fully terminate
+    [NSThread sleepForTimeInterval:0.5];
+
     NSArray *allPaths = [self allDataPathsForBundleID:bundleID];
     if (allPaths.count == 0) return NO;
 
@@ -327,20 +533,35 @@
         }
 
         for (NSString *item in contents) {
-            if ([item hasPrefix:@"."]) continue;
+            // Skip ONLY the container metadata plist - delete everything else including hidden files
             if ([item isEqualToString:@".com.apple.mobile_container_manager.metadata.plist"]) continue;
 
             NSString *fullPath = [dataPath stringByAppendingPathComponent:item];
             NSError *err = nil;
+
+            // First try to change permissions to ensure we can delete
+            [fm setAttributes:@{NSFilePosixPermissions: @0777} ofItemAtPath:fullPath error:nil];
+
             BOOL success = [fm removeItemAtPath:fullPath error:&err];
             if (!success) {
                 NSLog(@"[AppDataManager] ⚠️ Failed to remove %@: %@", item, err);
-                [fm setAttributes:@{NSFilePosixPermissions: @0777} ofItemAtPath:fullPath error:nil];
-                success = [fm removeItemAtPath:fullPath error:&err];
-                if (!success) overallSuccess = NO;
+                // Try with system() as last resort for stubborn files
+                const char *pathC = [fullPath UTF8String];
+                if (pathC) {
+                    char cmd[2048];
+                    snprintf(cmd, sizeof(cmd), "rm -rf "%s"", pathC);
+                    system(cmd);
+                }
+                // Verify deletion
+                if ([fm fileExistsAtPath:fullPath]) {
+                    overallSuccess = NO;
+                }
             }
         }
     }
+
+    // Clear app from memory caches
+    [self clearAppCaches:bundleID];
 
     [self.sizeCache removeObjectForKey:bundleID];
     [self clearCache];
@@ -401,12 +622,19 @@
         return NO;
     }
 
+    // CRITICAL: Kill app first
+    [self killApp:bundleID];
+    [NSThread sleepForTimeInterval:0.5];
+
     NSString *manifestPath = [backupPath stringByAppendingPathComponent:@"_manifest.plist"];
     NSDictionary *manifest = [NSDictionary dictionaryWithContentsOfFile:manifestPath];
     NSArray *manifestPaths = manifest[@"paths"];
 
     NSLog(@"[AppDataManager] 🧹 Wiping existing data for %@...", bundleID);
     [self wipeAppData:bundleID];
+
+    // Extra sleep after wipe to ensure filesystem sync
+    [NSThread sleepForTimeInterval:0.3];
 
     BOOL allSuccess = YES;
 
@@ -434,13 +662,31 @@
                     NSError *err = nil;
                     BOOL copied = [fm copyItemAtPath:itemSrc toPath:itemDst error:&err];
                     if (copied) {
-                        [fm setAttributes:@{NSFileOwnerAccountName: @"mobile", NSFileGroupOwnerAccountName: @"mobile"} ofItemAtPath:itemDst error:nil];
+                        // Set comprehensive permissions
+                        [self setFullPermissions:itemDst];
                     } else {
                         NSLog(@"[AppDataManager] ⚠️ Failed to restore %@: %@", item, err);
-                        allSuccess = NO;
+                        // Try system cp as fallback
+                        const char *srcC = [itemSrc UTF8String];
+                        const char *dstC = [itemDst UTF8String];
+                        if (srcC && dstC) {
+                            char cmd[4096];
+                            snprintf(cmd, sizeof(cmd), "cp -R "%s" "%s" 2>/dev/null || cp -rf "%s" "%s"", srcC, dstC, srcC, dstC);
+                            int result = system(cmd);
+                            if (result == 0) {
+                                [self setFullPermissions:itemDst];
+                            } else {
+                                allSuccess = NO;
+                            }
+                        } else {
+                            allSuccess = NO;
+                        }
                     }
                 }
             }
+
+            // Set permissions on the destination directory itself
+            [self setFullPermissions:dstPath];
         }
     } else {
         NSString *dataPath = [self dataPathForBundleID:bundleID];
@@ -455,6 +701,7 @@
 
         NSArray *contents = [fm contentsOfDirectoryAtPath:backupPath error:nil];
         for (NSString *item in contents) {
+            if ([item isEqualToString:@"_manifest.plist"]) continue;
             NSString *srcPath = [backupPath stringByAppendingPathComponent:item];
             NSString *dstPath = [dataPath stringByAppendingPathComponent:item];
 
@@ -463,12 +710,34 @@
             NSError *err = nil;
             BOOL copied = [fm copyItemAtPath:srcPath toPath:dstPath error:&err];
             if (copied) {
-                [fm setAttributes:@{NSFileOwnerAccountName: @"mobile", NSFileGroupOwnerAccountName: @"mobile"} ofItemAtPath:dstPath error:nil];
+                [self setFullPermissions:dstPath];
             } else {
-                allSuccess = NO;
+                const char *srcC = [srcPath UTF8String];
+                const char *dstC = [dstPath UTF8String];
+                if (srcC && dstC) {
+                    char cmd[4096];
+                    snprintf(cmd, sizeof(cmd), "cp -R "%s" "%s" 2>/dev/null || cp -rf "%s" "%s"", srcC, dstC, srcC, dstC);
+                    int result = system(cmd);
+                    if (result == 0) {
+                        [self setFullPermissions:dstPath];
+                    } else {
+                        allSuccess = NO;
+                    }
+                } else {
+                    allSuccess = NO;
+                }
             }
         }
+        [self setFullPermissions:dataPath];
     }
+
+    // CRITICAL: Kill app again after restore to force it to reload from disk
+    [NSThread sleepForTimeInterval:0.3];
+    [self killApp:bundleID];
+    [self clearAppCaches:bundleID];
+
+    // Sync filesystem
+    system("sync");
 
     NSLog(@"[AppDataManager] %@ Restored data for %@", allSuccess ? @"✅" : @"⚠️", bundleID);
     return allSuccess;
@@ -695,6 +964,138 @@
     self.cachedApps = nil;
     [self.sizeCache removeAllObjects];
     [self.iconCache removeAllObjects];
+}
+
+- (BOOL)killApp:(NSString *)bundleID {
+    if (!bundleID) return NO;
+
+    NSLog(@"[AppDataManager] 💀 Killing app: %@", bundleID);
+
+    // Method 1: FrontBoardServices (iOS 13+)
+    @try {
+        void *fbHandle = dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY);
+        if (fbHandle) {
+            Class FBSSystemService_class = NSClassFromString(@"FBSSystemService");
+            if (FBSSystemService_class && [FBSSystemService_class respondsToSelector:@selector(sharedService)]) {
+                id service = [FBSSystemService_class performSelector:@selector(sharedService)];
+                if (service && [service respondsToSelector:@selector(terminateApplication:forReason:andReport:completion:)]) {
+                    [service performSelector:@selector(terminateApplication:forReason:andReport:completion:)
+                                  withObject:bundleID
+                                  withObject:@(1)
+                                  withObject:@(NO)
+                                  withObject:nil];
+                    NSLog(@"[AppDataManager] ✅ Killed via FrontBoardServices");
+                    return YES;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // Method 2: LSApplicationWorkspace closeApplication
+    @try {
+        Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
+        if (LSApplicationWorkspace_class && [LSApplicationWorkspace_class respondsToSelector:@selector(defaultWorkspace)]) {
+            id workspace = [LSApplicationWorkspace_class performSelector:@selector(defaultWorkspace)];
+            if (workspace && [workspace respondsToSelector:@selector(closeApplicationWithBundleID:)]) {
+                [workspace performSelector:@selector(closeApplicationWithBundleID:) withObject:bundleID];
+                NSLog(@"[AppDataManager] ✅ Killed via LSApplicationWorkspace");
+                return YES;
+            }
+        }
+    } @catch (NSException *e) {}
+
+    // Method 3: killall by process name (fallback)
+    @try {
+        Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+        if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+            id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+            NSString *execName = nil;
+            if (proxy && [proxy respondsToSelector:@selector(execPath)]) {
+                NSString *execPath = [proxy performSelector:@selector(execPath)];
+                execName = [execPath lastPathComponent];
+            }
+            if (!execName) {
+                execName = [bundleID lastPathComponent];
+            }
+            if (execName) {
+                const char *nameC = [execName UTF8String];
+                if (nameC) {
+                    char cmd[512];
+                    snprintf(cmd, sizeof(cmd), "killall -9 "%s" 2>/dev/null", nameC);
+                    system(cmd);
+                    NSLog(@"[AppDataManager] ✅ Killed via killall: %@", execName);
+                    return YES;
+                }
+            }
+        }
+    } @catch (NSException *e) {}
+
+    NSLog(@"[AppDataManager] ⚠️ Could not kill app: %@", bundleID);
+    return NO;
+}
+
+- (void)clearAppCaches:(NSString *)bundleID {
+    if (!bundleID) return;
+
+    // Clear URL cache and other system caches for this app
+    @try {
+        // Post notification to clear caches
+        notify_post([[NSString stringWithFormat:@"com.apple.%@.cachecleared", bundleID] UTF8String]);
+    } @catch (NSException *e) {}
+
+    // Clear common cache directories within the app container
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *paths = [self allDataPathsForBundleID:bundleID];
+    for (NSString *path in paths) {
+        NSString *cachesPath = [path stringByAppendingPathComponent:@"Library/Caches"];
+        if ([fm fileExistsAtPath:cachesPath]) {
+            NSArray *cacheContents = [fm contentsOfDirectoryAtPath:cachesPath error:nil];
+            for (NSString *item in cacheContents) {
+                NSString *fullPath = [cachesPath stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:nil];
+            }
+        }
+        NSString *tmpPath = [path stringByAppendingPathComponent:@"tmp"];
+        if ([fm fileExistsAtPath:tmpPath]) {
+            NSArray *tmpContents = [fm contentsOfDirectoryAtPath:tmpPath error:nil];
+            for (NSString *item in tmpContents) {
+                NSString *fullPath = [tmpPath stringByAppendingPathComponent:item];
+                [fm removeItemAtPath:fullPath error:nil];
+            }
+        }
+    }
+}
+
+- (void)setFullPermissions:(NSString *)path {
+    if (!path) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    // Set owner and group
+    [fm setAttributes:@{
+        NSFileOwnerAccountName: @"mobile",
+        NSFileGroupOwnerAccountName: @"mobile"
+    } ofItemAtPath:path error:nil];
+
+    // Set permissions recursively using system chmod
+    const char *pathC = [path UTF8String];
+    if (pathC) {
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "chmod -R 755 "%s" 2>/dev/null", pathC);
+        system(cmd);
+        // Also try chown
+        snprintf(cmd, sizeof(cmd), "chown -R mobile:mobile "%s" 2>/dev/null", pathC);
+        system(cmd);
+    }
+
+    // For directories, ensure they're readable/writable
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:path isDirectory:&isDir] && isDir) {
+        NSArray *contents = [fm contentsOfDirectoryAtPath:path error:nil];
+        for (NSString *item in contents) {
+            NSString *fullPath = [path stringByAppendingPathComponent:item];
+            [self setFullPermissions:fullPath];
+        }
+    }
 }
 
 @end
