@@ -1,3 +1,9 @@
+#import "AppDataManager.h"
+#import <objc/runtime.h>
+#import <dlfcn.h>
+#import <sys/statvfs.h>
+#import "rootless.h"
+
 @implementation AppDataManager
 
 + (instancetype)sharedManager {
