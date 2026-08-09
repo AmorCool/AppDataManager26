@@ -295,6 +295,7 @@
 @property (nonatomic, strong) UILabel *backupTitle;
 @property (nonatomic, strong) UILabel *backupStatus;
 @property (nonatomic, strong) UIButton *backupBtn;
+@property (nonatomic, strong) UIButton *restoreBtn;
 
 // Actions Card
 @property (nonatomic, strong) UIView *actionCard;
@@ -512,9 +513,20 @@
     self.backupBtn.backgroundColor = [UIColor colorWithRed:0.769 green:0.655 blue:0.490 alpha:0.12];
     self.backupBtn.layer.cornerRadius = 10;
     self.backupBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.backupBtn setTitle:@"نسخ جديد" forState:UIControlStateNormal];
     [self.backupBtn setTitleColor:C_ACCENT forState:UIControlStateNormal];
     [self.backupBtn addTarget:self action:@selector(backupTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.backupCard addSubview:self.backupBtn];
+
+    self.restoreBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.restoreBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    self.restoreBtn.backgroundColor = [UIColor colorWithRed:0.3 green:0.6 blue:0.9 alpha:0.12];
+    self.restoreBtn.layer.cornerRadius = 10;
+    self.restoreBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.restoreBtn setTitle:@"استعادة" forState:UIControlStateNormal];
+    [self.restoreBtn setTitleColor:[UIColor colorWithRed:0.3 green:0.6 blue:0.9 alpha:1.0] forState:UIControlStateNormal];
+    [self.restoreBtn addTarget:self action:@selector(restoreDetailTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.backupCard addSubview:self.restoreBtn];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.backupCard.topAnchor constraintEqualToAnchor:self.dataCard.bottomAnchor constant:12],
@@ -531,7 +543,12 @@
         [self.backupBtn.leadingAnchor constraintEqualToAnchor:self.backupTitle.leadingAnchor],
         [self.backupBtn.widthAnchor constraintEqualToConstant:110],
         [self.backupBtn.heightAnchor constraintEqualToConstant:36],
-        [self.backupBtn.bottomAnchor constraintEqualToAnchor:self.backupCard.bottomAnchor constant:-16]
+
+        [self.restoreBtn.topAnchor constraintEqualToAnchor:self.backupBtn.topAnchor],
+        [self.restoreBtn.leadingAnchor constraintEqualToAnchor:self.backupBtn.trailingAnchor constant:10],
+        [self.restoreBtn.widthAnchor constraintEqualToConstant:110],
+        [self.restoreBtn.heightAnchor constraintEqualToConstant:36],
+        [self.restoreBtn.bottomAnchor constraintEqualToAnchor:self.backupCard.bottomAnchor constant:-16]
     ]];
 }
 
@@ -775,38 +792,87 @@
 
 - (void)backupTapped {
     NSString *bid = self.appInfo[@"bundleID"];
-    NSDate *lb = [self.manager lastBackupDateForBundleID:bid];
 
-    if (lb) {
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"استعادة النسخة الاحتياطية"
-                                                                   message:@"سيتم استبدال بيانات التطبيق الحالية بالنسخة الاحتياطية."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-        [a addAction:[UIAlertAction actionWithTitle:@"استعادة" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-            NSArray *b = [self.manager availableBackupsForBundleID:bid];
-            if (b.count > 0) {
-                BOOL ok = [self.manager restoreAppData:bid fromBackup:b[0][@"path"]];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"نسخ %@ احتياطياً", self.appInfo[@"name"]]
+                                                               message:@"سيتم إنشاء نسخة احتياطية كاملة من بيانات التطبيق (بما فيها Group Containers)."
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"نسخ" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [self showSpinner:@"جاري النسخ..."];
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            BOOL ok = [self.manager backupAppData:bid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self hideSpinner];
+                [self toast:ok ? @"تم إنشاء النسخة ✅" : @"فشل إنشاء النسخة ❌"];
+                [self loadData];
+            });
+        });
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)restoreDetailTapped {
+    NSString *bid = self.appInfo[@"bundleID"];
+    NSArray *backups = [self.manager availableBackupsForBundleID:bid];
+
+    if (backups.count == 0) {
+        [self toast:@"لا توجد نسخ احتياطية ❌"];
+        return;
+    }
+
+    NSString *latestBackupPath = backups[0][@"path"];
+    NSString *backupDateStr = [self formatDate:backups[0][@"date"]];
+
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"استعادة النسخة الاحتياطية"
+                                                               message:[NSString stringWithFormat:@"سيتم استبدال بيانات التطبيق الحالية بالنسخة الاحتياطية (%@).", backupDateStr]
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"استعادة" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [self showSpinner:@"جاري الاستعادة..."];
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            BOOL ok = [self.manager restoreAppData:bid fromBackup:latestBackupPath];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self hideSpinner];
                 [self toast:ok ? @"تمت الاستعادة ✅" : @"فشلت الاستعادة ❌"];
                 if (ok) [self loadData];
-            }
-        }]];
-        [self presentViewController:a animated:YES completion:nil];
-    } else {
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"نسخ %@ احتياطياً", self.appInfo[@"name"]]
-                                                                   message:@"سيتم إنشاء نسخة احتياطية كاملة من بيانات التطبيق."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-        [a addAction:[UIAlertAction actionWithTitle:@"نسخ" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                BOOL ok = [self.manager backupAppData:bid];
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self toast:ok ? @"تم إنشاء النسخة ✅" : @"فشل إنشاء النسخة ❌"];
-                    if (ok) [self loadData];
-                });
             });
-        }]];
-        [self presentViewController:a animated:YES completion:nil];
-    }
+        });
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (NSString *)formatDate:(NSDate *)date {
+    if (!date) return @"Unknown";
+    NSDateFormatter *f = [[NSDateFormatter alloc] init];
+    [f setDateFormat:@"yyyy-MM-dd HH:mm"];
+    return [f stringFromDate:date];
+}
+
+- (void)showSpinner:(NSString *)message {
+    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    spinner.tag = 999;
+    spinner.center = self.view.center;
+    spinner.color = C_ACCENT;
+    [self.view addSubview:spinner];
+    [spinner startAnimating];
+
+    UILabel *label = [[UILabel alloc] init];
+    label.tag = 998;
+    label.text = message;
+    label.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    label.textColor = C_TEXT_PRI;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.frame = CGRectMake(0, 0, 200, 30);
+    label.center = CGPointMake(self.view.center.x, self.view.center.y + 40);
+    [self.view addSubview:label];
+}
+
+- (void)hideSpinner {
+    UIActivityIndicatorView *spinner = [self.view viewWithTag:999];
+    [spinner stopAnimating];
+    [spinner removeFromSuperview];
+    UILabel *label = [self.view viewWithTag:998];
+    [label removeFromSuperview];
 }
 
 - (void)wipeTapped {
