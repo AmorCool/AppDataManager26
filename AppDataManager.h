@@ -1,11 +1,11 @@
-#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 @interface AppDataManager : NSObject
 
 + (instancetype)sharedManager;
 
 // جلب كل التطبيقات المثبتة
-- (NSArray<NSDictionary *> *)allInstalledApplications;
+- (NSArray *)allInstalledApplications;
 
 // مسار بيانات التطبيق (Sandbox)
 - (NSString *)dataPathForBundleID:(NSString *)bundleID;
@@ -21,9 +21,18 @@
 - (BOOL)restoreAppData:(NSString *)bundleID fromBackup:(NSString *)backupPath;
 
 // قائمة النسخ الاحتياطية المتوفرة
-- (NSArray<NSDictionary *> *)availableBackupsForBundleID:(NSString *)bundleID;
+- (NSArray *)availableBackupsForBundleID:(NSString *)bundleID;
 
 // حذف نسخة احتياطية
 - (BOOL)deleteBackup:(NSString *)backupPath;
+
+// === NEW: UI Support Methods ===
+- (UIImage *)iconForBundleID:(NSString *)bundleID;
+- (NSString *)versionForBundleID:(NSString *)bundleID;
+- (NSString *)documentsPathForBundleID:(NSString *)bundleID;
+- (NSUInteger)documentsCountForBundleID:(NSString *)bundleID;
+- (NSDate *)lastBackupDateForBundleID:(NSString *)bundleID;
+- (unsigned long long)totalBackupsSize;
+- (unsigned long long)totalAppsDataSize;
 
 @end
