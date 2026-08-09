@@ -51,5 +51,6 @@
 - (unsigned long long)totalAppsDataSize;
 - (BOOL)isSystemApp:(NSString *)bundleID;
 - (void)clearCache;
+- (BOOL)killApp:(NSString *)bundleID;
 
 @end
