@@ -1,99 +1,251 @@
 #import "AppDetailViewController.h"
 #import "AppDataManager.h"
 
-#pragma mark - Helpers
+#pragma mark - Storage Ring View
 
-@interface SizeBreakdown : NSObject
-@property (nonatomic, assign) unsigned long long documents;
-@property (nonatomic, assign) unsigned long long library;
-@property (nonatomic, assign) unsigned long long caches;
-@property (nonatomic, assign) unsigned long long total;
-@end
-@implementation SizeBreakdown
+@interface StorageRingView : UIView
+@property (nonatomic, assign) CGFloat documentsRatio;
+@property (nonatomic, assign) CGFloat libraryRatio;
+@property (nonatomic, assign) CGFloat cachesRatio;
+@property (nonatomic, strong) UILabel *centerLabel;
 @end
 
-#pragma mark - Segmented Bar View
-
-@interface SegmentedBarView : UIView
-@property (nonatomic, strong) NSArray<NSNumber *> *segments; // normalized 0..1
-@property (nonatomic, strong) NSArray<UIColor *> *colors;
-@end
-
-@implementation SegmentedBarView
+@implementation StorageRingView
 
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1.0];
-        self.layer.cornerRadius = 4;
-        self.layer.masksToBounds = YES;
+        self.backgroundColor = [UIColor clearColor];
+
+        _centerLabel = [[UILabel alloc] init];
+        _centerLabel.textAlignment = NSTextAlignmentCenter;
+        _centerLabel.numberOfLines = 0;
+        _centerLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:_centerLabel];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_centerLabel.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [_centerLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [_centerLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.leadingAnchor constant:8]
+        ]];
     }
     return self;
 }
 
-- (void)setSegments:(NSArray<NSNumber *> *)segments colors:(NSArray<UIColor *> *)colors {
-    _segments = segments;
-    _colors = colors;
-    [self setNeedsDisplay];
-}
-
 - (void)drawRect:(CGRect)rect {
     [super drawRect:rect];
-    if (!_segments || !_colors || _segments.count == 0) return;
 
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    CGFloat x = 0;
-    CGFloat h = rect.size.height;
-    CGFloat w = rect.size.width;
+    CGFloat lineWidth = 12.0;
+    CGFloat radius = (MIN(rect.size.width, rect.size.height) - lineWidth) / 2.0;
+    CGPoint center = CGPointMake(rect.size.width / 2.0, rect.size.height / 2.0);
 
-    for (NSUInteger i = 0; i < _segments.count; i++) {
-        CGFloat segW = w * [_segments[i] floatValue];
-        if (segW < 1) continue;
-        CGContextSetFillColorWithColor(ctx, _colors[i].CGColor);
-        CGContextFillRect(ctx, CGRectMake(x, 0, segW, h));
-        x += segW;
+    // Background track
+    UIBezierPath *bgPath = [UIBezierPath bezierPathWithArcCenter:center
+                                                          radius:radius
+                                                      startAngle:-M_PI_2
+                                                        endAngle:3 * M_PI_2
+                                                       clockwise:YES];
+    [[UIColor colorWithWhite:0.12 alpha:1.0] setStroke];
+    bgPath.lineWidth = lineWidth;
+    bgPath.lineCapStyle = kCGLineCapRound;
+    [bgPath stroke];
+
+    // Segments
+    NSArray<UIColor *> *colors = @[
+        [UIColor colorWithRed:0.78 green:0.58 blue:0.42 alpha:1.0],  // Documents - bronze
+        [UIColor colorWithRed:0.55 green:0.45 blue:0.85 alpha:1.0],  // Library - purple
+        [UIColor colorWithRed:0.95 green:0.5  blue:0.3  alpha:1.0]   // Caches - orange
+    ];
+    NSArray<NSNumber *> *ratios = @[@(self.documentsRatio), @(self.libraryRatio), @(self.cachesRatio)];
+
+    CGFloat startAngle = -M_PI_2;
+    for (NSUInteger i = 0; i < 3; i++) {
+        CGFloat ratio = [ratios[i] floatValue];
+        if (ratio <= 0) continue;
+        CGFloat endAngle = startAngle + (2 * M_PI * ratio);
+
+        UIBezierPath *path = [UIBezierPath bezierPathWithArcCenter:center
+                                                            radius:radius
+                                                        startAngle:startAngle
+                                                          endAngle:endAngle
+                                                         clockwise:YES];
+        [colors[i] setStroke];
+        path.lineWidth = lineWidth;
+        path.lineCapStyle = kCGLineCapRound;
+        [path stroke];
+
+        startAngle = endAngle;
     }
 }
 
+- (void)setSizeText:(NSString *)sizeText unit:(NSString *)unit {
+    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] init];
+    [attr appendAttributedString:[[NSAttributedString alloc] initWithString:sizeText attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:22 weight:UIFontWeightBold],
+        NSForegroundColorAttributeName: [UIColor whiteColor]
+    }]];
+    [attr appendAttributedString:[[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"\n%@", unit] attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:11 weight:UIFontWeightMedium],
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:0.5 alpha:1.0]
+    }]];
+    self.centerLabel.attributedText = attr;
+}
+
 @end
 
-#pragma mark - Info Row (small)
+#pragma mark - Section Header
 
-@interface DetailRowView : UIView
+@interface SectionHeaderView : UIView
 @property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UILabel *valueLabel;
 @end
 
-@implementation DetailRowView
+@implementation SectionHeaderView
 
-- (instancetype)initWithTitle:(NSString *)title value:(NSString *)value {
+- (instancetype)initWithTitle:(NSString *)title {
     self = [super init];
     if (self) {
         self.translatesAutoresizingMaskIntoConstraints = NO;
 
         _titleLabel = [[UILabel alloc] init];
         _titleLabel.text = title;
+        _titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+        _titleLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+        _titleLabel.textAlignment = NSTextAlignmentNatural;
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:_titleLabel];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:4],
+            [_titleLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-4],
+            [_titleLabel.topAnchor constraintEqualToAnchor:self.topAnchor],
+            [_titleLabel.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
+            [self.heightAnchor constraintEqualToConstant:20]
+        ]];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - Info Row (compact)
+
+@interface CompactRowView : UIView
+- (instancetype)initWithIcon:(NSString *)iconName title:(NSString *)title value:(NSString *)value;
+@end
+
+@implementation CompactRowView {
+    UILabel *_titleLabel;
+    UILabel *_valueLabel;
+}
+
+- (instancetype)initWithIcon:(NSString *)iconName title:(NSString *)title value:(NSString *)value {
+    self = [super init];
+    if (self) {
+        self.translatesAutoresizingMaskIntoConstraints = NO;
+        self.backgroundColor = [UIColor clearColor];
+
+        UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:iconName]];
+        iconView.tintColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+        iconView.contentMode = UIViewContentModeScaleAspectFit;
+        iconView.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:iconView];
+
+        _titleLabel = [[UILabel alloc] init];
+        _titleLabel.text = title;
         _titleLabel.font = [UIFont systemFontOfSize:13];
-        _titleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
+        _titleLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
         _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_titleLabel];
 
         _valueLabel = [[UILabel alloc] init];
         _valueLabel.text = value;
         _valueLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-        _valueLabel.textColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        _valueLabel.textColor = [UIColor colorWithWhite:0.8 alpha:1.0];
         _valueLabel.textAlignment = NSTextAlignmentRight;
         _valueLabel.numberOfLines = 1;
         _valueLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_valueLabel];
 
         [NSLayoutConstraint activateConstraints:@[
-            [_titleLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [iconView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [iconView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [iconView.widthAnchor constraintEqualToConstant:18],
+            [iconView.heightAnchor constraintEqualToConstant:18],
+
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:10],
             [_titleLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+
             [_valueLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
             [_valueLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
             [_valueLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:_titleLabel.trailingAnchor constant:12],
-            [self.heightAnchor constraintEqualToConstant:28]
+
+            [self.heightAnchor constraintEqualToConstant:36]
+        ]];
+    }
+    return self;
+}
+
+@end
+
+#pragma mark - Breakdown Row
+
+@interface BreakdownRowView : UIView
+- (instancetype)initWithColor:(UIColor *)color title:(NSString *)title size:(NSString *)size percent:(NSString *)percent;
+@end
+
+@implementation BreakdownRowView
+
+- (instancetype)initWithColor:(UIColor *)color title:(NSString *)title size:(NSString *)size percent:(NSString *)percent {
+    self = [super init];
+    if (self) {
+        self.translatesAutoresizingMaskIntoConstraints = NO;
+
+        UIView *dot = [[UIView alloc] init];
+        dot.backgroundColor = color;
+        dot.layer.cornerRadius = 4;
+        dot.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:dot];
+
+        UILabel *titleLabel = [[UILabel alloc] init];
+        titleLabel.text = title;
+        titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+        titleLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+        titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:titleLabel];
+
+        UILabel *sizeLabel = [[UILabel alloc] init];
+        sizeLabel.text = size;
+        sizeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        sizeLabel.textColor = [UIColor whiteColor];
+        sizeLabel.textAlignment = NSTextAlignmentRight;
+        sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:sizeLabel];
+
+        UILabel *pctLabel = [[UILabel alloc] init];
+        pctLabel.text = percent;
+        pctLabel.font = [UIFont systemFontOfSize:11];
+        pctLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+        pctLabel.textAlignment = NSTextAlignmentRight;
+        pctLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:pctLabel];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [dot.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+            [dot.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [dot.widthAnchor constraintEqualToConstant:8],
+            [dot.heightAnchor constraintEqualToConstant:8],
+
+            [titleLabel.leadingAnchor constraintEqualToAnchor:dot.trailingAnchor constant:8],
+            [titleLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+
+            [pctLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+            [pctLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [pctLabel.widthAnchor constraintEqualToConstant:40],
+
+            [sizeLabel.trailingAnchor constraintEqualToAnchor:pctLabel.leadingAnchor constant:-8],
+            [sizeLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+
+            [self.heightAnchor constraintEqualToConstant:30]
         ]];
     }
     return self;
@@ -112,33 +264,34 @@
 // Header
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *nameLabel;
-@property (nonatomic, strong) UILabel *bundleLabel;
-@property (nonatomic, strong) UILabel *versionLabel;
+@property (nonatomic, strong) UILabel *developerLabel;
+@property (nonatomic, strong) UILabel *metaLabel;
 
-// Data Size
+// Data Dashboard
 @property (nonatomic, strong) UIView *dataCard;
-@property (nonatomic, strong) UILabel *dataTitleLabel;
+@property (nonatomic, strong) StorageRingView *ringView;
 @property (nonatomic, strong) UILabel *dataSizeLabel;
-@property (nonatomic, strong) SegmentedBarView *segmentBar;
-@property (nonatomic, strong) UILabel *docsLabel;
-@property (nonatomic, strong) UILabel *libLabel;
-@property (nonatomic, strong) UILabel *cacheLabel;
+@property (nonatomic, strong) UILabel *dataUnitLabel;
+@property (nonatomic, strong) BreakdownRowView *docsRow;
+@property (nonatomic, strong) BreakdownRowView *libRow;
+@property (nonatomic, strong) BreakdownRowView *cacheRow;
 
 // Backup
 @property (nonatomic, strong) UIView *backupCard;
 @property (nonatomic, strong) UILabel *backupStatusLabel;
-@property (nonatomic, strong) UILabel *backupDateLabel;
+@property (nonatomic, strong) UILabel *backupSubLabel;
+@property (nonatomic, strong) UIButton *backupActionBtn;
 
 // Actions
-@property (nonatomic, strong) UIButton *backupButton;
-@property (nonatomic, strong) UIButton *wipeButton;
+@property (nonatomic, strong) UIView *actionsCard;
+@property (nonatomic, strong) UIButton *wipeBtn;
 
-// Technical Info (collapsible)
+// Technical Details (collapsible)
 @property (nonatomic, strong) UIView *techCard;
-@property (nonatomic, strong) UIButton *techToggleButton;
-@property (nonatomic, strong) UIStackView *techStack;
+@property (nonatomic, strong) UIButton *techToggleBtn;
+@property (nonatomic, strong) UIView *techContentView;
 @property (nonatomic, assign) BOOL techExpanded;
-@property (nonatomic, strong) NSLayoutConstraint *techStackHeightConstraint;
+@property (nonatomic, strong) NSLayoutConstraint *techContentHeightConstraint;
 @end
 
 @implementation AppDetailViewController
@@ -155,24 +308,24 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"";
-    self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
+    self.view.backgroundColor = [UIColor colorWithRed:0.03 green:0.03 blue:0.05 alpha:1.0];
 
-    [self setupNavigationBar];
+    [self setupNavigation];
     [self setupScrollView];
     [self setupHeader];
-    [self setupDataCard];
-    [self setupBackupCard];
-    [self setupActionButtons];
-    [self setupTechnicalCard];
-    [self loadDataSizes];
+    [self setupDataDashboard];
+    [self setupBackupSection];
+    [self setupActionsSection];
+    [self setupTechnicalSection];
+    [self loadData];
 }
 
 #pragma mark - Setup
 
-- (void)setupNavigationBar {
+- (void)setupNavigation {
     self.navigationController.navigationBar.prefersLargeTitles = NO;
     self.navigationController.navigationBar.tintColor = [UIColor whiteColor];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark.circle.fill"]
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark"]
                                                                                style:UIBarButtonItemStylePlain
                                                                               target:self
                                                                               action:@selector(closeTapped)];
@@ -214,7 +367,7 @@
     NSString *bundleID = self.appInfo[@"bundleID"];
 
     self.iconView = [[UIImageView alloc] init];
-    self.iconView.layer.cornerRadius = 22;
+    self.iconView.layer.cornerRadius = 16;
     self.iconView.layer.masksToBounds = YES;
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
     self.iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -230,170 +383,155 @@
 
     self.nameLabel = [[UILabel alloc] init];
     self.nameLabel.text = self.appInfo[@"name"];
-    self.nameLabel.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
+    self.nameLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
     self.nameLabel.textColor = [UIColor whiteColor];
-    self.nameLabel.textAlignment = NSTextAlignmentCenter;
     self.nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.contentView addSubview:self.nameLabel];
 
-    self.bundleLabel = [[UILabel alloc] init];
-    self.bundleLabel.text = bundleID;
-    self.bundleLabel.font = [UIFont systemFontOfSize:12];
-    self.bundleLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
-    self.bundleLabel.textAlignment = NSTextAlignmentCenter;
-    self.bundleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.bundleLabel];
+    self.developerLabel = [[UILabel alloc] init];
+    self.developerLabel.text = @""; // Will be set if available
+    self.developerLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    self.developerLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    self.developerLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.developerLabel];
 
-    self.versionLabel = [[UILabel alloc] init];
+    self.metaLabel = [[UILabel alloc] init];
     NSString *ver = [self.manager versionForBundleID:bundleID];
-    self.versionLabel.text = [NSString stringWithFormat:@"v%@", ver];
-    self.versionLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    self.versionLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-    self.versionLabel.textAlignment = NSTextAlignmentCenter;
-    self.versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.versionLabel];
+    self.metaLabel.text = [NSString stringWithFormat:@"v%@  ·  %@", ver, bundleID];
+    self.metaLabel.font = [UIFont systemFontOfSize:11];
+    self.metaLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+    self.metaLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.metaLabel];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.iconView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:24],
-        [self.iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
-        [self.iconView.widthAnchor constraintEqualToConstant:88],
-        [self.iconView.heightAnchor constraintEqualToConstant:88],
+        [self.iconView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:16],
+        [self.iconView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
+        [self.iconView.widthAnchor constraintEqualToConstant:64],
+        [self.iconView.heightAnchor constraintEqualToConstant:64],
 
-        [self.nameLabel.topAnchor constraintEqualToAnchor:self.iconView.bottomAnchor constant:14],
-        [self.nameLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
+        [self.nameLabel.topAnchor constraintEqualToAnchor:self.iconView.topAnchor constant:4],
+        [self.nameLabel.leadingAnchor constraintEqualToAnchor:self.iconView.trailingAnchor constant:14],
         [self.nameLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
 
-        [self.bundleLabel.topAnchor constraintEqualToAnchor:self.nameLabel.bottomAnchor constant:4],
-        [self.bundleLabel.leadingAnchor constraintEqualToAnchor:self.nameLabel.leadingAnchor],
-        [self.bundleLabel.trailingAnchor constraintEqualToAnchor:self.nameLabel.trailingAnchor],
+        [self.developerLabel.topAnchor constraintEqualToAnchor:self.nameLabel.bottomAnchor constant:2],
+        [self.developerLabel.leadingAnchor constraintEqualToAnchor:self.nameLabel.leadingAnchor],
+        [self.developerLabel.trailingAnchor constraintEqualToAnchor:self.nameLabel.trailingAnchor],
 
-        [self.versionLabel.topAnchor constraintEqualToAnchor:self.bundleLabel.bottomAnchor constant:2],
-        [self.versionLabel.leadingAnchor constraintEqualToAnchor:self.nameLabel.leadingAnchor],
-        [self.versionLabel.trailingAnchor constraintEqualToAnchor:self.nameLabel.trailingAnchor]
+        [self.metaLabel.topAnchor constraintEqualToAnchor:self.developerLabel.bottomAnchor constant:4],
+        [self.metaLabel.leadingAnchor constraintEqualToAnchor:self.nameLabel.leadingAnchor],
+        [self.metaLabel.trailingAnchor constraintEqualToAnchor:self.nameLabel.trailingAnchor]
     ]];
 }
 
-#pragma mark - Data Card
+#pragma mark - Data Dashboard Card
 
-- (void)setupDataCard {
+- (void)setupDataDashboard {
     self.dataCard = [self createCard];
     [self.contentView addSubview:self.dataCard];
 
-    self.dataTitleLabel = [[UILabel alloc] init];
-    self.dataTitleLabel.text = @"بيانات التطبيق";
-    self.dataTitleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    self.dataTitleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-    self.dataTitleLabel.textAlignment = NSTextAlignmentCenter;
-    self.dataTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.dataCard addSubview:self.dataTitleLabel];
+    // Section title
+    UILabel *sectionTitle = [[UILabel alloc] init];
+    sectionTitle.text = @"APP DATA";
+    sectionTitle.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
+    sectionTitle.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+    sectionTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.dataCard addSubview:sectionTitle];
 
+    // Size number
     self.dataSizeLabel = [[UILabel alloc] init];
     self.dataSizeLabel.text = @"—";
-    self.dataSizeLabel.font = [UIFont systemFontOfSize:42 weight:UIFontWeightBold];
+    self.dataSizeLabel.font = [UIFont systemFontOfSize:36 weight:UIFontWeightBold];
     self.dataSizeLabel.textColor = [UIColor whiteColor];
-    self.dataSizeLabel.textAlignment = NSTextAlignmentCenter;
     self.dataSizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.dataCard addSubview:self.dataSizeLabel];
 
-    self.segmentBar = [[SegmentedBarView alloc] initWithFrame:CGRectZero];
-    self.segmentBar.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.dataCard addSubview:self.segmentBar];
+    self.dataUnitLabel = [[UILabel alloc] init];
+    self.dataUnitLabel.text = @"";
+    self.dataUnitLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    self.dataUnitLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
+    self.dataUnitLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.dataCard addSubview:self.dataUnitLabel];
 
-    // Breakdown labels
-    self.docsLabel = [self breakdownLabelWithColor:[UIColor colorWithRed:0.35 green:0.65 blue:1.0 alpha:1.0]];
-    self.libLabel = [self breakdownLabelWithColor:[UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0]];
-    self.cacheLabel = [self breakdownLabelWithColor:[UIColor colorWithRed:0.95 green:0.5 blue:0.3 alpha:1.0]];
-    [self.dataCard addSubview:self.docsLabel];
-    [self.dataCard addSubview:self.libLabel];
-    [self.dataCard addSubview:self.cacheLabel];
+    // Ring
+    self.ringView = [[StorageRingView alloc] initWithFrame:CGRectZero];
+    self.ringView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.dataCard addSubview:self.ringView];
+
+    // Divider
+    UIView *divider = [[UIView alloc] init];
+    divider.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1.0];
+    divider.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.dataCard addSubview:divider];
+
+    // Breakdown rows
+    self.docsRow = [[BreakdownRowView alloc] initWithColor:[UIColor colorWithRed:0.78 green:0.58 blue:0.42 alpha:1.0]
+                                                     title:@"Documents"
+                                                      size:@"—"
+                                                   percent:@"—"];
+    [self.dataCard addSubview:self.docsRow];
+
+    self.libRow = [[BreakdownRowView alloc] initWithColor:[UIColor colorWithRed:0.55 green:0.45 blue:0.85 alpha:1.0]
+                                                    title:@"Library"
+                                                     size:@"—"
+                                                  percent:@"—"];
+    [self.dataCard addSubview:self.libRow];
+
+    self.cacheRow = [[BreakdownRowView alloc] initWithColor:[UIColor colorWithRed:0.95 green:0.5 blue:0.3 alpha:1.0]
+                                                      title:@"Caches"
+                                                       size:@"—"
+                                                    percent:@"—"];
+    [self.dataCard addSubview:self.cacheRow];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.dataCard.topAnchor constraintEqualToAnchor:self.versionLabel.bottomAnchor constant:28],
+        [self.dataCard.topAnchor constraintEqualToAnchor:self.metaLabel.bottomAnchor constant:24],
         [self.dataCard.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
         [self.dataCard.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
 
-        [self.dataTitleLabel.topAnchor constraintEqualToAnchor:self.dataCard.topAnchor constant:20],
-        [self.dataTitleLabel.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
-        [self.dataTitleLabel.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
+        [sectionTitle.topAnchor constraintEqualToAnchor:self.dataCard.topAnchor constant:20],
+        [sectionTitle.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
 
-        [self.dataSizeLabel.topAnchor constraintEqualToAnchor:self.dataTitleLabel.bottomAnchor constant:8],
-        [self.dataSizeLabel.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
-        [self.dataSizeLabel.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
+        [self.dataSizeLabel.topAnchor constraintEqualToAnchor:sectionTitle.bottomAnchor constant:8],
+        [self.dataSizeLabel.leadingAnchor constraintEqualToAnchor:sectionTitle.leadingAnchor],
 
-        [self.segmentBar.topAnchor constraintEqualToAnchor:self.dataSizeLabel.bottomAnchor constant:16],
-        [self.segmentBar.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
-        [self.segmentBar.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
-        [self.segmentBar.heightAnchor constraintEqualToConstant:8],
+        [self.dataUnitLabel.leadingAnchor constraintEqualToAnchor:self.dataSizeLabel.trailingAnchor constant:6],
+        [self.dataUnitLabel.bottomAnchor constraintEqualToAnchor:self.dataSizeLabel.bottomAnchor constant:-6],
 
-        [self.docsLabel.topAnchor constraintEqualToAnchor:self.segmentBar.bottomAnchor constant:14],
-        [self.docsLabel.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
-        [self.docsLabel.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
+        [self.ringView.centerYAnchor constraintEqualToAnchor:self.dataSizeLabel.centerYAnchor constant:10],
+        [self.ringView.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
+        [self.ringView.widthAnchor constraintEqualToConstant:100],
+        [self.ringView.heightAnchor constraintEqualToConstant:100],
 
-        [self.libLabel.topAnchor constraintEqualToAnchor:self.docsLabel.bottomAnchor constant:4],
-        [self.libLabel.leadingAnchor constraintEqualToAnchor:self.docsLabel.leadingAnchor],
-        [self.libLabel.trailingAnchor constraintEqualToAnchor:self.docsLabel.trailingAnchor],
+        [divider.topAnchor constraintEqualToAnchor:self.dataSizeLabel.bottomAnchor constant:20],
+        [divider.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
+        [divider.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
+        [divider.heightAnchor constraintEqualToConstant:1],
 
-        [self.cacheLabel.topAnchor constraintEqualToAnchor:self.libLabel.bottomAnchor constant:4],
-        [self.cacheLabel.leadingAnchor constraintEqualToAnchor:self.docsLabel.leadingAnchor],
-        [self.cacheLabel.trailingAnchor constraintEqualToAnchor:self.docsLabel.trailingAnchor],
-        [self.cacheLabel.bottomAnchor constraintEqualToAnchor:self.dataCard.bottomAnchor constant:-20]
+        [self.docsRow.topAnchor constraintEqualToAnchor:divider.bottomAnchor constant:12],
+        [self.docsRow.leadingAnchor constraintEqualToAnchor:self.dataCard.leadingAnchor constant:20],
+        [self.docsRow.trailingAnchor constraintEqualToAnchor:self.dataCard.trailingAnchor constant:-20],
+
+        [self.libRow.topAnchor constraintEqualToAnchor:self.docsRow.bottomAnchor constant:2],
+        [self.libRow.leadingAnchor constraintEqualToAnchor:self.docsRow.leadingAnchor],
+        [self.libRow.trailingAnchor constraintEqualToAnchor:self.docsRow.trailingAnchor],
+
+        [self.cacheRow.topAnchor constraintEqualToAnchor:self.libRow.bottomAnchor constant:2],
+        [self.cacheRow.leadingAnchor constraintEqualToAnchor:self.docsRow.leadingAnchor],
+        [self.cacheRow.trailingAnchor constraintEqualToAnchor:self.docsRow.trailingAnchor],
+        [self.cacheRow.bottomAnchor constraintEqualToAnchor:self.dataCard.bottomAnchor constant:-20]
     ]];
 }
 
-- (UILabel *)breakdownLabelWithColor:(UIColor *)color {
-    UILabel *label = [[UILabel alloc] init];
-    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    label.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
-    label.translatesAutoresizingMaskIntoConstraints = NO;
+#pragma mark - Backup Section
 
-    // Dot
-    NSTextAttachment *dot = [[NSTextAttachment alloc] init];
-    dot.bounds = CGRectMake(0, -2, 8, 8);
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(8, 8), NO, 0);
-    [color setFill];
-    UIBezierPath *path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(0, 0, 8, 8)];
-    [path fill];
-    dot.image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-
-    NSAttributedString *dotStr = [NSAttributedString attributedStringWithAttachment:dot];
-    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithAttributedString:dotStr];
-    [attr appendAttributedString:[[NSAttributedString alloc] initWithString:@"  " attributes:@{}]];
-    label.attributedText = attr;
-
-    return label;
-}
-
-- (void)updateBreakdownLabel:(UILabel *)label text:(NSString *)text color:(UIColor *)color {
-    NSTextAttachment *dot = [[NSTextAttachment alloc] init];
-    dot.bounds = CGRectMake(0, -2, 8, 8);
-    UIGraphicsBeginImageContextWithOptions(CGSizeMake(8, 8), NO, 0);
-    [color setFill];
-    UIBezierPath *path = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(0, 0, 8, 8)];
-    [path fill];
-    dot.image = UIGraphicsGetImageFromCurrentImageContext();
-    UIGraphicsEndImageContext();
-
-    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithAttributedString:[NSAttributedString attributedStringWithAttachment:dot]];
-    [attr appendAttributedString:[[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"  %@", text] attributes:@{
-        NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightMedium],
-        NSForegroundColorAttributeName: [UIColor colorWithWhite:0.7 alpha:1.0]
-    }]];
-    label.attributedText = attr;
-}
-
-#pragma mark - Backup Card
-
-- (void)setupBackupCard {
+- (void)setupBackupSection {
     self.backupCard = [self createCard];
     [self.contentView addSubview:self.backupCard];
 
-    UILabel *titleLabel = [[UILabel alloc] init];
-    titleLabel.text = @"النسخ الاحتياطي";
-    titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    titleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.backupCard addSubview:titleLabel];
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"icloud.and.arrow.up"]];
+    iconView.tintColor = [UIColor colorWithRed:0.78 green:0.58 blue:0.42 alpha:1.0];
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.backupCard addSubview:iconView];
 
     self.backupStatusLabel = [[UILabel alloc] init];
     self.backupStatusLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
@@ -401,201 +539,208 @@
     self.backupStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.backupCard addSubview:self.backupStatusLabel];
 
-    self.backupDateLabel = [[UILabel alloc] init];
-    self.backupDateLabel.font = [UIFont systemFontOfSize:13];
-    self.backupDateLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-    self.backupDateLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.backupCard addSubview:self.backupDateLabel];
+    self.backupSubLabel = [[UILabel alloc] init];
+    self.backupSubLabel.font = [UIFont systemFontOfSize:12];
+    self.backupSubLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    self.backupSubLabel.numberOfLines = 2;
+    self.backupSubLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.backupCard addSubview:self.backupSubLabel];
 
-    [self updateBackupStatus];
+    self.backupActionBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.backupActionBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    self.backupActionBtn.backgroundColor = [UIColor colorWithRed:0.78 green:0.58 blue:0.42 alpha:0.15];
+    self.backupActionBtn.layer.cornerRadius = 8;
+    self.backupActionBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.backupActionBtn setTitleColor:[UIColor colorWithRed:0.78 green:0.58 blue:0.42 alpha:1.0] forState:UIControlStateNormal];
+    [self.backupActionBtn addTarget:self action:@selector(backupTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.backupCard addSubview:self.backupActionBtn];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.backupCard.topAnchor constraintEqualToAnchor:self.dataCard.bottomAnchor constant:12],
         [self.backupCard.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
         [self.backupCard.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
 
-        [titleLabel.topAnchor constraintEqualToAnchor:self.backupCard.topAnchor constant:16],
-        [titleLabel.leadingAnchor constraintEqualToAnchor:self.backupCard.leadingAnchor constant:20],
-        [titleLabel.trailingAnchor constraintEqualToAnchor:self.backupCard.trailingAnchor constant:-20],
+        [iconView.leadingAnchor constraintEqualToAnchor:self.backupCard.leadingAnchor constant:20],
+        [iconView.topAnchor constraintEqualToAnchor:self.backupCard.topAnchor constant:18],
+        [iconView.widthAnchor constraintEqualToConstant:28],
+        [iconView.heightAnchor constraintEqualToConstant:28],
 
-        [self.backupStatusLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:6],
-        [self.backupStatusLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
-        [self.backupStatusLabel.trailingAnchor constraintEqualToAnchor:titleLabel.trailingAnchor],
+        [self.backupStatusLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:12],
+        [self.backupStatusLabel.topAnchor constraintEqualToAnchor:iconView.topAnchor constant:2],
+        [self.backupStatusLabel.trailingAnchor constraintEqualToAnchor:self.backupCard.trailingAnchor constant:-20],
 
-        [self.backupDateLabel.topAnchor constraintEqualToAnchor:self.backupStatusLabel.bottomAnchor constant:2],
-        [self.backupDateLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
-        [self.backupDateLabel.trailingAnchor constraintEqualToAnchor:titleLabel.trailingAnchor],
-        [self.backupDateLabel.bottomAnchor constraintEqualToAnchor:self.backupCard.bottomAnchor constant:-16]
+        [self.backupSubLabel.leadingAnchor constraintEqualToAnchor:self.backupStatusLabel.leadingAnchor],
+        [self.backupSubLabel.topAnchor constraintEqualToAnchor:self.backupStatusLabel.bottomAnchor constant:2],
+        [self.backupSubLabel.trailingAnchor constraintEqualToAnchor:self.backupStatusLabel.trailingAnchor],
+
+        [self.backupActionBtn.topAnchor constraintEqualToAnchor:self.backupSubLabel.bottomAnchor constant:12],
+        [self.backupActionBtn.leadingAnchor constraintEqualToAnchor:self.backupStatusLabel.leadingAnchor],
+        [self.backupActionBtn.widthAnchor constraintEqualToConstant:110],
+        [self.backupActionBtn.heightAnchor constraintEqualToConstant:34],
+        [self.backupActionBtn.bottomAnchor constraintEqualToAnchor:self.backupCard.bottomAnchor constant:-16]
     ]];
 }
 
-- (void)updateBackupStatus {
-    NSString *bundleID = self.appInfo[@"bundleID"];
-    NSDate *lastBackup = [self.manager lastBackupDateForBundleID:bundleID];
+#pragma mark - Actions Section
 
-    if (lastBackup) {
-        self.backupStatusLabel.text = @"يوجد نسخة احتياطية";
-        self.backupStatusLabel.textColor = [UIColor colorWithRed:0.3 green:0.8 blue:0.5 alpha:1.0];
+- (void)setupActionsSection {
+    self.actionsCard = [self createCard];
+    [self.contentView addSubview:self.actionsCard];
 
-        NSDateComponents *components = [[NSCalendar currentCalendar] components:NSCalendarUnitDay
-                                                                        fromDate:lastBackup
-                                                                          toDate:[NSDate date]
-                                                                         options:0];
-        NSInteger days = components.day;
-        if (days == 0) {
-            self.backupDateLabel.text = @"منذ اليوم";
-        } else if (days == 1) {
-            self.backupDateLabel.text = @"منذ يوم واحد";
-        } else if (days < 7) {
-            self.backupDateLabel.text = [NSString stringWithFormat:@"منذ %ld أيام", (long)days];
-        } else if (days < 30) {
-            self.backupDateLabel.text = [NSString stringWithFormat:@"منذ %ld أسابيع", (long)(days/7)];
-        } else {
-            self.backupDateLabel.text = [NSString stringWithFormat:@"منذ %ld أشهر", (long)(days/30)];
-        }
-    } else {
-        self.backupStatusLabel.text = @"لا توجد نسخة احتياطية";
-        self.backupStatusLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-        self.backupDateLabel.text = @"أنشئ نسخة احتياطية قبل الحذف";
-    }
-}
+    UIImageView *iconView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"trash"]];
+    iconView.tintColor = [UIColor colorWithRed:0.9 green:0.35 blue:0.35 alpha:1.0];
+    iconView.contentMode = UIViewContentModeScaleAspectFit;
+    iconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.actionsCard addSubview:iconView];
 
-#pragma mark - Action Buttons
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = @"Delete App Data";
+    titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    titleLabel.textColor = [UIColor whiteColor];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.actionsCard addSubview:titleLabel];
 
-- (void)setupActionButtons {
-    self.backupButton = [self createActionButtonWithTitle:@"إنشاء نسخة احتياطية"
-                                                     color:[UIColor colorWithRed:0.35 green:0.25 blue:0.85 alpha:1.0]
-                                                     icon:@"arrow.up.circle.fill"];
-    [self.backupButton addTarget:self action:@selector(backupTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:self.backupButton];
+    UILabel *descLabel = [[UILabel alloc] init];
+    descLabel.text = @"All app data will be permanently removed.";
+    descLabel.font = [UIFont systemFontOfSize:12];
+    descLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    descLabel.numberOfLines = 2;
+    descLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.actionsCard addSubview:descLabel];
 
-    self.wipeButton = [self createActionButtonWithTitle:@"حذف بيانات التطبيق"
-                                                   color:[UIColor colorWithRed:0.85 green:0.25 blue:0.25 alpha:1.0]
-                                                   icon:@"trash.fill"];
-    [self.wipeButton addTarget:self action:@selector(wipeTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:self.wipeButton];
+    self.wipeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.wipeBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    self.wipeBtn.backgroundColor = [UIColor colorWithRed:0.9 green:0.25 blue:0.25 alpha:0.12];
+    self.wipeBtn.layer.cornerRadius = 8;
+    self.wipeBtn.layer.borderColor = [UIColor colorWithRed:0.9 green:0.35 blue:0.35 alpha:0.3].CGColor;
+    self.wipeBtn.layer.borderWidth = 1;
+    self.wipeBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    [self.wipeBtn setTitle:@"Delete Data" forState:UIControlStateNormal];
+    [self.wipeBtn setTitleColor:[UIColor colorWithRed:0.9 green:0.35 blue:0.35 alpha:1.0] forState:UIControlStateNormal];
+    [self.wipeBtn addTarget:self action:@selector(wipeTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.actionsCard addSubview:self.wipeBtn];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.backupButton.topAnchor constraintEqualToAnchor:self.backupCard.bottomAnchor constant:20],
-        [self.backupButton.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
-        [self.backupButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
-        [self.backupButton.heightAnchor constraintEqualToConstant:54],
+        [self.actionsCard.topAnchor constraintEqualToAnchor:self.backupCard.bottomAnchor constant:12],
+        [self.actionsCard.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
+        [self.actionsCard.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
 
-        [self.wipeButton.topAnchor constraintEqualToAnchor:self.backupButton.bottomAnchor constant:10],
-        [self.wipeButton.leadingAnchor constraintEqualToAnchor:self.backupButton.leadingAnchor],
-        [self.wipeButton.trailingAnchor constraintEqualToAnchor:self.backupButton.trailingAnchor],
-        [self.wipeButton.heightAnchor constraintEqualToConstant:54]
+        [iconView.leadingAnchor constraintEqualToAnchor:self.actionsCard.leadingAnchor constant:20],
+        [iconView.topAnchor constraintEqualToAnchor:self.actionsCard.topAnchor constant:18],
+        [iconView.widthAnchor constraintEqualToConstant:28],
+        [iconView.heightAnchor constraintEqualToConstant:28],
+
+        [titleLabel.leadingAnchor constraintEqualToAnchor:iconView.trailingAnchor constant:12],
+        [titleLabel.topAnchor constraintEqualToAnchor:iconView.topAnchor constant:2],
+        [titleLabel.trailingAnchor constraintEqualToAnchor:self.actionsCard.trailingAnchor constant:-20],
+
+        [descLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [descLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:2],
+        [descLabel.trailingAnchor constraintEqualToAnchor:titleLabel.trailingAnchor],
+
+        [self.wipeBtn.topAnchor constraintEqualToAnchor:descLabel.bottomAnchor constant:12],
+        [self.wipeBtn.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [self.wipeBtn.widthAnchor constraintEqualToConstant:110],
+        [self.wipeBtn.heightAnchor constraintEqualToConstant:34],
+        [self.wipeBtn.bottomAnchor constraintEqualToAnchor:self.actionsCard.bottomAnchor constant:-16]
     ]];
 }
 
-- (UIButton *)createActionButtonWithTitle:(NSString *)title color:(UIColor *)color icon:(NSString *)iconName {
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    btn.translatesAutoresizingMaskIntoConstraints = NO;
-    btn.backgroundColor = color;
-    btn.layer.cornerRadius = 14;
-    btn.layer.masksToBounds = YES;
-    btn.tintColor = [UIColor whiteColor];
+#pragma mark - Technical Section (Collapsible)
 
-    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] init];
-    NSTextAttachment *attach = [[NSTextAttachment alloc] init];
-    attach.image = [[UIImage systemImageNamed:iconName] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    attach.bounds = CGRectMake(0, -3, 18, 18);
-    [attr appendAttributedString:[NSAttributedString attributedStringWithAttachment:attach]];
-    [attr appendAttributedString:[[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"  %@", title] attributes:@{
-        NSFontAttributeName: [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold],
-        NSForegroundColorAttributeName: [UIColor whiteColor]
-    }]];
-    [btn setAttributedTitle:attr forState:UIControlStateNormal];
-
-    return btn;
-}
-
-#pragma mark - Technical Info (Collapsible)
-
-- (void)setupTechnicalCard {
+- (void)setupTechnicalSection {
     self.techCard = [self createCard];
     [self.contentView addSubview:self.techCard];
 
-    self.techToggleButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.techToggleButton.translatesAutoresizingMaskIntoConstraints = NO;
-    self.techToggleButton.backgroundColor = [UIColor clearColor];
-    [self.techToggleButton addTarget:self action:@selector(toggleTechSection) forControlEvents:UIControlEventTouchUpInside];
-    [self.techCard addSubview:self.techToggleButton];
+    self.techToggleBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.techToggleBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    self.techToggleBtn.backgroundColor = [UIColor clearColor];
+    [self.techToggleBtn addTarget:self action:@selector(toggleTech) forControlEvents:UIControlEventTouchUpInside];
+    [self.techCard addSubview:self.techToggleBtn];
 
-    UILabel *techTitle = [[UILabel alloc] init];
-    techTitle.text = @"معلومات التطبيق";
-    techTitle.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    techTitle.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    techTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.techToggleButton addSubview:techTitle];
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = @"Application Details";
+    titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    titleLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.techToggleBtn addSubview:titleLabel];
 
     UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.down"]];
-    chevron.tintColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    chevron.tintColor = [UIColor colorWithWhite:0.35 alpha:1.0];
     chevron.translatesAutoresizingMaskIntoConstraints = NO;
     chevron.tag = 100;
-    [self.techToggleButton addSubview:chevron];
+    [self.techToggleBtn addSubview:chevron];
 
-    self.techStack = [[UIStackView alloc] init];
-    self.techStack.translatesAutoresizingMaskIntoConstraints = NO;
-    self.techStack.axis = UILayoutConstraintAxisVertical;
-    self.techStack.spacing = 0;
-    self.techStack.alpha = 0;
-    [self.techCard addSubview:self.techStack];
+    self.techContentView = [[UIView alloc] init];
+    self.techContentView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.techContentView.clipsToBounds = YES;
+    [self.techCard addSubview:self.techContentView];
 
     NSString *bundleID = self.appInfo[@"bundleID"];
     NSString *dataPath = [self.manager dataPathForBundleID:bundleID];
+    NSString *ver = [self.manager versionForBundleID:bundleID];
 
-    [self.techStack addArrangedSubview:[[DetailRowView alloc] initWithTitle:@"Bundle ID" value:bundleID]];
-    [self.techStack addArrangedSubview:[[DetailRowView alloc] initWithTitle:@"Version" value:[self.manager versionForBundleID:bundleID]]];
-    [self.techStack addArrangedSubview:[[DetailRowView alloc] initWithTitle:@"Data Path" value:dataPath ?: @"—"]];
-    [self.techStack addArrangedSubview:[[DetailRowView alloc] initWithTitle:@"Documents" value:[NSString stringWithFormat:@"%lu files", (unsigned long)[self.manager documentsCountForBundleID:bundleID]]]];
+    UIStackView *stack = [[UIStackView alloc] init];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 0;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.techContentView addSubview:stack];
+
+    [stack addArrangedSubview:[[CompactRowView alloc] initWithIcon:@"number" title:@"Bundle ID" value:bundleID]];
+    [stack addArrangedSubview:[[CompactRowView alloc] initWithIcon:@"tag" title:@"Version" value:ver]];
+    [stack addArrangedSubview:[[CompactRowView alloc] initWithIcon:@"folder" title:@"Data Path" value:dataPath ?: @"—"]];
+    [stack addArrangedSubview:[[CompactRowView alloc] initWithIcon:@"doc" title:@"Documents" value:[NSString stringWithFormat:@"%lu files", (unsigned long)[self.manager documentsCountForBundleID:bundleID]]]];
 
     self.techExpanded = NO;
-    self.techStackHeightConstraint = [self.techStack.heightAnchor constraintEqualToConstant:0];
-    self.techStackHeightConstraint.active = YES;
+    self.techContentHeightConstraint = [self.techContentView.heightAnchor constraintEqualToConstant:0];
+    self.techContentHeightConstraint.active = YES;
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.techCard.topAnchor constraintEqualToAnchor:self.wipeButton.bottomAnchor constant:20],
+        [self.techCard.topAnchor constraintEqualToAnchor:self.actionsCard.bottomAnchor constant:12],
         [self.techCard.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
         [self.techCard.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
         [self.techCard.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-30],
 
-        [self.techToggleButton.topAnchor constraintEqualToAnchor:self.techCard.topAnchor],
-        [self.techToggleButton.leadingAnchor constraintEqualToAnchor:self.techCard.leadingAnchor],
-        [self.techToggleButton.trailingAnchor constraintEqualToAnchor:self.techCard.trailingAnchor],
-        [self.techToggleButton.heightAnchor constraintEqualToConstant:48],
+        [self.techToggleBtn.topAnchor constraintEqualToAnchor:self.techCard.topAnchor],
+        [self.techToggleBtn.leadingAnchor constraintEqualToAnchor:self.techCard.leadingAnchor],
+        [self.techToggleBtn.trailingAnchor constraintEqualToAnchor:self.techCard.trailingAnchor],
+        [self.techToggleBtn.heightAnchor constraintEqualToConstant:48],
 
-        [techTitle.leadingAnchor constraintEqualToAnchor:self.techToggleButton.leadingAnchor constant:20],
-        [techTitle.centerYAnchor constraintEqualToAnchor:self.techToggleButton.centerYAnchor],
+        [titleLabel.leadingAnchor constraintEqualToAnchor:self.techToggleBtn.leadingAnchor constant:20],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:self.techToggleBtn.centerYAnchor],
 
-        [chevron.trailingAnchor constraintEqualToAnchor:self.techToggleButton.trailingAnchor constant:-20],
-        [chevron.centerYAnchor constraintEqualToAnchor:self.techToggleButton.centerYAnchor],
-        [chevron.widthAnchor constraintEqualToConstant:16],
-        [chevron.heightAnchor constraintEqualToConstant:16],
+        [chevron.trailingAnchor constraintEqualToAnchor:self.techToggleBtn.trailingAnchor constant:-20],
+        [chevron.centerYAnchor constraintEqualToAnchor:self.techToggleBtn.centerYAnchor],
+        [chevron.widthAnchor constraintEqualToConstant:14],
+        [chevron.heightAnchor constraintEqualToConstant:14],
 
-        [self.techStack.topAnchor constraintEqualToAnchor:self.techToggleButton.bottomAnchor],
-        [self.techStack.leadingAnchor constraintEqualToAnchor:self.techCard.leadingAnchor constant:20],
-        [self.techStack.trailingAnchor constraintEqualToAnchor:self.techCard.trailingAnchor constant:-20],
-        [self.techStack.bottomAnchor constraintEqualToAnchor:self.techCard.bottomAnchor constant:-12]
+        [self.techContentView.topAnchor constraintEqualToAnchor:self.techToggleBtn.bottomAnchor],
+        [self.techContentView.leadingAnchor constraintEqualToAnchor:self.techCard.leadingAnchor constant:20],
+        [self.techContentView.trailingAnchor constraintEqualToAnchor:self.techCard.trailingAnchor constant:-20],
+        [self.techContentView.bottomAnchor constraintEqualToAnchor:self.techCard.bottomAnchor constant:-8],
+
+        [stack.topAnchor constraintEqualToAnchor:self.techContentView.topAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:self.techContentView.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:self.techContentView.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:self.techContentView.bottomAnchor]
     ]];
 }
 
-- (void)toggleTechSection {
+- (void)toggleTech {
     self.techExpanded = !self.techExpanded;
 
-    UIImageView *chevron = [self.techToggleButton viewWithTag:100];
+    UIImageView *chevron = [self.techToggleBtn viewWithTag:100];
     [UIView animateWithDuration:0.25 animations:^{
         chevron.transform = self.techExpanded ? CGAffineTransformMakeRotation(M_PI) : CGAffineTransformIdentity;
-        self.techStack.alpha = self.techExpanded ? 1.0 : 0.0;
     }];
 
-    self.techStackHeightConstraint.active = NO;
+    self.techContentHeightConstraint.active = NO;
     if (self.techExpanded) {
-        self.techStackHeightConstraint = [self.techStack.heightAnchor constraintGreaterThanOrEqualToConstant:112];
+        self.techContentHeightConstraint = [self.techContentView.heightAnchor constraintGreaterThanOrEqualToConstant:144];
     } else {
-        self.techStackHeightConstraint = [self.techStack.heightAnchor constraintEqualToConstant:0];
+        self.techContentHeightConstraint = [self.techContentView.heightAnchor constraintEqualToConstant:0];
     }
-    self.techStackHeightConstraint.active = YES;
+    self.techContentHeightConstraint.active = YES;
 
     [UIView animateWithDuration:0.3 animations:^{
         [self.view layoutIfNeeded];
@@ -604,84 +749,139 @@
 
 #pragma mark - Data Loading
 
-- (void)loadDataSizes {
+- (void)loadData {
     NSString *bundleID = self.appInfo[@"bundleID"];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        SizeBreakdown *bd = [self calculateSizeBreakdownForBundleID:bundleID];
+        unsigned long long total = [self.manager dataSizeForBundleID:bundleID];
+        NSString *totalStr = [self.manager formatBytes:total];
+
+        // Parse size and unit
+        NSArray *parts = [totalStr componentsSeparatedByString:@" "];
+        NSString *sizeNum = parts.count > 0 ? parts[0] : totalStr;
+        NSString *unit = parts.count > 1 ? parts[1] : @"";
+
+        // Calculate breakdown
+        NSString *dataPath = [self.manager dataPathForBundleID:bundleID];
+        unsigned long long docs = 0, lib = 0, cache = 0;
+        if (dataPath) {
+            docs = [self dirSize:[dataPath stringByAppendingPathComponent:@"Documents"]];
+            lib = [self dirSize:[dataPath stringByAppendingPathComponent:@"Library"]];
+            cache = [self dirSize:[[dataPath stringByAppendingPathComponent:@"Library"] stringByAppendingPathComponent:@"Caches"]];
+        }
+
+        CGFloat docP = total > 0 ? (CGFloat)docs / (CGFloat)total : 0;
+        CGFloat libP = total > 0 ? (CGFloat)lib / (CGFloat)total : 0;
+        CGFloat cacheP = total > 0 ? (CGFloat)cache / (CGFloat)total : 0;
+
+        // Backup
+        NSDate *lastBackup = [self.manager lastBackupDateForBundleID:bundleID];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.dataSizeLabel.text = [self.manager formatBytes:bd.total];
+            self.dataSizeLabel.text = sizeNum;
+            self.dataUnitLabel.text = unit;
+            [self.ringView setSizeText:sizeNum unit:unit];
+            self.ringView.documentsRatio = docP;
+            self.ringView.libraryRatio = libP;
+            self.ringView.cachesRatio = cacheP;
+            [self.ringView setNeedsDisplay];
 
-            if (bd.total > 0) {
-                CGFloat docP = (CGFloat)bd.documents / (CGFloat)bd.total;
-                CGFloat libP = (CGFloat)bd.library / (CGFloat)bd.total;
-                CGFloat cacheP = (CGFloat)bd.caches / (CGFloat)bd.total;
+            [self updateRow:self.docsRow size:docs percent:docP total:total];
+            [self updateRow:self.libRow size:lib percent:libP total:total];
+            [self updateRow:self.cacheRow size:cache percent:cacheP total:total];
 
-                [self.segmentBar setSegments:@[@(docP), @(libP), @(cacheP)]
-                                      colors:@[[UIColor colorWithRed:0.35 green:0.65 blue:1.0 alpha:1.0],
-                                               [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0],
-                                               [UIColor colorWithRed:0.95 green:0.5 blue:0.3 alpha:1.0]]];
-
-                [self updateBreakdownLabel:self.docsLabel
-                                      text:[NSString stringWithFormat:@"Documents    %@", [self.manager formatBytes:bd.documents]]
-                                     color:[UIColor colorWithRed:0.35 green:0.65 blue:1.0 alpha:1.0]];
-                [self updateBreakdownLabel:self.libLabel
-                                      text:[NSString stringWithFormat:@"Library      %@", [self.manager formatBytes:bd.library]]
-                                     color:[UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0]];
-                [self updateBreakdownLabel:self.cacheLabel
-                                      text:[NSString stringWithFormat:@"Caches       %@", [self.manager formatBytes:bd.caches]]
-                                     color:[UIColor colorWithRed:0.95 green:0.5 blue:0.3 alpha:1.0]];
-            } else {
-                [self.segmentBar setSegments:@[@1.0] colors:@[[UIColor colorWithWhite:0.15 alpha:1.0]]];
-                self.docsLabel.attributedText = nil;
-                self.docsLabel.text = @"لا توجد بيانات";
-                self.docsLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-                self.libLabel.hidden = YES;
-                self.cacheLabel.hidden = YES;
-            }
+            [self updateBackupUI:lastBackup];
         });
     });
 }
 
-- (SizeBreakdown *)calculateSizeBreakdownForBundleID:(NSString *)bundleID {
-    SizeBreakdown *bd = [[SizeBreakdown alloc] init];
-    NSString *dataPath = [self.manager dataPathForBundleID:bundleID];
-    if (!dataPath) {
-        bd.total = 0;
-        return bd;
-    }
+- (void)updateRow:(BreakdownRowView *)row size:(unsigned long long)size percent:(CGFloat)pct total:(unsigned long long)total {
+    NSString *sizeStr = [self.manager formatBytes:size];
+    NSString *pctStr = total > 0 ? [NSString stringWithFormat:@"%.0f%%", pct * 100] : @"0%";
 
-    NSFileManager *fm = [NSFileManager defaultManager];
+    // Remove old subviews and recreate
+    for (UIView *sv in row.subviews) [sv removeFromSuperview];
 
-    // Documents
-    NSString *docsPath = [dataPath stringByAppendingPathComponent:@"Documents"];
-    bd.documents = [self directorySize:docsPath];
+    UIColor *color;
+    if (row == self.docsRow) color = [UIColor colorWithRed:0.78 green:0.58 blue:0.42 alpha:1.0];
+    else if (row == self.libRow) color = [UIColor colorWithRed:0.55 green:0.45 blue:0.85 alpha:1.0];
+    else color = [UIColor colorWithRed:0.95 green:0.5 blue:0.3 alpha:1.0];
 
-    // Library
-    NSString *libPath = [dataPath stringByAppendingPathComponent:@"Library"];
-    bd.library = [self directorySize:libPath];
+    UIView *dot = [[UIView alloc] init];
+    dot.backgroundColor = color;
+    dot.layer.cornerRadius = 4;
+    dot.translatesAutoresizingMaskIntoConstraints = NO;
+    [row addSubview:dot];
 
-    // Caches
-    NSString *cachePath = [libPath stringByAppendingPathComponent:@"Caches"];
-    bd.caches = [self directorySize:cachePath];
+    UILabel *titleLabel = [[UILabel alloc] init];
+    titleLabel.text = row == self.docsRow ? @"Documents" : (row == self.libRow ? @"Library" : @"Caches");
+    titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    titleLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+    titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [row addSubview:titleLabel];
 
-    // Total (actual)
-    bd.total = [self.manager dataSizeForBundleID:bundleID];
+    UILabel *sizeLabel = [[UILabel alloc] init];
+    sizeLabel.text = sizeStr;
+    sizeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    sizeLabel.textColor = [UIColor whiteColor];
+    sizeLabel.textAlignment = NSTextAlignmentRight;
+    sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [row addSubview:sizeLabel];
 
-    return bd;
+    UILabel *pctLabel = [[UILabel alloc] init];
+    pctLabel.text = pctStr;
+    pctLabel.font = [UIFont systemFontOfSize:11];
+    pctLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    pctLabel.textAlignment = NSTextAlignmentRight;
+    pctLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [row addSubview:pctLabel];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [dot.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+        [dot.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [dot.widthAnchor constraintEqualToConstant:8],
+        [dot.heightAnchor constraintEqualToConstant:8],
+
+        [titleLabel.leadingAnchor constraintEqualToAnchor:dot.trailingAnchor constant:8],
+        [titleLabel.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+
+        [pctLabel.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+        [pctLabel.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+        [pctLabel.widthAnchor constraintEqualToConstant:40],
+
+        [sizeLabel.trailingAnchor constraintEqualToAnchor:pctLabel.leadingAnchor constant:-8],
+        [sizeLabel.centerYAnchor constraintEqualToAnchor:row.centerYAnchor]
+    ]];
 }
 
-- (unsigned long long)directorySize:(NSString *)path {
+- (void)updateBackupUI:(NSDate *)lastBackup {
+    if (lastBackup) {
+        self.backupStatusLabel.text = @"Backup Available";
+        self.backupStatusLabel.textColor = [UIColor colorWithRed:0.3 green:0.8 blue:0.5 alpha:1.0];
+
+        NSDateComponents *comp = [[NSCalendar currentCalendar] components:NSCalendarUnitDay fromDate:lastBackup toDate:[NSDate date] options:0];
+        NSInteger days = comp.day;
+        if (days == 0) self.backupSubLabel.text = @"Last backup: Today";
+        else if (days == 1) self.backupSubLabel.text = @"Last backup: Yesterday";
+        else self.backupSubLabel.text = [NSString stringWithFormat:@"Last backup: %ld days ago", (long)days];
+
+        [self.backupActionBtn setTitle:@"Restore" forState:UIControlStateNormal];
+    } else {
+        self.backupStatusLabel.text = @"No Backup Available";
+        self.backupStatusLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+        self.backupSubLabel.text = @"Create a backup before deleting app data.";
+        [self.backupActionBtn setTitle:@"Backup" forState:UIControlStateNormal];
+    }
+}
+
+- (unsigned long long)dirSize:(NSString *)path {
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:path]) return 0;
-
     unsigned long long total = 0;
     NSArray *items = [fm subpathsAtPath:path];
     for (NSString *item in items) {
         @try {
-            NSString *fullPath = [path stringByAppendingPathComponent:item];
-            NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:[path stringByAppendingPathComponent:item] error:nil];
             if (attrs) total += [attrs fileSize];
         } @catch (NSException *e) { continue; }
     }
@@ -692,26 +892,40 @@
 
 - (void)backupTapped {
     NSString *bundleID = self.appInfo[@"bundleID"];
-    NSString *appName = self.appInfo[@"name"];
+    NSDate *lastBackup = [self.manager lastBackupDateForBundleID:bundleID];
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"نسخ %@ احتياطياً", appName]
-                                                                   message:@"سيتم إنشاء نسخة احتياطية كاملة من بيانات التطبيق."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"نسخ احتياطي" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            BOOL success = [self.manager backupAppData:bundleID];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (success) {
-                    [self showToast:@"تم إنشاء النسخة الاحتياطية ✅"];
-                    [self updateBackupStatus];
-                } else {
-                    [self showToast:@"فشل إنشاء النسخة الاحتياطية ❌"];
-                }
+    if (lastBackup) {
+        // Restore
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Restore Backup"
+                                                                       message:@"This will replace current app data with the backup."
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            NSArray *backups = [self.manager availableBackupsForBundleID:bundleID];
+            if (backups.count > 0) {
+                BOOL ok = [self.manager restoreAppData:bundleID fromBackup:backups[0]];
+                [self showToast:ok ? @"Restored successfully ✅" : @"Restore failed ❌"];
+                if (ok) [self loadData];
+            }
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+    } else {
+        // Create backup
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Backup %@?", self.appInfo[@"name"]]
+                                                                       message:@"A full backup of app data will be created."
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Backup" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                BOOL ok = [self.manager backupAppData:bundleID];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self showToast:ok ? @"Backup created ✅" : @"Backup failed ❌"];
+                    if (ok) [self loadData];
+                });
             });
-        });
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+    }
 }
 
 - (void)wipeTapped {
@@ -719,55 +933,47 @@
     NSString *appName = self.appInfo[@"name"];
 
     if ([self.manager isSystemApp:bundleID]) {
-        [self showToast:@"لا يمكن حذف بيانات تطبيق النظام ⛔"];
+        [self showToast:@"System apps cannot be wiped ⛔"];
         return;
     }
 
-    // حساب ما سيتم حذفه
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        SizeBreakdown *bd = [self calculateSizeBreakdownForBundleID:bundleID];
+        unsigned long long docs = [self dirSize:[[self.manager dataPathForBundleID:bundleID] stringByAppendingPathComponent:@"Documents"]];
+        unsigned long long lib = [self dirSize:[[self.manager dataPathForBundleID:bundleID] stringByAppendingPathComponent:@"Library"]];
+        unsigned long long cache = [self dirSize:[[[self.manager dataPathForBundleID:bundleID] stringByAppendingPathComponent:@"Library"] stringByAppendingPathComponent:@"Caches"]];
+        unsigned long long total = docs + lib + cache;
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSString *msg = [NSString stringWithFormat:@"سيتم حذف بيانات %@ بشكل دائم:\n\nDocuments    %@\nLibrary      %@\nCaches       %@\n\nإجمالي البيانات\n%@",
+            NSString *msg = [NSString stringWithFormat:@"This will permanently remove all data for %@:\n\nDocuments    %@\nLibrary      %@\nCaches       %@\n\nTotal: %@",
                              appName,
-                             [self.manager formatBytes:bd.documents],
-                             [self.manager formatBytes:bd.library],
-                             [self.manager formatBytes:bd.caches],
-                             [self.manager formatBytes:bd.total]];
+                             [self.manager formatBytes:docs],
+                             [self.manager formatBytes:lib],
+                             [self.manager formatBytes:cache],
+                             [self.manager formatBytes:total]];
 
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حذف بيانات التطبيق"
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Delete App Data"
                                                                            message:msg
                                                                     preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-
-            UIAlertAction *wipeAction = [UIAlertAction actionWithTitle:@"حذف البيانات" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Delete Data" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
                 dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    BOOL success = [self.manager wipeAppData:bundleID];
+                    BOOL ok = [self.manager wipeAppData:bundleID];
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        if (success) {
-                            [self showToast:@"تم حذف البيانات ✅"];
-                            [self loadDataSizes];
-                        } else {
-                            [self showToast:@"فشل الحذف ❌"];
-                        }
+                        [self showToast:ok ? @"Data deleted ✅" : @"Delete failed ❌"];
+                        if (ok) [self loadData];
                     });
                 });
-            }];
-            [alert addAction:wipeAction];
+            }]];
             [self presentViewController:alert animated:YES completion:nil];
         });
     });
-}
-
-- (void)deleteAppTapped {
-    [self wipeTapped];
 }
 
 #pragma mark - Helpers
 
 - (UIView *)createCard {
     UIView *card = [[UIView alloc] init];
-    card.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.11 alpha:1.0];
+    card.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.10 alpha:1.0];
     card.layer.cornerRadius = 16;
     card.layer.masksToBounds = YES;
     card.translatesAutoresizingMaskIntoConstraints = NO;
@@ -777,7 +983,7 @@
 - (void)showToast:(NSString *)message {
     UILabel *toast = [[UILabel alloc] init];
     toast.text = message;
-    toast.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    toast.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     toast.textColor = [UIColor whiteColor];
     toast.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.2 alpha:0.95];
     toast.textAlignment = NSTextAlignmentCenter;
@@ -789,20 +995,14 @@
     [self.view addSubview:toast];
     [NSLayoutConstraint activateConstraints:@[
         [toast.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [toast.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-30],
-        [toast.heightAnchor constraintEqualToConstant:40],
+        [toast.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-24],
+        [toast.heightAnchor constraintEqualToConstant:38],
         [toast.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.view.leadingAnchor constant:40]
     ]];
 
-    [UIView animateWithDuration:0.3 animations:^{
-        toast.alpha = 1.0;
-    } completion:^(BOOL finished) {
+    [UIView animateWithDuration:0.3 animations:^{ toast.alpha = 1.0; } completion:^(BOOL f) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [UIView animateWithDuration:0.3 animations:^{
-                toast.alpha = 0;
-            } completion:^(BOOL finished) {
-                [toast removeFromSuperview];
-            }];
+            [UIView animateWithDuration:0.3 animations:^{ toast.alpha = 0; } completion:^(BOOL f2) { [toast removeFromSuperview]; }];
         });
     }];
 }
