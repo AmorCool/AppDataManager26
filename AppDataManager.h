@@ -34,6 +34,7 @@
 
 // تصدير النسخ الاحتياطية
 - (NSString *)exportBackupsToZip:(NSError **)error;
+- (NSString *)backupDirectory;
 
 // مساحة التخزين الفعلية
 - (unsigned long long)totalFreeSpace;
