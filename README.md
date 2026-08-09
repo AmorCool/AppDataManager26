@@ -141,7 +141,7 @@ packages/
 بعد بناء الحزمة:
 
 ```bash
-scp packages/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb root@<your-iphone-ip>:/tmp/
+scp packages/com.aosaid.appdatamgr_1.3.0_iphoneos-arm64.deb root@<your-iphone-ip>:/tmp/
 ```
 
 الاتصال بالجهاز:
@@ -153,7 +153,7 @@ ssh root@<your-iphone-ip>
 تثبيت الحزمة:
 
 ```bash
-dpkg -i /tmp/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb
+dpkg -i /tmp/com.aosaid.appdatamgr_1.3.0_iphoneos-arm64.deb
 ```
 
 تحديث تسجيل التطبيق:
@@ -290,7 +290,7 @@ MIT License
 
 حالة المشروع
 
-الإصدار الحالي: 1.0.0
+الإصدار الحالي: 1.3.0
 
 نوع الحزمة: Rootless .deb
 
