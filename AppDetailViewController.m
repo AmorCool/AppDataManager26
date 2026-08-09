@@ -514,6 +514,8 @@
     self.backupBtn.layer.cornerRadius = 10;
     self.backupBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     [self.backupBtn setTitle:@"نسخ جديد" forState:UIControlStateNormal];
+    self.restoreBtn.hidden = YES;
+    self.restoreBtn.alpha = 0.0;
     [self.backupBtn setTitleColor:C_ACCENT forState:UIControlStateNormal];
     [self.backupBtn addTarget:self action:@selector(backupTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.backupCard addSubview:self.backupBtn];
@@ -767,11 +769,13 @@
         f.timeStyle = NSDateFormatterShortStyle;
         self.backupStatus.text = [NSString stringWithFormat:@"آخر نسخة: %@", [f stringFromDate:lastBackup]];
         self.backupStatus.textColor = [UIColor colorWithRed:0.35 green:0.75 blue:0.55 alpha:1.0];
-        [self.backupBtn setTitle:@"استعادة" forState:UIControlStateNormal];
+        self.restoreBtn.hidden = NO;
+        self.restoreBtn.alpha = 1.0;
     } else {
         self.backupStatus.text = @"لا توجد نسخة احتياطية";
         self.backupStatus.textColor = C_TEXT_SEC;
-        [self.backupBtn setTitle:@"نسخ احتياطي" forState:UIControlStateNormal];
+        self.restoreBtn.hidden = YES;
+        self.restoreBtn.alpha = 0.0;
     }
 }
 
