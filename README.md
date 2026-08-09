@@ -1,181 +1,285 @@
-# 📱 AppData Manager
-
-> **🔄 [دليل تحديث ورفع الأداة → WORKFLOW.md](WORKFLOW.md)**
-> 
-> للمطورين: اضغط على الرابط أعلاه لفهم كيفية التحديث والرفع والمزامنة
+> **للمطورين:** [دليل تحديث ورفع الأداة → WORKFLOW.md](WORKFLOW.md)
+>
+> اضغط على الرابط أعلاه لفهم كيفية التحديث والرفع والمزامنة
 
 ---
 
-# 🗑 AppData Manager
+# AppData Manager
 
-**Professional App Data Management Tool for iOS Jailbreak**
+مدير بيانات التطبيقات لنظام iOS
 
-[![iOS](https://img.shields.io/badge/iOS-15.0%2B-blue)](https://developer.apple.com/ios/)
-[![Jailbreak](https://img.shields.io/badge/Jailbreak-Rootless-green)](https://github.com/opa334/Dopamine)
-[![Dopamine](https://img.shields.io/badge/Dopamine-3.0-purple)](https://ellekit.space/dopamine/)
-[![Architecture](https://img.shields.io/badge/Arch-arm64%20arm64e-orange)](https://developer.apple.com/documentation/xcode/building_a_universal_mac_binary_with_xcode)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+أداة احترافية لإدارة بيانات التطبيقات على أجهزة iOS العاملة ضمن بيئة Jailbreak.
 
----
+يوفر AppData Manager مجموعة متكاملة من الأدوات لاستعراض بيانات التطبيقات، معرفة أحجامها، إنشاء النسخ الاحتياطية واستعادتها، وإزالة بيانات التطبيقات عند الحاجة، مع توفير حماية للبيانات والتطبيقات الحساسة للنظام.
 
-## ✨ Features
+المطور: ZAIN
 
-- 📱 **List All Apps** — View all installed applications with real-time data sizes
-- 🗑 **Wipe App Data** — Permanently delete app data (Documents, Library, Caches)
-- 🛡 **System App Protection** — Prevents accidental wiping of critical system apps
-- 📦 **Backup & Restore** — Create backups before wiping and restore anytime
-- 🔍 **Search** — Quickly find apps by name or bundle ID
-- 🌙 **Dark Mode** — Full support for iOS Dark Mode
-- 📊 **Data Size** — Real-time calculation of app data sizes
-- ⚡ **Rootless Compatible** — Works with Dopamine 3.0 and all rootless jailbreaks
-- 🍎 **iOS 18 Support** — Fully compatible with iOS 18.3.1
+⸻
 
----
+المميزات
 
-## 📸 Screenshots
+إدارة التطبيقات
 
-| Main Screen | App Actions | Backup Manager |
-|-------------|-------------|----------------|
-| List of all apps with sizes | Backup / Wipe / Restore options | View and manage all backups |
+عرض التطبيقات المثبتة على الجهاز مع معلوماتها الأساسية، بما في ذلك اسم التطبيق ومعرّف الحزمة وحجم البيانات.
 
----
+حساب حجم البيانات
 
-## 🚀 Installation
+حساب وعرض حجم بيانات كل تطبيق بشكل مباشر.
 
-### Via Sileo (Recommended)
+حذف بيانات التطبيق
 
-1. Add this repository to Sileo:
-   ```
-   https://aosaid3224-ops.github.io/repo/
-   ```
+إزالة بيانات التطبيق عند الحاجة، بما في ذلك:
 
-2. Search for **"AppData Manager"**
-3. Tap **Install**
+* Documents
+* Library
+* Caches
 
-### Direct Download
+النسخ الاحتياطي والاستعادة
 
-Visit: [aosaid3224-ops.github.io/repo](https://aosaid3224-ops.github.io/repo/)
+إنشاء نسخة احتياطية من بيانات التطبيق قبل تنفيذ عمليات الحذف، مع إمكانية إدارة النسخ الاحتياطية واستعادة البيانات لاحقًا.
 
-### Manual Installation
+البحث
 
-```bash
-# Build the package
-make clean
-make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+البحث السريع عن التطبيقات باستخدام اسم التطبيق أو Bundle ID.
 
-# Install via SSH
-scp packages/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb root@<your-iphone-ip>:/tmp/
-ssh root@<your-iphone-ip>
-dpkg -i /tmp/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb
-uicache -p /var/jb/Applications/AppDataManager.app
-```
+حماية تطبيقات النظام
 
----
+حماية التطبيقات والبيانات المصنفة كحرجة للنظام لمنع تنفيذ عمليات حذف غير مقصودة.
 
-## 🛠 Building from Source
+الوضع الداكن
 
-### Requirements
+دعم الوضع الداكن الأصلي لنظام iOS.
 
-- [Theos](https://theos.dev/docs/installation) installed
-- iOS 15.0+ SDK
-- Xcode Command Line Tools
+دعم Rootless
 
-### Quick Build
+مصمم للعمل ضمن بيئة Rootless المستخدمة في أحدث إصدار من Dopamine.
 
-```bash
-# Clone the repository
+⸻
+
+لقطات الواجهة
+
+الشاشة الرئيسية
+
+عرض جميع التطبيقات المثبتة وأحجام بياناتها مع إمكانية البحث والوصول إلى أدوات الإدارة.
+
+إجراءات التطبيق
+
+الوصول إلى عمليات النسخ الاحتياطي والحذف والاستعادة من خلال واجهة موحدة.
+
+مدير النسخ الاحتياطية
+
+عرض النسخ الاحتياطية الموجودة وإدارتها واستعادة بيانات التطبيقات عند الحاجة.
+
+⸻
+
+التثبيت
+
+عبر Sileo
+
+الطريقة الموصى بها لتثبيت AppData Manager.
+
+أضف المستودع التالي إلى Sileo:
+
+https://aosaid3224-ops.github.io/repo/
+
+بعد إضافة المستودع:
+
+1. افتح Sileo.
+2. ابحث عن AppData Manager.
+3. افتح الحزمة.
+4. اضغط على Install.
+5. نفّذ Respring إذا كان مطلوبًا.
+
+⸻
+
+التحميل المباشر
+
+يمكن الحصول على أحدث حزمة من مستودع المشروع:
+
+https://aosaid3224-ops.github.io/repo/
+
+⸻
+
+البناء من المصدر
+
+المتطلبات
+
+* Theos
+* iOS SDK 15.0 أو أحدث
+* Xcode Command Line Tools
+* بيئة Jailbreak متوافقة للاختبار
+
+البناء السريع
+
 git clone https://github.com/aosaid3224-ops/AppDataManager.git
 cd AppDataManager
-
-# Build for Dopamine 3.0 / Rootless
 ./build.sh
-```
 
-### Manual Build
+البناء اليدوي
 
-```bash
 make clean
 make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
-```
 
-The `.deb` file will be in the `packages/` directory.
+ستجد الحزمة الناتجة داخل:
 
----
+packages/
 
-## 📋 Compatibility
+⸻
 
-| Jailbreak | iOS Version | Device | Status |
-|-----------|-------------|--------|--------|
-| **Dopamine 3.0** | iOS 15.0 - 18.7.1 | A8 - A17, M1-M2 | ✅ Fully Supported |
-| Dopamine 2.x | iOS 15.0 - 16.6.1 | A8 - A16 | ✅ Supported |
-| Palera1n | iOS 15.0 - 17.x | A8 - A11 | ✅ Supported |
-| XinaA15 | iOS 15.0 - 15.4.1 | A12+ | ⚠️ Untested |
+التثبيت عبر SSH
 
----
+بعد بناء الحزمة:
 
-## ⚠️ Important Notes
+scp packages/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb root@<your-iphone-ip>:/tmp/
 
-- **This app runs unsandboxed** with root privileges
-- **System apps are protected** — wipe action is disabled for critical system apps
-- **Always backup before wiping** — data deletion is permanent
-- **Use at your own risk**
+الاتصال بالجهاز:
 
----
+ssh root@<your-iphone-ip>
 
-## 🏗 Project Structure
+تثبيت الحزمة:
 
-```
+dpkg -i /tmp/com.aosaid.appdatamgr_1.0.0_iphoneos-arm64.deb
+
+تحديث تسجيل التطبيق:
+
+uicache -p /var/jb/Applications/AppDataManager.app
+
+قد يتغير اسم الحزمة أو مسار التطبيق في الإصدارات المستقبلية.
+
+⸻
+
+التوافق
+
+AppData Manager مبني على Dopamine 3.0، ولذلك يعتمد نطاق توافقه على الأجهزة وإصدارات iOS المدعومة من أحدث إصدار من Dopamine.
+
+المعمارية	إصدارات iOS المدعومة
+A12 / A12X / A12Z / A13	iOS 16.6 – 18.7.1، و iOS 26.0 – 26.0.1
+A14 / M1	iOS 16.6 – 17.3.1
+A15 / A16 / A17 / M2	iOS 16.5.1 – 17.3.1
+A10	iOS 15.8.7 – 15.8.8، و iOS 16.7 – 18.7.1
+A10X	iOS 15.8.7 – 15.8.8، و iOS 16.7 – 17.7.11
+A9 / A9X / A11	iOS 15.8.7 – 16.7.16
+A8 / A8X	iOS 15.8.7 – 15.8.8
+
+لا يستهدف المشروع إصدارات Dopamine القديمة بشكل منفصل. يعتمد توافق AppData Manager على نطاق دعم Dopamine 3.0 واختبارات المشروع.
+
+⸻
+
+ملاحظات مهمة
+
+AppData Manager يعمل ضمن بيئة Jailbreak ويحتاج إلى الصلاحيات التي توفرها هذه البيئة لتنفيذ عمليات إدارة بيانات التطبيقات.
+
+قبل استخدام عمليات الحذف:
+
+* أنشئ نسخة احتياطية من البيانات المهمة.
+* تأكد من اختيار التطبيق الصحيح.
+* انتبه إلى أن حذف البيانات قد يكون نهائيًا.
+* اختبر الإصدارات الجديدة قبل استخدامها على جهاز أساسي.
+
+تتم حماية التطبيقات والبيانات الحساسة للنظام من عمليات الحذف المدعومة.
+
+استخدم الأداة على مسؤوليتك الخاصة.
+
+⸻
+
+سير عمل المطور
+
+يحتوي المشروع على ملف:
+
+WORKFLOW.md
+
+وهو مخصص للمطورين والمساهمين، ويشرح دورة العمل الخاصة بالمشروع.
+
+يتضمن:
+
+* تحديث المشروع
+* تطوير الميزات
+* بناء الحزمة
+* إنشاء ملفات .deb
+* رفع الإصدارات
+* تحديث المستودع
+* المزامنة
+* إدارة الإصدارات
+* عملية النشر
+
+⸻
+
+بنية المشروع
+
 AppDataManager/
-├── Makefile                          # Theos build configuration
-├── control                           # Package metadata
-├── entitlements.plist                # Sandbox bypass entitlements
-├── build.sh                          # Automated build script
-├── install.sh                        # Direct install script
-├── main.m                            # Entry point
-├── AppDelegate.h/m                   # App delegate
-├── ViewController.h/m                # Main app list UI
-├── AppDataManager.h/m                # Core data management logic
-├── BackupManagerViewController.h/m   # Backup management UI
+├── Makefile
+├── control
+├── entitlements.plist
+├── build.sh
+├── install.sh
+│
+├── main.m
+├── AppDelegate.h
+├── AppDelegate.m
+├── ViewController.h
+├── ViewController.m
+├── AppDataManager.h
+├── AppDataManager.m
+├── BackupManagerViewController.h
+├── BackupManagerViewController.m
+│
 ├── Resources/
-│   └── Info.plist                    # App info
-├── layout/DEBIAN/
-│   ├── postinst                      # Post-install script
-│   └── prerm                         # Pre-remove script
-└── README.md                         # This file
-```
+│   └── Info.plist
+│
+├── layout/
+│   └── DEBIAN/
+│       ├── postinst
+│       └── prerm
+│
+└── README.md
 
----
+⸻
 
-## 🙏 Credits
+الاعتمادات
 
-- [opa334](https://github.com/opa334) — Dopamine Jailbreak & libroot
-- [Theos](https://theos.dev) — Build system
-- [ElleKit](https://ellekit.space) — Tweak injection
+يعتمد المشروع على عدد من الأدوات والمكونات مفتوحة المصدر المستخدمة في تطوير بيئات iOS Jailbreak، من بينها:
 
----
+* Dopamine
+* libroot
+* Theos
+* ElleKit
 
-## 📄 License
+⸻
 
-This project is licensed under the MIT License.
+المطور
 
----
+ZAIN
 
-**Made with ❤️ by aosaid3224**
+للتواصل والدعم عبر X (Twitter):
 
+@Zainqkvd
 
-<!-- Build trigger: 2026-08-08 -->
+AppData Manager هو مشروع متخصص في إدارة بيانات التطبيقات على أجهزة iOS العاملة ضمن بيئات Jailbreak.
 
-<!-- CI trigger: production pipeline v1 -->
+⸻
 
-<!-- CI trigger: fix broken pipe v2 -->
+الترخيص
 
-<!-- CI trigger: fix validation v3 -->
+هذا المشروع مرخص بموجب:
 
-<!-- CI trigger: PAT secret added, Pages enabled -->
+MIT License
 
-<!-- CI trigger: v5 production pipeline with GITHUB_TOKEN and gh-pages validation -->
+⸻
 
-<!-- CI trigger: v6 publish to external repo -->
+حالة المشروع
 
+الإصدار الحالي: 1.0.0
 
-<!-- Build trigger: v1.2.2 stability fix -->
+نوع الحزمة: Rootless .deb
+
+التوزيع: Sileo Repository
+
+المنصة: iOS
+
+بيئة التشغيل المستهدفة: Dopamine 3.0
+
+⸻
+
+AppData Manager
+
+Developed by ZAIN
