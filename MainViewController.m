@@ -197,6 +197,7 @@
 @property (nonatomic, strong) UIRefreshControl *refreshControl;
 @property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, assign) BOOL isCalculatingSizes;
 @end
 
 @implementation MainViewController
@@ -279,16 +280,21 @@
     [self.view addSubview:self.statusLabel];
 }
 
+#pragma mark - Fast Loading
+
 - (void)loadApps {
     [self.loadingIndicator startAnimating];
     self.statusLabel.text = @"Loading applications...";
     self.statusLabel.hidden = NO;
     self.tableView.hidden = YES;
 
+    // Clear cache on refresh
+    [self.manager clearCache];
+
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // FAST: Get apps WITHOUT calculating sizes
         self.allApps = [self.manager allInstalledApplications];
         self.filteredApps = self.allApps;
-        unsigned long long totalSize = [self.manager totalAppsDataSize];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.loadingIndicator stopAnimating];
@@ -297,11 +303,70 @@
             [self.refreshControl endRefreshing];
 
             self.statsView.appsCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.allApps.count];
-            self.statsView.sizeLabel.text = [self.manager formatBytes:totalSize];
+            self.statsView.sizeLabel.text = @"Calculating...";
 
             [self.tableView reloadData];
+
+            // NOW calculate sizes in background
+            [self calculateSizesInBackground];
         });
     });
+}
+
+- (void)calculateSizesInBackground {
+    if (self.isCalculatingSizes) return;
+    self.isCalculatingSizes = YES;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        NSMutableArray *updatedApps = [NSMutableArray array];
+        unsigned long long totalSize = 0;
+
+        for (NSMutableDictionary *app in self.allApps) {
+            NSString *bundleID = app[@"bundleID"];
+
+            // Calculate size
+            unsigned long long size = [self.manager dataSizeForBundleID:bundleID];
+            NSString *sizeStr = [self.manager formatBytes:size];
+
+            NSMutableDictionary *updatedApp = [app mutableCopy];
+            updatedApp[@"size"] = @(size);
+            updatedApp[@"sizeString"] = sizeStr;
+            [updatedApps addObject:updatedApp];
+
+            totalSize += size;
+
+            // Update UI every 5 apps to avoid lag
+            if ([updatedApps count] % 5 == 0) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self.statsView.sizeLabel.text = [self.manager formatBytes:totalSize];
+                    // Update visible cells only
+                    [self updateVisibleCellSizes];
+                });
+            }
+        }
+
+        self.allApps = updatedApps;
+        self.filteredApps = self.allApps;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.statsView.sizeLabel.text = [self.manager formatBytes:totalSize];
+            [self.tableView reloadData];
+            self.isCalculatingSizes = NO;
+        });
+    });
+}
+
+- (void)updateVisibleCellSizes {
+    NSArray *visiblePaths = [self.tableView indexPathsForVisibleRows];
+    for (NSIndexPath *path in visiblePaths) {
+        if (path.row < self.filteredApps.count) {
+            NSDictionary *app = self.filteredApps[path.row];
+            AppListCell *cell = [self.tableView cellForRowAtIndexPath:path];
+            if ([cell isKindOfClass:[AppListCell class]]) {
+                cell.sizeLabel.text = app[@"sizeString"];
+            }
+        }
+    }
 }
 
 #pragma mark - UITableViewDataSource
@@ -326,7 +391,7 @@
     cell.bundleLabel.text = app[@"bundleID"];
     cell.sizeLabel.text = app[@"sizeString"];
 
-    // Load icon
+    // Load icon async
     NSString *bundleID = app[@"bundleID"];
     UIImage *icon = [self.manager iconForBundleID:bundleID];
     if (icon) {
