@@ -62,7 +62,7 @@
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"Version";
-        cell.detailTextLabel.text = @"1.3.1";
+        cell.detailTextLabel.text = @"1.3.2";
         cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.42 green:0.31 blue:0.90 alpha:1.0]];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"Clear All Backups", @"Export Backups", @"Import Backups"];
