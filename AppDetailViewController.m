@@ -513,7 +513,7 @@
     self.backupBtn.backgroundColor = [UIColor colorWithRed:0.769 green:0.655 blue:0.490 alpha:0.12];
     self.backupBtn.layer.cornerRadius = 10;
     self.backupBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    [self.backupBtn setTitle:@"نسخ جديد" forState:UIControlStateNormal];
+    [self.backupBtn setTitle:@"نسخة احتياطية جديدة" forState:UIControlStateNormal];
     self.restoreBtn.hidden = YES;
     self.restoreBtn.alpha = 0.0;
     [self.backupBtn setTitleColor:C_ACCENT forState:UIControlStateNormal];
