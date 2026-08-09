@@ -409,7 +409,6 @@
     [self wipeAppData:bundleID];
 
     BOOL allSuccess = YES;
-    NSUInteger successCount = 0;
 
     if (manifestPaths && manifestPaths.count > 0) {
         for (NSDictionary *pathInfo in manifestPaths) {
@@ -436,7 +435,6 @@
                     BOOL copied = [fm copyItemAtPath:itemSrc toPath:itemDst error:&err];
                     if (copied) {
                         [fm setAttributes:@{NSFileOwnerAccountName: @"mobile", NSFileGroupOwnerAccountName: @"mobile"} ofItemAtPath:itemDst error:nil];
-                        successCount++;
                     } else {
                         NSLog(@"[AppDataManager] ⚠️ Failed to restore %@: %@", item, err);
                         allSuccess = NO;
