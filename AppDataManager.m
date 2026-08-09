@@ -455,30 +455,33 @@
 
     UIImage *icon = nil;
 
-    // Method 1: Private API _applicationIconImageForBundleIdentifier (iOS 15-26)
+    // Method 1: LSApplicationProxy iconDataForVariant (most reliable)
     @try {
-        if ([UIImage respondsToSelector:@selector(_applicationIconImageForBundleIdentifier:format:scale:)]) {
-            icon = [UIImage _applicationIconImageForBundleIdentifier:bundleID format:10 scale:[UIScreen mainScreen].scale];
+        Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
+        if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
+            id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
+            if (proxy) {
+                // Try different variant sizes
+                NSArray *variants = @[@(0), @(1), @(2), @(10)];
+                for (NSNumber *variant in variants) {
+                    if ([proxy respondsToSelector:@selector(iconDataForVariant:)]) {
+                        NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:variant];
+                        if (iconData) {
+                            icon = [UIImage imageWithData:iconData];
+                            if (icon) break;
+                        }
+                    }
+                }
+
+                // Alternative: iconForDisplayIdentifier
+                if (!icon && [proxy respondsToSelector:@selector(iconForDisplayIdentifier:withFormat:)]) {
+                    icon = [proxy performSelector:@selector(iconForDisplayIdentifier:withFormat:) withObject:bundleID withObject:@(10)];
+                }
+            }
         }
     } @catch (NSException *e) {}
 
-    // Method 2: LSApplicationProxy icon variant
-    if (!icon) {
-        @try {
-            Class LSApplicationProxy_class = objc_getClass("LSApplicationProxy");
-            if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
-                id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
-                if (proxy && [proxy respondsToSelector:@selector(iconDataForVariant:)]) {
-                    NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:@(2)];
-                    if (iconData) {
-                        icon = [UIImage imageWithData:iconData];
-                    }
-                }
-            }
-        } @catch (NSException *e) {}
-    }
-
-    // Method 3: Get icon from app bundle
+    // Method 2: Get icon from app bundle directly
     if (!icon) {
         @try {
             NSString *appPath = nil;
@@ -499,11 +502,23 @@
                     if (!iconFiles) {
                         iconFiles = info[@"CFBundleIconFiles"];
                     }
+                    if (!iconFiles) {
+                        iconFiles = @[info[@"CFBundleIconFile"] ?: @"AppIcon60x60"];
+                    }
                     if (iconFiles && iconFiles.count > 0) {
-                        NSString *iconName = [iconFiles lastObject];
-                        NSString *iconPath = [appPath stringByAppendingPathComponent:[iconName stringByAppendingString:@".png"]];
-                        if ([[NSFileManager defaultManager] fileExistsAtPath:iconPath]) {
-                            icon = [UIImage imageWithContentsOfFile:iconPath];
+                        for (NSString *iconName in [iconFiles reverseObjectEnumerator]) {
+                            NSString *iconPath = [appPath stringByAppendingPathComponent:[iconName stringByAppendingString:@".png"]];
+                            NSString *iconPath2x = [appPath stringByAppendingPathComponent:[iconName stringByAppendingString:@"@2x.png"]];
+                            NSString *iconPath3x = [appPath stringByAppendingPathComponent:[iconName stringByAppendingString:@"@3x.png"]];
+
+                            if ([[NSFileManager defaultManager] fileExistsAtPath:iconPath3x]) {
+                                icon = [UIImage imageWithContentsOfFile:iconPath3x];
+                            } else if ([[NSFileManager defaultManager] fileExistsAtPath:iconPath2x]) {
+                                icon = [UIImage imageWithContentsOfFile:iconPath2x];
+                            } else if ([[NSFileManager defaultManager] fileExistsAtPath:iconPath]) {
+                                icon = [UIImage imageWithContentsOfFile:iconPath];
+                            }
+                            if (icon) break;
                         }
                     }
                 }
