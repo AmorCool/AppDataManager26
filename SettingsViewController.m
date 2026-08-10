@@ -68,7 +68,7 @@
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"الإصدار";
-        cell.detailTextLabel.text = @"1.3.3";
+        cell.detailTextLabel.text = @"1.3.4";
         cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.42 green:0.31 blue:0.90 alpha:1.0]];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"مسح كل النسخ", @"تصدير النسخ", @"استيراد النسخ"];
@@ -142,7 +142,7 @@
             [self showToast:@"انسخ ملفات النسخ إلى مجلد النسخ الاحتياطية"];
         }
     } else if (indexPath.section == 2) {
-        NSString *info = @"AppData Manager v1.3.3\n\n"
+        NSString *info = @"AppData Manager v1.3.4\n\n"
             @"أداة احترافية لإدارة بيانات التطبيقات\n"
             @"لأجهزة iOS Jailbreak.\n\n"
             @"• متوافق مع Dopamine 3.0\n"
