@@ -1,0 +1,74 @@
+name: Build Repo
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: repo
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Setup dependencies
+        run: brew install dpkg ldid
+
+      - name: Fix permissions
+        run: |
+          chmod +x source/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/layout/DEBIAN/prerm 2>/dev/null || true
+          chmod +x source/IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/IPAInstallerPro/layout/DEBIAN/prerm 2>/dev/null || true
+
+      - name: Build AppDataManager
+        run: |
+          cd source
+          make clean
+          make package
+
+      - name: Build IPA Installer Pro
+        run: |
+          cd source/IPAInstallerPro
+          make clean
+          make package
+
+      - name: Deploy
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub CI"
+
+          mkdir -p repo/pool/main/iphoneos-arm64
+          cp source/packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
+          cp source/IPAInstallerPro/packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
+
+          cd repo
+          python3 ../source/scripts/generate-repo.py .
+
+          echo "Origin: A-ZAIN Repo" > Release
+          echo "Label: A-ZAIN" >> Release
+          echo "Suite: stable" >> Release
+          echo "Version: 1.0" >> Release
+          echo "Codename: ios" >> Release
+          echo "Architectures: iphoneos-arm64" >> Release
+          echo "Components: main" >> Release
+          echo "Description: A-ZAIN Repo - Jailbreak tools and utilities" >> Release
+
+          git add -A
+          git commit -m "Update repo" || true
+          git push origin gh-pages
