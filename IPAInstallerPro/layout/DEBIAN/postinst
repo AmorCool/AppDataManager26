@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+JB_ROOT="/var/jb"
+if [ ! -d "$JB_ROOT" ]; then
+    JB_ROOT=""
+fi
+
+APP_PATH="${JB_ROOT}/Applications/IPAInstallerPro.app"
+
+echo "📦 IPA Installer Pro — Dopamine 3.0 / Rootless"
+
+if command -v uicache &> /dev/null; then
+    uicache -p "$APP_PATH" 2>/dev/null || uicache -p /Applications/IPAInstallerPro.app 2>/dev/null || true
+fi
+
+if [ -d "$APP_PATH" ]; then
+    chown -R root:wheel "$APP_PATH"
+    chmod 755 "$APP_PATH"
+    chmod +x "$APP_PATH/IPAInstallerPro" 2>/dev/null || true
+fi
+
+# Auto-install dependencies if missing (should already be handled by Depends, but safety net)
+if ! command -v appinst &> /dev/null && ! command -v ${JB_ROOT}/usr/bin/appinst &> /dev/null; then
+    echo "⚙️  Installing appinst..."
+    apt-get update 2>/dev/null || true
+    apt-get install -y ai.akemi.appinst 2>/dev/null || true
+fi
+
+if ! command -v unzip &> /dev/null && ! command -v ${JB_ROOT}/usr/bin/unzip &> /dev/null; then
+    echo "⚙️  Installing unzip..."
+    apt-get install -y unzip 2>/dev/null || true
+fi
+
+echo "✅ IPA Installer Pro ready"
+exit 0

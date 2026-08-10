@@ -1,0 +1,9 @@
+Package: com.aosaid.ipainstallerpro
+Name: IPA Installer Pro
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Professional IPA Installer for iOS Jailbreak — Dopamine 3.0 Ready
+Maintainer: ZAIN <@Zainqkvd>
+Author: ZAIN <@Zainqkvd>
+Section: Utilities
+Depends: firmware (>= 15.0), ai.akemi.appsyncunified, ai.akemi.appinst, unzip
