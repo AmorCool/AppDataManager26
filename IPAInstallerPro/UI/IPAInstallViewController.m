@@ -1,7 +1,7 @@
 #import "IPAInstallViewController.h"
 #import "InstallationProgressViewController.h"
 #import "Core/InstallationEngine.h"
-#import "Core/DependencyManager.h"
+#import "Core/CapabilityManager.h"
 #import "Core/Logger.h"
 #import "Core/IPAValidator.h"
 
@@ -161,13 +161,12 @@
 - (void)installTapped:(UIButton *)sender {
     if (!self.isValid) return;
 
-    // Check dependencies
-    DependencyManager *depMgr = [DependencyManager sharedManager];
-    [depMgr refreshStatus];
-    Dependency *appInstDep = [depMgr dependencyForPackageID:@"ai.akemi.appinst"];
+    // Check installation readiness
+    CapabilityManager *capMgr = [CapabilityManager sharedManager];
+    [capMgr scanCapabilities];
 
-    if (!appInstDep.isInstalled) {
-        [self showDependencyAlert:appInstDep];
+    if (!capMgr.canInstallIPA) {
+        [self showReadinessAlert:capMgr];
         return;
     }
 
@@ -179,16 +178,12 @@
     [self presentViewController:progressVC animated:YES completion:nil];
 }
 
-- (void)showDependencyAlert:(Dependency *)dep {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تبعية مطلوبة"
-        message:[NSString stringWithFormat:@"%@ غير مثبت. يرجى تثبيته من الريبو الرسمي.", dep.name]
+- (void)showReadinessAlert:(CapabilityManager *)capMgr {
+    NSString *status = [capMgr installationReadinessStatus];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"جاهزية التثبيت"
+        message:status
         preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"فتح الريبو" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-        if (dep.repoURL) {
-            [[UIApplication sharedApplication] openURL:[NSURL URLWithString:dep.repoURL] options:@{} completionHandler:nil];
-        }
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
