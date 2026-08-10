@@ -1,4 +1,5 @@
 #import "CapabilityManager.h"
+#import <objc/runtime.h>
 #import "Logger.h"
 #import "RootlessManager.h"
 
