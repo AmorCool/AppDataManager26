@@ -2,12 +2,10 @@
 set -e
 
 echo "=========================================="
-echo " 📱 AppData Manager v1.0.0"
+echo " 📱 AppData Manager v1.4.0"
 echo " Dopamine 3.0 / Rootless Compatible"
-echo " First Stable Release"
 echo "=========================================="
 
-# تحديد مسار الجيلبريك (Dopamine 3.0 يستخدم /var/jb/)
 JB_ROOT="/var/jb"
 if [ ! -d "$JB_ROOT" ]; then
     JB_ROOT=""
@@ -15,7 +13,6 @@ fi
 
 APP_PATH="${JB_ROOT}/Applications/AppDataManager.app"
 
-# إنشاء مجلد النسخ الاحتياطية
 BACKUP_DIR="/var/mobile/Documents/AppDataBackups"
 if [ ! -d "$BACKUP_DIR" ]; then
     mkdir -p "$BACKUP_DIR"
@@ -24,7 +21,6 @@ if [ ! -d "$BACKUP_DIR" ]; then
     echo "✅ Backup directory created at $BACKUP_DIR"
 fi
 
-# تحديث uicache (Dopamine 3.0)
 if command -v uicache &> /dev/null; then
     echo "🔄 Updating icon cache..."
     if [ -d "$APP_PATH" ]; then
@@ -35,7 +31,6 @@ if command -v uicache &> /dev/null; then
     echo "✅ Icon cache updated"
 fi
 
-# إصلاح صلاحيات
 if [ -d "$APP_PATH" ]; then
     chown -R root:wheel "$APP_PATH"
     chmod 755 "$APP_PATH"
@@ -45,7 +40,6 @@ fi
 echo ""
 echo "✅ Installation Complete!"
 echo "📲 Open 'AppData Manager' from your home screen"
-echo "🔧 Compatible with Dopamine 3.0 & Rootless Jailbreak"
 echo ""
 
 exit 0
