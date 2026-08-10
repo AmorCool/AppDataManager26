@@ -1,4 +1,5 @@
 #import "InstallationProgressViewController.h"
+#import <objc/runtime.h>
 #import "Core/InstallationEngine.h"
 #import "Core/Logger.h"
 
