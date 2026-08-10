@@ -46,7 +46,7 @@ jobs:
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub CI"
 
-          # Save .deb and scripts before switching branches
+          # Save new .deb and scripts before switching branches
           mkdir -p /tmp/deploy
           find . -name '*.deb' -type f -exec cp {} /tmp/deploy/ \;
           cp -r scripts /tmp/deploy/scripts
@@ -54,12 +54,14 @@ jobs:
           git fetch origin gh-pages || true
           git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
 
-          git rm -rf . 2>/dev/null || true
-          rm -rf * 2>/dev/null || true
-
+          # Preserve existing .debs in pool
           mkdir -p pool/main/iphoneos-arm64
+          git checkout gh-pages -- pool/main/iphoneos-arm64/*.deb 2>/dev/null || true
+
+          # Copy new .deb
           cp /tmp/deploy/*.deb pool/main/iphoneos-arm64/
 
+          # Regenerate Packages with ALL .debs
           python3 /tmp/deploy/scripts/generate-repo.py .
 
           echo "Origin: A-ZAIN Repo" > Release
@@ -72,5 +74,5 @@ jobs:
           echo "Description: A-ZAIN Repo - Jailbreak tools and utilities" >> Release
 
           git add -A
-          git commit -m "Add IPA Installer Pro" || true
+          git commit -m "Update repo: add IPA Installer Pro alongside existing packages" || true
           git push origin gh-pages --force
