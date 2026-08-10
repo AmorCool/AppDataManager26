@@ -1,4 +1,5 @@
 #import "JailbreakEnvironment.h"
+#import <UIKit/UIKit.h>
 #import "Logger.h"
 #import "rootless.h"
 #include <sys/utsname.h>
