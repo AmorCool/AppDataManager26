@@ -62,7 +62,8 @@
     BOOL hasLaunched = [defaults boolForKey:@"HasLaunchedBefore"];
 
     if (!hasLaunched) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        // تأخير بسيط حتى تكتمل واجهة التطبيق وتظهر بسلاسة
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             NSString *message = @"\n"
                 @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
                 @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
