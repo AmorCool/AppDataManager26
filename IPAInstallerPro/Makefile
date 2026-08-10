@@ -31,7 +31,7 @@ IPAInstallerPro_FILES = \
     UI/AppDetailsViewController.m \
     UI/SettingsViewController.m
 
-IPAInstallerPro_FRAMEWORKS = UIKit CoreGraphics
+IPAInstallerPro_FRAMEWORKS = UIKit CoreGraphics UniformTypeIdentifiers
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
 IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-format
 IPAInstallerPro_CODESIGN_FLAGS = -Sentitlements.plist
