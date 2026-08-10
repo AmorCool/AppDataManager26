@@ -1,0 +1,52 @@
+name: Build Packages and Upload Artifacts
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Setup dependencies
+        run: brew install dpkg ldid
+
+      - name: Fix postinst/prerm permissions
+        run: |
+          chmod +x layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x layout/DEBIAN/prerm 2>/dev/null || true
+          chmod +x IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x IPAInstallerPro/layout/DEBIAN/prerm 2>/dev/null || true
+
+      - name: Build AppDataManager
+        run: |
+          make clean
+          make package
+
+      - name: Build IPA Installer Pro
+        run: |
+          cd IPAInstallerPro
+          make clean
+          make package
+
+      - name: Upload AppDataManager deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: appdatamanager-deb
+          path: packages/*.deb
+
+      - name: Upload IPA Installer Pro deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipainstallerpro-deb
+          path: IPAInstallerPro/packages/*.deb
