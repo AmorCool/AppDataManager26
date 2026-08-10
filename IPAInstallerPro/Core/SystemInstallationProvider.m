@@ -1,6 +1,9 @@
 #import "SystemInstallationProvider.h"
 #import <objc/runtime.h>
 #import "Logger.h"
+#import "RootlessManager.h"
+#include <spawn.h>
+#include <sys/wait.h>
 
 @implementation SystemInstallationProvider
 
@@ -39,13 +42,55 @@
             return;
         }
 
-        // Try to install using openApplicationWithBundleID or similar
-        // Note: Direct IPA installation via LSApplicationWorkspace is limited on modern iOS
-        // This is a fallback provider
+        // Try installApplication:withOptions:error: or installApplication:withOptions:
+        BOOL installed = NO;
+        NSString *errorMsg = nil;
+
+        @try {
+            // Method 1: installApplication:withOptions:error: (iOS 11+)
+            if ([workspace respondsToSelector:@selector(installApplication:withOptions:error:)]) {
+                NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
+                NSMutableDictionary *options = [NSMutableDictionary dictionary];
+                options[@"PackageType"] = @"User";
+                options[@"ApplicationType"] = @"User";
+
+                NSError *installError = nil;
+                installed = [workspace installApplication:ipaURL withOptions:options error:&installError];
+                if (!installed && installError) {
+                    errorMsg = installError.localizedDescription;
+                }
+            }
+            // Method 2: installApplication:withOptions: (older iOS)
+            else if ([workspace respondsToSelector:@selector(installApplication:withOptions:)]) {
+                NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
+                NSMutableDictionary *options = [NSMutableDictionary dictionary];
+                options[@"PackageType"] = @"User";
+                options[@"ApplicationType"] = @"User";
+
+                installed = [workspace installApplication:ipaURL withOptions:options];
+            }
+            // Method 3: installApplication: (oldest)
+            else if ([workspace respondsToSelector:@selector(installApplication:)]) {
+                NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
+                installed = [workspace installApplication:ipaURL];
+            }
+            else {
+                errorMsg = @"لا توجد طريقة تثبيت متاحة عبر النظام";
+            }
+        } @catch (NSException *e) {
+            errorMsg = [NSString stringWithFormat:@"استثناء أثناء التثبيت: %@", e.reason];
+            [[Logger sharedLogger] error:errorMsg];
+        }
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            completion([InstallationResult failureResult:@"التثبيت المباشر عبر النظام غير مدعوم في هذا الإصدار"
-                                                  error:[NSError errorWithDomain:@"IPAInstallerPro" code:-3 userInfo:nil]]);
+            if (installed) {
+                InstallationResult *result = [InstallationResult successResult:@"تم التثبيت عبر النظام بنجاح"];
+                completion(result);
+            } else {
+                NSString *msg = errorMsg ?: @"فشل التثبيت عبر النظام";
+                completion([InstallationResult failureResult:msg
+                                                          error:[NSError errorWithDomain:@"IPAInstallerPro" code:-3 userInfo:@{NSLocalizedDescriptionKey: msg}]]);
+            }
         });
     });
 }
