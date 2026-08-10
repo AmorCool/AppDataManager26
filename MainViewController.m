@@ -2,7 +2,7 @@
 #import "AppDataManager.h"
 #import "AppDetailViewController.h"
 
-// MARK: - Custom App Cell
+// MARK: - Custom App Cell (Redesigned)
 @interface AppListCell : UITableViewCell
 @property (nonatomic, strong) UIImageView *appIcon;
 @property (nonatomic, strong) UILabel *nameLabel;
@@ -20,8 +20,8 @@
         self.selectionStyle = UITableViewCellSelectionStyleNone;
 
         _containerView = [[UIView alloc] init];
-        _containerView.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.12 alpha:1.0];
-        _containerView.layer.cornerRadius = 12;
+        _containerView.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.13 alpha:1.0];
+        _containerView.layer.cornerRadius = 14;
         _containerView.layer.masksToBounds = YES;
         _containerView.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_containerView];
@@ -30,61 +30,62 @@
         _appIcon.layer.cornerRadius = 10;
         _appIcon.layer.masksToBounds = YES;
         _appIcon.contentMode = UIViewContentModeScaleAspectFit;
+        _appIcon.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:1.0];
         _appIcon.translatesAutoresizingMaskIntoConstraints = NO;
         [_containerView addSubview:_appIcon];
 
         _nameLabel = [[UILabel alloc] init];
-        _nameLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        _nameLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         _nameLabel.textColor = [UIColor whiteColor];
         _nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [_containerView addSubview:_nameLabel];
 
         _bundleLabel = [[UILabel alloc] init];
-        _bundleLabel.font = [UIFont systemFontOfSize:11];
-        _bundleLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+        _bundleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
+        _bundleLabel.textColor = [UIColor colorWithWhite:0.40 alpha:1.0];
         _bundleLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [_containerView addSubview:_bundleLabel];
 
         _sizeLabel = [[UILabel alloc] init];
-        _sizeLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-        _sizeLabel.textColor = [UIColor colorWithRed:0.4 green:0.3 blue:0.9 alpha:1.0];
+        _sizeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+        _sizeLabel.textColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
         _sizeLabel.textAlignment = NSTextAlignmentRight;
         _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [_containerView addSubview:_sizeLabel];
 
         UIImageView *arrow = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-        arrow.tintColor = [UIColor colorWithWhite:0.3 alpha:1.0];
+        arrow.tintColor = [UIColor colorWithWhite:0.25 alpha:1.0];
         arrow.translatesAutoresizingMaskIntoConstraints = NO;
         [_containerView addSubview:arrow];
 
         [NSLayoutConstraint activateConstraints:@[
-            [_containerView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:4],
+            [_containerView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:5],
             [_containerView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
             [_containerView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
-            [_containerView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-4],
-            [_containerView.heightAnchor constraintEqualToConstant:72],
+            [_containerView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-5],
+            [_containerView.heightAnchor constraintEqualToConstant:68],
 
             [_appIcon.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor constant:12],
             [_appIcon.centerYAnchor constraintEqualToAnchor:_containerView.centerYAnchor],
-            [_appIcon.widthAnchor constraintEqualToConstant:48],
-            [_appIcon.heightAnchor constraintEqualToConstant:48],
+            [_appIcon.widthAnchor constraintEqualToConstant:44],
+            [_appIcon.heightAnchor constraintEqualToConstant:44],
 
             [_nameLabel.leadingAnchor constraintEqualToAnchor:_appIcon.trailingAnchor constant:12],
             [_nameLabel.topAnchor constraintEqualToAnchor:_containerView.topAnchor constant:14],
             [_nameLabel.trailingAnchor constraintEqualToAnchor:_sizeLabel.leadingAnchor constant:-8],
 
             [_bundleLabel.leadingAnchor constraintEqualToAnchor:_nameLabel.leadingAnchor],
-            [_bundleLabel.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:4],
+            [_bundleLabel.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:3],
             [_bundleLabel.trailingAnchor constraintEqualToAnchor:_nameLabel.trailingAnchor],
 
-            [_sizeLabel.trailingAnchor constraintEqualToAnchor:arrow.leadingAnchor constant:-8],
+            [_sizeLabel.trailingAnchor constraintEqualToAnchor:arrow.leadingAnchor constant:-6],
             [_sizeLabel.centerYAnchor constraintEqualToAnchor:_containerView.centerYAnchor],
-            [_sizeLabel.widthAnchor constraintEqualToConstant:80],
+            [_sizeLabel.widthAnchor constraintEqualToConstant:70],
 
-            [arrow.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor constant:-12],
+            [arrow.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor constant:-14],
             [arrow.centerYAnchor constraintEqualToAnchor:_containerView.centerYAnchor],
-            [arrow.widthAnchor constraintEqualToConstant:16],
-            [arrow.heightAnchor constraintEqualToConstant:16]
+            [arrow.widthAnchor constraintEqualToConstant:14],
+            [arrow.heightAnchor constraintEqualToConstant:14]
         ]];
     }
     return self;
@@ -92,7 +93,7 @@
 
 @end
 
-// MARK: - Stats Header View
+// MARK: - Stats Header View (Redesigned - Simple & Clean)
 @interface StatsHeaderView : UIView
 @property (nonatomic, strong) UILabel *appsCountLabel;
 @property (nonatomic, strong) UILabel *appsTitleLabel;
@@ -105,78 +106,104 @@
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        self.backgroundColor = [UIColor colorWithRed:0.08 green:0.06 blue:0.18 alpha:1.0];
-        self.layer.cornerRadius = 16;
+        self.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.14 alpha:1.0];
+        self.layer.cornerRadius = 18;
         self.layer.masksToBounds = YES;
 
-        UIView *iconContainer = [[UIView alloc] init];
-        iconContainer.backgroundColor = [UIColor colorWithRed:0.15 green:0.1 blue:0.3 alpha:1.0];
-        iconContainer.layer.cornerRadius = 14;
-        iconContainer.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:iconContainer];
+        // Left side - Apps count
+        UIView *appsIconBg = [[UIView alloc] init];
+        appsIconBg.backgroundColor = [UIColor colorWithRed:0.18 green:0.15 blue:0.30 alpha:1.0];
+        appsIconBg.layer.cornerRadius = 10;
+        appsIconBg.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:appsIconBg];
 
-        UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"square.stack.3d.up.fill"]];
-        icon.tintColor = [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0];
-        icon.contentMode = UIViewContentModeScaleAspectFit;
-        icon.translatesAutoresizingMaskIntoConstraints = NO;
-        [iconContainer addSubview:icon];
+        UIImageView *appsIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"app.fill"]];
+        appsIcon.tintColor = [UIColor colorWithRed:0.65 green:0.50 blue:0.95 alpha:1.0];
+        appsIcon.contentMode = UIViewContentModeScaleAspectFit;
+        appsIcon.translatesAutoresizingMaskIntoConstraints = NO;
+        [appsIconBg addSubview:appsIcon];
 
         _appsCountLabel = [[UILabel alloc] init];
-        _appsCountLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
+        _appsCountLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
         _appsCountLabel.textColor = [UIColor whiteColor];
         _appsCountLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_appsCountLabel];
 
         _appsTitleLabel = [[UILabel alloc] init];
-        _appsTitleLabel.font = [UIFont systemFontOfSize:12];
-        _appsTitleLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-        _appsTitleLabel.text = @"Total Apps";
+        _appsTitleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+        _appsTitleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
+        _appsTitleLabel.text = @"التطبيقات";
         _appsTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_appsTitleLabel];
 
+        // Divider
         UIView *divider = [[UIView alloc] init];
-        divider.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1.0];
+        divider.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.6];
         divider.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:divider];
 
+        // Right side - Total size
+        UIView *sizeIconBg = [[UIView alloc] init];
+        sizeIconBg.backgroundColor = [UIColor colorWithRed:0.15 green:0.20 blue:0.30 alpha:1.0];
+        sizeIconBg.layer.cornerRadius = 10;
+        sizeIconBg.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:sizeIconBg];
+
+        UIImageView *sizeIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"externaldrive.fill"]];
+        sizeIcon.tintColor = [UIColor colorWithRed:0.45 green:0.65 blue:0.95 alpha:1.0];
+        sizeIcon.contentMode = UIViewContentModeScaleAspectFit;
+        sizeIcon.translatesAutoresizingMaskIntoConstraints = NO;
+        [sizeIconBg addSubview:sizeIcon];
+
         _sizeLabel = [[UILabel alloc] init];
-        _sizeLabel.font = [UIFont systemFontOfSize:28 weight:UIFontWeightBold];
-        _sizeLabel.textColor = [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0];
+        _sizeLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+        _sizeLabel.textColor = [UIColor whiteColor];
         _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_sizeLabel];
 
         _sizeTitleLabel = [[UILabel alloc] init];
-        _sizeTitleLabel.font = [UIFont systemFontOfSize:12];
-        _sizeTitleLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-        _sizeTitleLabel.text = @"Total Size";
+        _sizeTitleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+        _sizeTitleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
+        _sizeTitleLabel.text = @"الحجم الكلي";
         _sizeTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_sizeTitleLabel];
 
         [NSLayoutConstraint activateConstraints:@[
-            [iconContainer.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
-            [iconContainer.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-            [iconContainer.widthAnchor constraintEqualToConstant:52],
-            [iconContainer.heightAnchor constraintEqualToConstant:52],
+            // Apps icon
+            [appsIconBg.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:20],
+            [appsIconBg.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [appsIconBg.widthAnchor constraintEqualToConstant:36],
+            [appsIconBg.heightAnchor constraintEqualToConstant:36],
+            [appsIcon.centerXAnchor constraintEqualToAnchor:appsIconBg.centerXAnchor],
+            [appsIcon.centerYAnchor constraintEqualToAnchor:appsIconBg.centerYAnchor],
+            [appsIcon.widthAnchor constraintEqualToConstant:18],
+            [appsIcon.heightAnchor constraintEqualToConstant:18],
 
-            [icon.centerXAnchor constraintEqualToAnchor:iconContainer.centerXAnchor],
-            [icon.centerYAnchor constraintEqualToAnchor:iconContainer.centerYAnchor],
-            [icon.widthAnchor constraintEqualToConstant:26],
-            [icon.heightAnchor constraintEqualToConstant:26],
-
-            [_appsCountLabel.leadingAnchor constraintEqualToAnchor:iconContainer.trailingAnchor constant:16],
+            // Apps count & title
+            [_appsCountLabel.leadingAnchor constraintEqualToAnchor:appsIconBg.trailingAnchor constant:10],
             [_appsCountLabel.topAnchor constraintEqualToAnchor:self.topAnchor constant:18],
-
             [_appsTitleLabel.leadingAnchor constraintEqualToAnchor:_appsCountLabel.leadingAnchor],
             [_appsTitleLabel.topAnchor constraintEqualToAnchor:_appsCountLabel.bottomAnchor constant:2],
 
-            [divider.leadingAnchor constraintEqualToAnchor:_appsCountLabel.trailingAnchor constant:20],
+            // Divider
+            [divider.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
             [divider.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
             [divider.widthAnchor constraintEqualToConstant:1],
-            [divider.heightAnchor constraintEqualToConstant:40],
+            [divider.heightAnchor constraintEqualToConstant:36],
 
-            [_sizeLabel.leadingAnchor constraintEqualToAnchor:divider.trailingAnchor constant:20],
+            // Size icon
+            [sizeIconBg.leadingAnchor constraintEqualToAnchor:divider.trailingAnchor constant:20],
+            [sizeIconBg.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [sizeIconBg.widthAnchor constraintEqualToConstant:36],
+            [sizeIconBg.heightAnchor constraintEqualToConstant:36],
+            [sizeIcon.centerXAnchor constraintEqualToAnchor:sizeIconBg.centerXAnchor],
+            [sizeIcon.centerYAnchor constraintEqualToAnchor:sizeIconBg.centerYAnchor],
+            [sizeIcon.widthAnchor constraintEqualToConstant:18],
+            [sizeIcon.heightAnchor constraintEqualToConstant:18],
+
+            // Size count & title
+            [_sizeLabel.leadingAnchor constraintEqualToAnchor:sizeIconBg.trailingAnchor constant:10],
             [_sizeLabel.topAnchor constraintEqualToAnchor:_appsCountLabel.topAnchor],
-
             [_sizeTitleLabel.leadingAnchor constraintEqualToAnchor:_sizeLabel.leadingAnchor],
             [_sizeTitleLabel.topAnchor constraintEqualToAnchor:_appsTitleLabel.topAnchor]
         ]];
@@ -228,10 +255,11 @@
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Search apps...";
-    self.searchController.searchBar.searchTextField.backgroundColor = [UIColor colorWithRed:0.08 green:0.08 blue:0.12 alpha:1.0];
+    self.searchController.searchBar.placeholder = @"ابحث عن تطبيق...";
+    self.searchController.searchBar.searchTextField.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.13 alpha:1.0];
     self.searchController.searchBar.searchTextField.textColor = [UIColor whiteColor];
-    self.searchController.searchBar.tintColor = [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0];
+    self.searchController.searchBar.searchTextField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"ابحث عن تطبيق..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.35 alpha:1.0]}];
+    self.searchController.searchBar.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
     self.searchController.searchBar.barTintColor = [UIColor clearColor];
     self.searchController.searchBar.backgroundImage = [[UIImage alloc] init];
     self.navigationItem.searchController = self.searchController;
@@ -249,15 +277,15 @@
     [self.view addSubview:self.tableView];
 
     self.refreshControl = [[UIRefreshControl alloc] init];
-    self.refreshControl.tintColor = [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0];
+    self.refreshControl.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
     [self.refreshControl addTarget:self action:@selector(loadApps) forControlEvents:UIControlEventValueChanged];
     self.tableView.refreshControl = self.refreshControl;
 
     // Header with stats
-    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 110)];
+    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 100)];
     headerContainer.backgroundColor = [UIColor clearColor];
 
-    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 8, self.view.bounds.size.width - 32, 90)];
+    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 8, self.view.bounds.size.width - 32, 82)];
     self.statsView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [headerContainer addSubview:self.statsView];
 
@@ -268,7 +296,7 @@
     self.loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     self.loadingIndicator.center = self.view.center;
     self.loadingIndicator.hidesWhenStopped = YES;
-    self.loadingIndicator.color = [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0];
+    self.loadingIndicator.color = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
     [self.view addSubview:self.loadingIndicator];
 
     self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 0, self.view.bounds.size.width - 40, 30)];
@@ -284,15 +312,13 @@
 
 - (void)loadApps {
     [self.loadingIndicator startAnimating];
-    self.statusLabel.text = @"Loading applications...";
+    self.statusLabel.text = @"جاري تحميل التطبيقات...";
     self.statusLabel.hidden = NO;
     self.tableView.hidden = YES;
 
-    // Clear cache on refresh
     [self.manager clearCache];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // FAST: Get apps WITHOUT calculating sizes
         self.allApps = [self.manager allInstalledApplications];
         self.filteredApps = self.allApps;
 
@@ -303,11 +329,10 @@
             [self.refreshControl endRefreshing];
 
             self.statsView.appsCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.allApps.count];
-            self.statsView.sizeLabel.text = @"Calculating...";
+            self.statsView.sizeLabel.text = @"جاري الحساب...";
 
             [self.tableView reloadData];
 
-            // NOW calculate sizes in background
             [self calculateSizesInBackground];
         });
     });
@@ -323,8 +348,6 @@
 
         for (NSMutableDictionary *app in self.allApps) {
             NSString *bundleID = app[@"bundleID"];
-
-            // Calculate size
             unsigned long long size = [self.manager dataSizeForBundleID:bundleID];
             NSString *sizeStr = [self.manager formatBytes:size];
 
@@ -335,11 +358,9 @@
 
             totalSize += size;
 
-            // Update UI every 5 apps to avoid lag
             if ([updatedApps count] % 5 == 0) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     self.statsView.sizeLabel.text = [self.manager formatBytes:totalSize];
-                    // Update visible cells only
                     [self updateVisibleCellSizes];
                 });
             }
@@ -391,14 +412,13 @@
     cell.bundleLabel.text = app[@"bundleID"];
     cell.sizeLabel.text = app[@"sizeString"];
 
-    // Load icon async
     NSString *bundleID = app[@"bundleID"];
     UIImage *icon = [self.manager iconForBundleID:bundleID];
     if (icon) {
         cell.appIcon.image = icon;
     } else {
         cell.appIcon.image = [UIImage systemImageNamed:@"app.fill"];
-        cell.appIcon.tintColor = [UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0];
+        cell.appIcon.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
     }
 
     return cell;
@@ -412,7 +432,7 @@
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    return 80;
+    return 78;
 }
 
 #pragma mark - UISearchResultsUpdating
