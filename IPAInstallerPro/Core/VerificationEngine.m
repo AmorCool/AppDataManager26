@@ -1,4 +1,5 @@
 #import "VerificationEngine.h"
+#import <objc/runtime.h>
 #import "Logger.h"
 
 @implementation VerificationResult
