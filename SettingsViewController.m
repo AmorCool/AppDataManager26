@@ -44,7 +44,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 1;
     if (section == 1) return 3;
-    return 1;
+    return 2;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -82,10 +82,17 @@
         cell.imageView.image = [[UIImage systemImageNamed:icons[indexPath.row]] imageWithTintColor:colors[indexPath.row]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
-        cell.textLabel.text = @"عن الأداة";
-        cell.detailTextLabel.text = @"@Zainqkvd";
-        cell.imageView.image = [[UIImage systemImageNamed:@"person.fill"] imageWithTintColor:[UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0]];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"عن الأداة";
+            cell.detailTextLabel.text = @"@Zainqkvd";
+            cell.imageView.image = [[UIImage systemImageNamed:@"person.fill"] imageWithTintColor:[UIColor colorWithRed:0.6 green:0.4 blue:1.0 alpha:1.0]];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell.textLabel.text = @"حول AppData Manager";
+            cell.detailTextLabel.text = @"";
+            cell.imageView.image = [[UIImage systemImageNamed:@"hand.raised.fill"] imageWithTintColor:[UIColor colorWithRed:0.9 green:0.5 blue:0.2 alpha:1.0]];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        }
     }
 
     return cell;
@@ -142,20 +149,35 @@
             [self showToast:@"انسخ ملفات النسخ إلى مجلد النسخ الاحتياطية"];
         }
     } else if (indexPath.section == 2) {
-        NSString *info = @"AppData Manager v1.3.4\n\n"
-            @"أداة احترافية لإدارة بيانات التطبيقات\n"
-            @"لأجهزة iOS Jailbreak.\n\n"
-            @"• متوافق مع Dopamine 3.0\n"
-            @"• دعم Rootless Jailbreak\n"
-            @"• دعم iOS 15 - iOS 26\n"
-            @"• نسخ احتياطي شامل\n\n"
-            @"المطور: @Zainqkvd";
+        if (indexPath.row == 0) {
+            NSString *info = @"AppData Manager v1.3.4\n\n"
+                @"أداة احترافية لإدارة بيانات التطبيقات\n"
+                @"لأجهزة iOS Jailbreak.\n\n"
+                @"• متوافق مع Dopamine 3.0\n"
+                @"• دعم Rootless Jailbreak\n"
+                @"• دعم iOS 15 - iOS 26\n"
+                @"• نسخ احتياطي شامل\n\n"
+                @"المطور: @Zainqkvd";
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة"
-                                                                       message:info
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة"
+                                                                               message:info
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        } else {
+            NSString *aboutText = @"\n"
+                @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
+                @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
+                @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"
+                @"X: @Zainqkvd\n\n"
+                @"المطور: ZAIN";
+
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حول AppData Manager"
+                                                                               message:aboutText
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+        }
     }
 }
 
