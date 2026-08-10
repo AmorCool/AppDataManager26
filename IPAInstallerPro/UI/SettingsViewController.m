@@ -115,18 +115,7 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 3) {
-        NSString *info = @"IPA Installer Pro v1.0.0
-
-أداة احترافية لتثبيت تطبيقات IPA
-على أجهزة iOS Jailbreak.
-
-• متوافقة مع Dopamine 3.0
-• دعم Rootless Jailbreak
-• دعم iOS 15 - iOS 26
-• واجهة عربية احترافية
-
-المطور: @Zainqkvd
-الريبو: A-ZAIN Repo";
+        NSString *info = @"IPA Installer Pro v1.0.0\n\nأداة احترافية لتثبيت تطبيقات IPA\nعلى أجهزة iOS Jailbreak.\n\n• متوافقة مع Dopamine 3.0\n• دعم Rootless Jailbreak\n• دعم iOS 15 - iOS 26\n• واجهة عربية احترافية\n\nالمطور: @Zainqkvd\nالريبو: A-ZAIN Repo";
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة" message:info preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
