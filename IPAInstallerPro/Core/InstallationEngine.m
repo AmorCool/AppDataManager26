@@ -1,4 +1,5 @@
 #import "InstallationEngine.h"
+#include <spawn.h>
 #include <sys/wait.h>
 #import "Logger.h"
 #import "IPAValidator.h"

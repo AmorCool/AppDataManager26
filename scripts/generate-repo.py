@@ -35,8 +35,7 @@ def main():
         info = get_deb_info(fpath)
 
         entry = info.strip()
-        entry += f"
-Filename: pool/main/iphoneos-arm64/{fname}\n"
+        entry += f"\nFilename: pool/main/iphoneos-arm64/{fname}\n"
         entry += f"Size: {size}\n"
         entry += f"MD5sum: {md5}\n"
         entry += f"SHA1: {sha1}\n"
