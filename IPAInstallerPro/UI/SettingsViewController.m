@@ -1,6 +1,6 @@
 #import "SettingsViewController.h"
 #import "Core/JailbreakEnvironment.h"
-#import "Core/DependencyManager.h"
+#import "Core/CapabilityManager.h"
 #import "Core/Logger.h"
 #import "Core/InstallationEngine.h"
 
@@ -61,19 +61,19 @@
     cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
 
     JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
-    DependencyManager *depMgr = [DependencyManager sharedManager];
+    CapabilityManager *capMgr = [DependencyManager sharedManager];
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) { cell.textLabel.text = @"الإصدار"; cell.detailTextLabel.text = @"1.0.0"; cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
         else if (indexPath.row == 1) { cell.textLabel.text = @"نظام iOS"; cell.detailTextLabel.text = env.osVersion; cell.imageView.image = [[UIImage systemImageNamed:@"iphone"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
         else { cell.textLabel.text = @"الجهاز"; cell.detailTextLabel.text = env.deviceModel; cell.imageView.image = [[UIImage systemImageNamed:@"cpu"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
     } else if (indexPath.section == 1) {
-        NSArray *deps = [depMgr allDependencies];
-        Dependency *dep = deps[indexPath.row];
-        cell.textLabel.text = dep.name;
-        cell.detailTextLabel.text = dep.isInstalled ? @"مثبت ✓" : @"غير مثبت ✗";
-        cell.detailTextLabel.textColor = dep.isInstalled ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
-        cell.imageView.image = [[UIImage systemImageNamed:dep.isInstalled ? @"checkmark.shield.fill" : @"exclamationmark.shield.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
+        NSArray *caps = [capMgr allCapabilities];
+        Capability *cap = caps[indexPath.row];
+        cell.textLabel.text = cap.name;
+        cell.detailTextLabel.text = cap.statusMessage;
+        cell.detailTextLabel.textColor = cap.isAvailable ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+        cell.imageView.image = [[UIImage systemImageNamed:cap.isAvailable ? @"checkmark.shield.fill" : @"exclamationmark.shield.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"بيئة الجيلبريك";
