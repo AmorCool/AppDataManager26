@@ -18,6 +18,7 @@
 - (BOOL)isAppInstAvailable;
 - (BOOL)isUnzipAvailable;
 - (BOOL)isSystemInstallationAvailable;
+- (BOOL)isDirectInstallationAvailable;
 - (NSString *)installationReadinessStatus;
 - (BOOL)canInstallIPA;
 @end
