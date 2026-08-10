@@ -6,5 +6,5 @@ Description: Professional IPA Installer for iOS Jailbreak — Self-Contained Ins
 Maintainer: ZAIN <@Zainqkvd>
 Author: ZAIN <@Zainqkvd>
 Section: Utilities
-Depends: firmware (>= 15.0), ai.akemi.appsyncunified, unzip
+Depends: firmware (>= 15.0), unzip
 Pre-Depends: dpkg (>= 1.14.25)
