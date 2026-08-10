@@ -4,6 +4,7 @@
 #import "Logger.h"
 #import "CapabilityManager.h"
 #import "VerificationEngine.h"
+#import "RootlessManager.h"
 #import "IPAValidator.h"
 #import "AppInstInstallationProvider.h"
 #import "SystemInstallationProvider.h"
@@ -136,7 +137,11 @@
 
 - (void)runUICache {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const char *path = "/usr/bin/uicache";
+        NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:uicachePath]) {
+            uicachePath = @"/usr/bin/uicache";
+        }
+        const char *path = [uicachePath UTF8String];
         const char *args[] = { path, "-a", NULL };
         pid_t pid;
         int status;
