@@ -68,7 +68,7 @@
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"الإصدار";
-        cell.detailTextLabel.text = @"1.3.5";
+        cell.detailTextLabel.text = @"1.0.0";
         cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.42 green:0.31 blue:0.90 alpha:1.0]];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"مسح كل النسخ", @"تصدير النسخ", @"استيراد النسخ"];
@@ -126,8 +126,8 @@
     if (indexPath.section == 1) {
         if (indexPath.row == 0) {
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تنبيه"
-                                                                           message:@"سيتم حذف جميع النسخ الاحتياطية بشكل دائم. هل أنت متأكد؟"
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                message:@"سيتم حذف جميع النسخ الاحتياطية بشكل دائم. هل أنت متأكد؟"
+                preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
             [alert addAction:[UIAlertAction actionWithTitle:@"مسح الكل" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
                 dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -150,7 +150,7 @@
         }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
-            NSString *info = @"AppData Manager v1.3.5\n\n"
+            NSString *info = @"AppData Manager v1.0.0\n\n"
                 @"أداة احترافية لإدارة بيانات التطبيقات\n"
                 @"لأجهزة iOS Jailbreak.\n\n"
                 @"• متوافق مع Dopamine 3.0\n"
@@ -160,8 +160,8 @@
                 @"المطور: @Zainqkvd";
 
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة"
-                                                                               message:info
-                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                message:info
+                preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
         } else {
@@ -173,8 +173,8 @@
                 @"المطور: ZAIN";
 
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حول AppData Manager"
-                                                                               message:aboutText
-                                                                        preferredStyle:UIAlertControllerStyleAlert];
+                message:aboutText
+                preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
         }
@@ -193,9 +193,9 @@
     toast.numberOfLines = 0;
 
     CGSize size = [message boundingRectWithSize:CGSizeMake(self.view.bounds.size.width - 60, CGFLOAT_MAX)
-                                          options:NSStringDrawingUsesLineFragmentOrigin
-                                       attributes:@{NSFontAttributeName: toast.font}
-                                          context:nil].size;
+        options:NSStringDrawingUsesLineFragmentOrigin
+        attributes:@{NSFontAttributeName: toast.font}
+        context:nil].size;
     toast.frame = CGRectMake(0, 0, size.width + 32, size.height + 24);
     toast.center = CGPointMake(self.view.center.x, self.view.bounds.size.height - 120);
 
