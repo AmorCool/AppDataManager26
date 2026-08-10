@@ -9,27 +9,28 @@ include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = IPAInstallerPro
 
 IPAInstallerPro_FILES = \
-    main.m \
-    AppDelegate.m \
-    Core/Logger.m \
-    Core/JailbreakEnvironment.m \
-    Core/RootlessManager.m \
-    Core/CapabilityManager.m \
-    Core/IPAValidator.m \
-    Core/IPAExtractor.m \
-    Core/InstallationProvider.m \
-    Core/AppInstInstallationProvider.m \
-    Core/SystemInstallationProvider.m \
-    Core/InstallationEngine.m \
-    Core/VerificationEngine.m \
-    Core/ApplicationManager.m \
-    UI/MainViewController.m \
-    UI/IPAFileBrowserViewController.m \
-    UI/IPAInstallViewController.m \
-    UI/InstallationProgressViewController.m \
-    UI/InstalledAppsViewController.m \
-    UI/AppDetailsViewController.m \
-    UI/SettingsViewController.m
+ main.m \
+ AppDelegate.m \
+ Core/Logger.m \
+ Core/JailbreakEnvironment.m \
+ Core/RootlessManager.m \
+ Core/CapabilityManager.m \
+ Core/IPAValidator.m \
+ Core/IPAExtractor.m \
+ Core/InstallationProvider.m \
+ Core/AppInstInstallationProvider.m \
+ Core/SystemInstallationProvider.m \
+ Core/DirectInstallationProvider.m \
+ Core/InstallationEngine.m \
+ Core/VerificationEngine.m \
+ Core/ApplicationManager.m \
+ UI/MainViewController.m \
+ UI/IPAFileBrowserViewController.m \
+ UI/IPAInstallViewController.m \
+ UI/InstallationProgressViewController.m \
+ UI/InstalledAppsViewController.m \
+ UI/AppDetailsViewController.m \
+ UI/SettingsViewController.m
 
 IPAInstallerPro_FRAMEWORKS = UIKit CoreGraphics
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
