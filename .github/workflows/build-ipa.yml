@@ -31,8 +31,12 @@ jobs:
 
       - name: List packages
         run: |
-          ls -la IPAInstallerPro/packages/
-          file IPAInstallerPro/packages/*.deb
+          echo "=== Root packages ==="
+          ls -la packages/ 2>/dev/null || echo 'No root packages'
+          echo "=== IPAInstallerPro packages ==="
+          ls -la IPAInstallerPro/packages/ 2>/dev/null || echo 'No IPAInstallerPro packages'
+          echo "=== Find all .debs ==="
+          find . -name '*.deb' -type f
 
       - name: Deploy to gh-pages
         run: |
@@ -46,7 +50,7 @@ jobs:
           rm -rf * 2>/dev/null || true
 
           mkdir -p pool/main/iphoneos-arm64
-          cp IPAInstallerPro/packages/*.deb pool/main/iphoneos-arm64/
+          find . -name '*.deb' -type f -exec cp {} pool/main/iphoneos-arm64/ \;
 
           python3 scripts/generate-repo.py .
 
