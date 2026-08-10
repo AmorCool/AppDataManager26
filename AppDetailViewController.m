@@ -496,7 +496,7 @@
     [self.contentView addSubview:self.backupCard];
 
     self.backupTitle = [[UILabel alloc] init];
-    self.backupTitle.text = @"النسخ الاحتياطي";
+    self.backupTitle.text = @"النسخ الاحتياطية";
     self.backupTitle.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
     self.backupTitle.textColor = C_TEXT_TER;
     self.backupTitle.translatesAutoresizingMaskIntoConstraints = NO;
@@ -513,7 +513,7 @@
     self.backupBtn.backgroundColor = [UIColor colorWithRed:0.769 green:0.655 blue:0.490 alpha:0.12];
     self.backupBtn.layer.cornerRadius = 10;
     self.backupBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    [self.backupBtn setTitle:@"نسخة احتياطية جديدة" forState:UIControlStateNormal];
+    [self.backupBtn setTitle:@"نسخ احتياطي" forState:UIControlStateNormal];
     self.restoreBtn.hidden = YES;
     self.restoreBtn.alpha = 0.0;
     [self.backupBtn setTitleColor:C_ACCENT forState:UIControlStateNormal];
@@ -568,7 +568,7 @@
     [self.actionCard addSubview:title];
 
     UILabel *desc = [[UILabel alloc] init];
-    desc.text = @"سيتم حذف جميع بيانات التطبيق بشكل دائم. أنصح بإنشاء نسخة احتياطية أولاً.";
+    desc.text = @"سيتم حذف جميع بيانات التطبيق بشكل دائم. أنصح بإنشاء نسخ احتياطي أولاً.";
     desc.font = [UIFont systemFontOfSize:12];
     desc.textColor = C_TEXT_SEC;
     desc.numberOfLines = 2;
@@ -767,12 +767,12 @@
         NSDateFormatter *f = [[NSDateFormatter alloc] init];
         f.dateStyle = NSDateFormatterShortStyle;
         f.timeStyle = NSDateFormatterShortStyle;
-        self.backupStatus.text = [NSString stringWithFormat:@"آخر نسخة: %@", [f stringFromDate:lastBackup]];
+        self.backupStatus.text = [NSString stringWithFormat:@"آخر نسخ احتياطي: %@", [f stringFromDate:lastBackup]];
         self.backupStatus.textColor = [UIColor colorWithRed:0.35 green:0.75 blue:0.55 alpha:1.0];
         self.restoreBtn.hidden = NO;
         self.restoreBtn.alpha = 1.0;
     } else {
-        self.backupStatus.text = @"لا توجد نسخة احتياطية";
+        self.backupStatus.text = @"لا توجد نسخ احتياطية";
         self.backupStatus.textColor = C_TEXT_SEC;
         self.restoreBtn.hidden = YES;
         self.restoreBtn.alpha = 0.0;
@@ -797,17 +797,17 @@
 - (void)backupTapped {
     NSString *bid = self.appInfo[@"bundleID"];
 
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"نسخ %@ احتياطياً", self.appInfo[@"name"]]
-                                                               message:@"سيتم إنشاء نسخة احتياطية كاملة من بيانات التطبيق (بما فيها Group Containers)."
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"نسخ %@", self.appInfo[@"name"]]
+                                                               message:@"سيتم إنشاء نسخ احتياطي كامل من بيانات التطبيق."
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"نسخ" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [a addAction:[UIAlertAction actionWithTitle:@"نسخ احتياطي" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self showSpinner:@"جاري النسخ..."];
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             BOOL ok = [self.manager backupAppData:bid];
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self hideSpinner];
-                [self toast:ok ? @"تم إنشاء النسخة ✅" : @"فشل إنشاء النسخة ❌"];
+                [self toast:ok ? @"تم إنشاء النسخ الاحتياطي ✅" : @"فشل إنشاء النسخ الاحتياطي ❌"];
                 [self loadData];
             });
         });
@@ -827,8 +827,8 @@
     NSString *latestBackupPath = backups[0][@"path"];
     NSString *backupDateStr = [self formatDate:backups[0][@"date"]];
 
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"استعادة النسخة الاحتياطية"
-                                                               message:[NSString stringWithFormat:@"سيتم استبدال بيانات التطبيق الحالية بالنسخة الاحتياطية (%@).", backupDateStr]
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"استعادة النسخ الاحتياطي"
+                                                               message:[NSString stringWithFormat:@"سيتم استبدال بيانات التطبيق الحالية بالنسخ الاحتياطي (%@).", backupDateStr]
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
     [a addAction:[UIAlertAction actionWithTitle:@"استعادة" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
