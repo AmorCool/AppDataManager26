@@ -61,7 +61,7 @@
     cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
 
     JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
-    CapabilityManager *capMgr = [DependencyManager sharedManager];
+    CapabilityManager *capMgr = [CapabilityManager sharedManager];
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) { cell.textLabel.text = @"الإصدار"; cell.detailTextLabel.text = @"1.0.0"; cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
@@ -117,24 +117,16 @@
     if (indexPath.section == 3) {
         NSString *info = @"IPA Installer Pro v1.0.0
 
-"
-            @"أداة احترافية لتثبيت تطبيقات IPA
-"
-            @"على أجهزة iOS Jailbreak.
+أداة احترافية لتثبيت تطبيقات IPA
+على أجهزة iOS Jailbreak.
 
-"
-            @"• متوافقة مع Dopamine 3.0
-"
-            @"• دعم Rootless Jailbreak
-"
-            @"• دعم iOS 15 - iOS 26
-"
-            @"• واجهة عربية احترافية
+• متوافقة مع Dopamine 3.0
+• دعم Rootless Jailbreak
+• دعم iOS 15 - iOS 26
+• واجهة عربية احترافية
 
-"
-            @"المطور: @Zainqkvd
-"
-            @"الريبو: A-ZAIN Repo";
+المطور: @Zainqkvd
+الريبو: A-ZAIN Repo";
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة" message:info preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
