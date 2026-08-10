@@ -8,16 +8,38 @@ fi
 
 APP_PATH="${JB_ROOT}/Applications/IPAInstallerPro.app"
 
-echo "📦 IPA Installer Pro — Dopamine 3.0 / Rootless"
+echo "📦 IPA Installer Pro — Self-Contained Installation Stack"
 
+# Update icon cache
 if command -v uicache &> /dev/null; then
     uicache -p "$APP_PATH" 2>/dev/null || uicache -p /Applications/IPAInstallerPro.app 2>/dev/null || true
 fi
 
+# Fix permissions
 if [ -d "$APP_PATH" ]; then
     chown -R root:wheel "$APP_PATH"
     chmod 755 "$APP_PATH"
     chmod +x "$APP_PATH/IPAInstallerPro" 2>/dev/null || true
+fi
+
+# Auto-provision appinst if not present
+APPINST_PATH="${JB_ROOT}/usr/bin/appinst"
+if [ ! -f "$APPINST_PATH" ] && [ ! -f "/usr/bin/appinst" ]; then
+    echo "⚙️  Provisioning appinst backend..."
+    if command -v apt-get &> /dev/null; then
+        apt-get update 2>/dev/null || true
+        apt-get install -y ai.akemi.appinst 2>/dev/null || true
+    fi
+    if command -v dpkg &> /dev/null; then
+        # Try to find appinst in known repos
+        dpkg -l | grep -q appinst || echo "⚠️  appinst not available — will use fallback installation methods"
+    fi
+fi
+
+# Verify AppSync
+if ! dpkg -l | grep -q appsyncunified; then
+    echo "⚠️  AppSync Unified not detected — some installations may fail"
+    echo "   IPA Installer Pro will attempt to guide you if needed"
 fi
 
 echo "✅ IPA Installer Pro ready"
