@@ -2,6 +2,8 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #import "Logger.h"
+#import "CapabilityManager.h"
+#import "VerificationEngine.h"
 #import "IPAValidator.h"
 #import "AppInstInstallationProvider.h"
 #import "SystemInstallationProvider.h"
