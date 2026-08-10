@@ -27,6 +27,7 @@
 }
 
 - (NSString *)providerName { return @"Direct Install (No AppSync)"; }
+- (NSString *)providerDescription { return @"Direct installation without AppSync using ldid + uicache"; }
 - (NSInteger)priority { return 100; }
 
 - (BOOL)isAvailable {
