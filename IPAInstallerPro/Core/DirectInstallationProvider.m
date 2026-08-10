@@ -1,5 +1,6 @@
 #import "DirectInstallationProvider.h"
 #import "Logger.h"
+#import "RootlessManager.h"
 #import <Foundation/Foundation.h>
 #include <spawn.h>
 #include <sys/wait.h>
@@ -14,13 +15,13 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Detect rootless vs rootful
-        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]) {
+        // Detect rootless vs rootful using RootlessManager
+        NSString *resolvedApps = [[RootlessManager sharedManager] resolvePath:@"/Applications"];
+        _appsPath = resolvedApps;
+        if ([resolvedApps hasPrefix:@"/var/jb"]) {
             _jbPrefix = @"/var/jb";
-            _appsPath = @"/var/jb/Applications";
         } else {
             _jbPrefix = @"";
-            _appsPath = @"/Applications";
         }
     }
     return self;
@@ -31,8 +32,9 @@
 - (NSInteger)priority { return 100; }
 
 - (BOOL)isAvailable {
-    // Check if we have root access and ldid
-    return access("/usr/bin/ldid", F_OK) == 0 || access("/var/jb/usr/bin/ldid", F_OK) == 0;
+    // Check if we have root access and ldid (via RootlessManager)
+    NSString *ldidPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
+    return [[NSFileManager defaultManager] fileExistsAtPath:ldidPath];
 }
 
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
@@ -113,17 +115,17 @@
 }
 
 - (BOOL)unzipIPA:(NSString *)ipaPath toDirectory:(NSString *)destDir {
-    NSString *unzipPath = @"/usr/bin/unzip";
+    NSString *unzipPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) {
-        unzipPath = @"/var/jb/usr/bin/unzip";
+        unzipPath = @"/usr/bin/unzip";
     }
     return [self runCommand:unzipPath args:@[@"-q", @"-o", ipaPath, @"-d", destDir]];
 }
 
 - (void)signAppAtPath:(NSString *)appPath {
-    NSString *ldidPath = @"/usr/bin/ldid";
+    NSString *ldidPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:ldidPath]) {
-        ldidPath = @"/var/jb/usr/bin/ldid";
+        ldidPath = @"/usr/bin/ldid";
     }
 
     // Sign the main executable
@@ -162,9 +164,9 @@
 }
 
 - (void)runUICache:(NSString *)appPath {
-    NSString *uicachePath = @"/usr/bin/uicache";
+    NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:uicachePath]) {
-        uicachePath = @"/var/jb/usr/bin/uicache";
+        uicachePath = @"/usr/bin/uicache";
     }
     [self runCommand:uicachePath args:@[@"-p", appPath]];
 }
