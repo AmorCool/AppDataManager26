@@ -1,6 +1,11 @@
 name: Build IPA Installer Pro
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'IPAInstallerPro/**'
+      - '.github/workflows/build-ipainstaller.yml'
   workflow_dispatch:
 
 jobs:
