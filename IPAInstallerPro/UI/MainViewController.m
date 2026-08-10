@@ -1,10 +1,11 @@
 #import "MainViewController.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "IPAFileBrowserViewController.h"
 #import "IPAInstallViewController.h"
 #import "Core/IPAExtractor.h"
 #import "Core/Logger.h"
 
-@interface MainViewController ()
+@interface MainViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSMutableArray<IPAExtractedInfo *> *ipaFiles;
 @property (nonatomic, strong) UILabel *emptyLabel;
@@ -105,13 +106,54 @@
 }
 
 - (void)addIPATapped:(id)sender {
-    IPAFileBrowserViewController *browser = [[IPAFileBrowserViewController alloc] init];
-    browser.onFileSelected = ^(NSString *path) {
-        [self loadIPAFiles];
-    };
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:browser];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    [self presentViewController:nav animated:YES completion:nil];
+    // Use iOS native Files app (UIDocumentPickerViewController)
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[[UTType typeWithIdentifier:@"com.apple.itunes.ipa"]]];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = YES;
+    picker.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+#pragma mark - UIDocumentPickerDelegate
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *destDir = @"/var/mobile/Documents/IPAInstaller";
+    [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    for (NSURL *url in urls) {
+        // Start accessing security-scoped resource
+        [url startAccessingSecurityScopedResource];
+
+        NSString *fileName = url.lastPathComponent;
+        NSString *destPath = [destDir stringByAppendingPathComponent:fileName];
+
+        // Copy file
+        NSError *error = nil;
+        if ([fm fileExistsAtPath:destPath]) {
+            [fm removeItemAtPath:destPath error:nil];
+        }
+
+        // For security-scoped resources, we need to use NSFileCoordinator
+        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+        [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:&error byAccessor:^(NSURL *newURL) {
+            NSError *copyError = nil;
+            [fm copyItemAtPath:newURL.path toPath:destPath error:&copyError];
+            if (copyError) {
+                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to copy %@: %@", fileName, copyError.localizedDescription]];
+            } else {
+                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Copied %@ to Documents", fileName]];
+            }
+        }];
+
+        [url stopAccessingSecurityScopedResource];
+    }
+
+    [self loadIPAFiles];
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    // User cancelled
 }
 
 #pragma mark - UITableViewDataSource
