@@ -375,7 +375,7 @@
     UIContextualAction *deleteAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
         title:@"حذف"
         handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-            UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"تأكيد الحذف" message:[NSString stringWithFormat:@"هل أنت متأكد من حذف "%@"؟", item[@"name"]] preferredStyle:UIAlertControllerStyleAlert];
+            UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"تأكيد الحذف" message:[NSString stringWithFormat:@"هل أنت متأكد من حذف %@؟", item[@"name"]] preferredStyle:UIAlertControllerStyleAlert];
             [confirm addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
                 NSError *error = nil;
                 [[NSFileManager defaultManager] removeItemAtPath:path error:&error];
