@@ -37,7 +37,6 @@
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"إلغاء" style:UIBarButtonItemStylePlain target:self action:@selector(cancelTapped:)];
     self.navigationItem.leftBarButtonItem.tintColor = [UIColor whiteColor];
 
-    // Add "Select" button for multi-select operations
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"تحديد" style:UIBarButtonItemStylePlain target:self action:@selector(selectTapped:)];
     self.navigationItem.rightBarButtonItem.tintColor = [UIColor whiteColor];
 }
@@ -57,7 +56,6 @@
 
     self.toolbar.items = @[backBtn, flex1, newFolderBtn, flex2, pasteBtn];
 
-    // Layout
     [NSLayoutConstraint activateConstraints:@[
         [self.toolbar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.toolbar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
@@ -134,7 +132,6 @@
     self.filteredItems = [self.items mutableCopy];
     [self.tableView reloadData];
 
-    // Update back button state
     self.toolbar.items[0].enabled = ![self.currentPath isEqualToString:@"/var/mobile"];
 }
 
@@ -143,7 +140,6 @@
 }
 
 - (void)selectTapped:(id)sender {
-    // Toggle edit mode for multi-select
     [self.tableView setEditing:!self.tableView.isEditing animated:YES];
     self.navigationItem.rightBarButtonItem.title = self.tableView.isEditing ? @"تم" : @"تحديد";
 }
@@ -281,7 +277,7 @@
     if (isDir) {
         cell.imageView.image = [[UIImage systemImageNamed:@"folder.fill"] imageWithTintColor:[UIColor colorWithRed:0.4 green:0.5 blue:0.9 alpha:1.0]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"📁 مجلد • %@", [self formatDate:date]];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@", [self formatDate:date]];
     } else {
         NSString *ext = [item[@"name"] pathExtension].lowercaseString;
         if ([ext isEqualToString:@"ipa"]) {
@@ -311,88 +307,6 @@
         }
         [self dismissViewControllerAnimated:YES completion:nil];
     }
-}
-
-#pragma mark - Swipe Actions (Copy, Cut, Delete, Rename)
-
-- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSDictionary *item = self.filteredItems[indexPath.row];
-    NSString *path = item[@"path"];
-
-    // Copy action
-    UIContextualAction *copyAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
-        title:@"نسخ"
-        handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-            self.clipboardPath = path;
-            self.clipboardIsCut = NO;
-            [self showAlert:@"تم النسخ إلى الحافظة"];
-            completionHandler(YES);
-        }];
-    copyAction.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:1.0];
-    copyAction.image = [UIImage systemImageNamed:@"doc.on.doc"];
-
-    // Cut action
-    UIContextualAction *cutAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
-        title:@"قص"
-        handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-            self.clipboardPath = path;
-            self.clipboardIsCut = YES;
-            [self showAlert:@"تم القص إلى الحافظة"];
-            completionHandler(YES);
-        }];
-    cutAction.backgroundColor = [UIColor colorWithRed:0.9 green:0.6 blue:0.1 alpha:1.0];
-    cutAction.image = [UIImage systemImageNamed:@"scissors"];
-
-    // Rename action
-    UIContextualAction *renameAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
-        title:@"إعادة تسمية"
-        handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"إعادة تسمية" message:@"أدخل الاسم الجديد" preferredStyle:UIAlertControllerStyleAlert];
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.text = item[@"name"];
-            }];
-            [alert addAction:[UIAlertAction actionWithTitle:@"حفظ" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                NSString *newName = alert.textFields[0].text;
-                if (newName.length > 0) {
-                    NSString *newPath = [self.currentPath stringByAppendingPathComponent:newName];
-                    NSError *error = nil;
-                    [[NSFileManager defaultManager] moveItemAtPath:path toPath:newPath error:&error];
-                    if (error) {
-                        [self showAlert:[NSString stringWithFormat:@"فشل: %@", error.localizedDescription]];
-                    } else {
-                        [self loadDirectory];
-                    }
-                }
-            }]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
-            completionHandler(YES);
-        }];
-    renameAction.backgroundColor = [UIColor colorWithRed:0.4 green:0.4 blue:0.9 alpha:1.0];
-    renameAction.image = [UIImage systemImageNamed:@"pencil"];
-
-    // Delete action
-    UIContextualAction *deleteAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
-        title:@"حذف"
-        handler:^(UIContextualAction *action, UIView *sourceView, void (^completionHandler)(BOOL)) {
-            UIAlertController *confirm = [UIAlertController alertControllerWithTitle:@"تأكيد الحذف" message:[NSString stringWithFormat:@"هل أنت متأكد من حذف %@؟", item[@"name"]] preferredStyle:UIAlertControllerStyleAlert];
-            [confirm addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-                NSError *error = nil;
-                [[NSFileManager defaultManager] removeItemAtPath:path error:&error];
-                if (error) {
-                    [self showAlert:[NSString stringWithFormat:@"فشل الحذف: %@", error.localizedDescription]];
-                } else {
-                    [self loadDirectory];
-                }
-            }]];
-            [confirm addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
-            [self presentViewController:confirm animated:YES completion:nil];
-            completionHandler(YES);
-        }];
-    deleteAction.backgroundColor = [UIColor colorWithRed:0.8 green:0.2 blue:0.2 alpha:1.0];
-    deleteAction.image = [UIImage systemImageNamed:@"trash"];
-
-    return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction, renameAction, cutAction, copyAction]];
 }
 
 @end
