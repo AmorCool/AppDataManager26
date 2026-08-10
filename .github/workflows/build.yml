@@ -1,0 +1,72 @@
+name: Build and Deploy Both Packages
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Setup dependencies
+        run: brew install dpkg ldid
+
+      - name: Fix script permissions
+        run: |
+          chmod +x layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x layout/DEBIAN/prerm 2>/dev/null || true
+          chmod +x IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x IPAInstallerPro/layout/DEBIAN/prerm 2>/dev/null || true
+
+      - name: Build AppDataManager
+        run: |
+          make clean
+          make package
+
+      - name: Build IPA Installer Pro
+        run: |
+          cd IPAInstallerPro
+          make clean
+          make package
+
+      - name: Deploy to gh-pages
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub CI"
+
+          git fetch origin gh-pages || true
+          git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
+
+          git rm -rf . 2>/dev/null || true
+          rm -rf * 2>/dev/null || true
+
+          mkdir -p pool/main/iphoneos-arm64
+          cp packages/*.deb pool/main/iphoneos-arm64/ 2>/dev/null || true
+          cp IPAInstallerPro/packages/*.deb pool/main/iphoneos-arm64/ 2>/dev/null || true
+
+          python3 scripts/generate-repo.py .
+
+          echo "Origin: A-ZAIN Repo" > Release
+          echo "Label: A-ZAIN" >> Release
+          echo "Suite: stable" >> Release
+          echo "Version: 1.0" >> Release
+          echo "Codename: ios" >> Release
+          echo "Architectures: iphoneos-arm64" >> Release
+          echo "Components: main" >> Release
+          echo "Description: A-ZAIN Repo - Jailbreak tools and utilities" >> Release
+
+          git add -A
+          git commit -m "Update repo: AppDataManager + IPA Installer Pro" || true
+          git push origin gh-pages --force
