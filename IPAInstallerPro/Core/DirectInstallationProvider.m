@@ -104,21 +104,19 @@
         [fm removeItemAtPath:tempDir error:nil];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            completion([InstallationResult successResult:@"تم التثبيت بنجاح بدون AppSync" bundleID:[self bundleIDFromApp:destAppPath]]);
+            InstallationResult *result = [InstallationResult successResult:@"تم التثبيت بنجاح بدون AppSync"];
+            result.bundleID = [self bundleIDFromApp:destAppPath];
+            completion(result);
         });
     });
 }
 
 - (BOOL)unzipIPA:(NSString *)ipaPath toDirectory:(NSString *)destDir {
-    NSTask *task = [[NSTask alloc] init];
-    task.launchPath = @"/usr/bin/unzip";
-    if (![[NSFileManager defaultManager] fileExistsAtPath:task.launchPath]) {
-        task.launchPath = @"/var/jb/usr/bin/unzip";
+    NSString *unzipPath = @"/usr/bin/unzip";
+    if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) {
+        unzipPath = @"/var/jb/usr/bin/unzip";
     }
-    task.arguments = @[@"-q", @"-o", ipaPath, @"-d", destDir];
-    [task launch];
-    [task waitUntilExit];
-    return task.terminationStatus == 0;
+    return [self runCommand:unzipPath args:@[@"-q", @"-o", ipaPath, @"-d", destDir]];
 }
 
 - (void)signAppAtPath:(NSString *)appPath {
@@ -170,12 +168,26 @@
     [self runCommand:uicachePath args:@[@"-p", appPath]];
 }
 
-- (void)runCommand:(NSString *)cmd args:(NSArray *)args {
-    NSTask *task = [[NSTask alloc] init];
-    task.launchPath = cmd;
-    task.arguments = args;
-    [task launch];
-    [task waitUntilExit];
+- (BOOL)runCommand:(NSString *)cmd args:(NSArray *)args {
+    if (!cmd || args.count == 0) return NO;
+
+    const char *cmdPath = [cmd UTF8String];
+    char **argv = (char **)malloc((args.count + 2) * sizeof(char *));
+    argv[0] = (char *)cmdPath;
+    for (int i = 0; i < args.count; i++) {
+        argv[i + 1] = (char *)[[args objectAtIndex:i] UTF8String];
+    }
+    argv[args.count + 1] = NULL;
+
+    pid_t pid;
+    int status = posix_spawn(&pid, cmdPath, NULL, NULL, argv, NULL);
+    free(argv);
+
+    if (status != 0) return NO;
+
+    int waitStatus;
+    waitpid(pid, &waitStatus, 0);
+    return WIFEXITED(waitStatus) && WEXITSTATUS(waitStatus) == 0;
 }
 
 - (NSString *)executableNameFromApp:(NSString *)appPath {
