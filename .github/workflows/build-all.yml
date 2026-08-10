@@ -1,4 +1,4 @@
-name: Build All Packages
+name: Build and Deploy Repo
 
 permissions:
   contents: write
@@ -10,8 +10,16 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: repo
 
       - name: Setup Theos
         run: |
@@ -23,42 +31,36 @@ jobs:
 
       - name: Fix postinst permissions
         run: |
-          chmod +x layout/DEBIAN/postinst 2>/dev/null || true
-          chmod +x IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
 
       - name: Build AppDataManager
         run: |
+          cd source
           make clean
           make package
 
       - name: Build IPA Installer Pro
         run: |
-          cd IPAInstallerPro
+          cd source/IPAInstallerPro
           make clean
           make package
 
-      - name: Deploy to gh-pages
+      - name: Deploy packages to repo
         run: |
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub CI"
 
-          # Save packages and scripts
-          mkdir -p /tmp/deploy
-          cp packages/*.deb /tmp/deploy/ 2>/dev/null || true
-          cp IPAInstallerPro/packages/*.deb /tmp/deploy/ 2>/dev/null || true
-          cp -r scripts /tmp/deploy/scripts
+          # Copy new .debs to repo
+          mkdir -p repo/pool/main/iphoneos-arm64
+          cp source/packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
+          cp source/IPAInstallerPro/packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
 
-          git fetch origin gh-pages || true
-          git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
+          # Regenerate Packages
+          cd repo
+          python3 ../source/scripts/generate-repo.py .
 
-          git rm -rf . 2>/dev/null || true
-          rm -rf * 2>/dev/null || true
-
-          mkdir -p pool/main/iphoneos-arm64
-          cp /tmp/deploy/*.deb pool/main/iphoneos-arm64/
-
-          python3 /tmp/deploy/scripts/generate-repo.py .
-
+          # Update Release
           echo "Origin: A-ZAIN Repo" > Release
           echo "Label: A-ZAIN" >> Release
           echo "Suite: stable" >> Release
@@ -68,6 +70,7 @@ jobs:
           echo "Components: main" >> Release
           echo "Description: A-ZAIN Repo - Jailbreak tools and utilities" >> Release
 
+          # Commit and push
           git add -A
           git commit -m "Update repo: AppDataManager + IPA Installer Pro" || true
-          git push origin gh-pages --force
+          git push origin gh-pages
