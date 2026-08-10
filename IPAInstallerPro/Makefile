@@ -24,6 +24,7 @@ IPAInstallerPro_FILES = \
  Core/InstallationEngine.m \
  Core/VerificationEngine.m \
  Core/ApplicationManager.m \
+ Core/DependencyManager.m \
  UI/MainViewController.m \
  UI/IPAFileBrowserViewController.m \
  UI/IPAInstallViewController.m \
