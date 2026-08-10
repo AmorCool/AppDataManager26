@@ -1,3 +1,4 @@
+#import <Foundation/Foundation.h>
 #ifndef ROOTLESS_H
 #define ROOTLESS_H
 

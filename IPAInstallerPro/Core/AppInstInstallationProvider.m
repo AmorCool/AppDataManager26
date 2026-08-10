@@ -3,6 +3,7 @@
 #import "RootlessManager.h"
 #import "JailbreakEnvironment.h"
 #include <spawn.h>
+#include <unistd.h>
 #include <sys/wait.h>
 
 @implementation AppInstInstallationProvider

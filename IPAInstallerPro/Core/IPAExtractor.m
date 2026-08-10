@@ -1,4 +1,6 @@
 #import "IPAExtractor.h"
+#include <spawn.h>
+#include <sys/wait.h>
 #import "Logger.h"
 
 @implementation IPAExtractedInfo
@@ -28,29 +30,22 @@
     NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
     [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-    // Unzip
-    NSTask *unzipTask = [[NSTask alloc] init];
-    unzipTask.launchPath = @"/usr/bin/unzip";
-    unzipTask.arguments = @[@"-q", @"-o", @"-j", ipaPath, @"Payload/*/Info.plist", @"-d", tempDir];
-    @try {
-        [unzipTask launch];
-        [unzipTask waitUntilExit];
-    } @catch (NSException *e) {
-        [[Logger sharedLogger] error:[NSString stringWithFormat:@"Unzip exception: %@", e.reason]];
-    }
+    // Unzip selective
+    const char *unzipPath = "/usr/bin/unzip";
+    const char *selArgs[] = { unzipPath, "-q", "-o", "-j", [ipaPath UTF8String], "Payload/*/Info.plist", "-d", [tempDir UTF8String], NULL };
+    pid_t selPid;
+    int selStatus;
+    posix_spawn(&selPid, unzipPath, NULL, NULL, (char **)selArgs, NULL);
+    waitpid(selPid, &selStatus, 0);
 
     // Alternative: extract full payload
     NSString *payloadDir = [tempDir stringByAppendingPathComponent:@"Payload"];
     if (![[NSFileManager defaultManager] fileExistsAtPath:payloadDir]) {
-        NSTask *fullUnzip = [[NSTask alloc] init];
-        fullUnzip.launchPath = @"/usr/bin/unzip";
-        fullUnzip.arguments = @[@"-q", @"-o", ipaPath, @"-d", tempDir];
-        @try {
-            [fullUnzip launch];
-            [fullUnzip waitUntilExit];
-        } @catch (NSException *e) {
-            [[Logger sharedLogger] error:[NSString stringWithFormat:@"Full unzip exception: %@", e.reason]];
-        }
+        const char *fullArgs[] = { unzipPath, "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL };
+        pid_t fullPid;
+        int fullStatus;
+        posix_spawn(&fullPid, unzipPath, NULL, NULL, (char **)fullArgs, NULL);
+        waitpid(fullPid, &fullStatus, 0);
     }
 
     payloadDir = [tempDir stringByAppendingPathComponent:@"Payload"];

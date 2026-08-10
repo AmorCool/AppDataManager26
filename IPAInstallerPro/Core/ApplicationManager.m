@@ -1,4 +1,7 @@
 #import "ApplicationManager.h"
+#import <objc/runtime.h>
+#import <dlfcn.h>
+
 #import "Logger.h"
 
 @implementation AppInfo

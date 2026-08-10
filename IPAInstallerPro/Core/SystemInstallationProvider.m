@@ -1,4 +1,5 @@
 #import "SystemInstallationProvider.h"
+#import <objc/runtime.h>
 #import "Logger.h"
 
 @implementation SystemInstallationProvider

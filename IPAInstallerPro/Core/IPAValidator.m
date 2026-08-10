@@ -1,4 +1,6 @@
 #import "IPAValidator.h"
+#include <spawn.h>
+#include <sys/wait.h>
 #import "Logger.h"
 #import "JailbreakEnvironment.h"
 
@@ -67,15 +69,24 @@
     NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
     [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-    // Unzip
-    NSTask *unzipTask = [[NSTask alloc] init];
-    unzipTask.launchPath = @"/usr/bin/unzip";
-    unzipTask.arguments = @[@"-q", @"-o", ipaPath, @"-d", tempDir];
-    @try {
-        [unzipTask launch];
-        [unzipTask waitUntilExit];
-    } @catch (NSException *e) {
-        [[Logger sharedLogger] error:[NSString stringWithFormat:@"Unzip failed: %@", e.reason]];
+    // Unzip using posix_spawn
+    const char *unzipPath = "/usr/bin/unzip";
+    const char *unzipArgs[] = { unzipPath, "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL };
+    pid_t unzipPid;
+    int unzipStatus;
+    int spawnErr = posix_spawn(&unzipPid, unzipPath, NULL, NULL, (char **)unzipArgs, NULL);
+    if (spawnErr != 0) {
+        [[Logger sharedLogger] error:[NSString stringWithFormat:@"posix_spawn unzip failed: %d", spawnErr]];
+        result.status = IPAValidationStatusInvalidZip;
+        result.statusMessage = @"فشل في فك الضغط";
+        result.issues = @[@"تعذر فك ضغط ملف IPA"];
+        result.isReadyForInstall = NO;
+        [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
+        return result;
+    }
+    waitpid(unzipPid, &unzipStatus, 0);
+    if (!WIFEXITED(unzipStatus) || WEXITSTATUS(unzipStatus) != 0) {
+        [[Logger sharedLogger] error:@"unzip exited with error"];
         result.status = IPAValidationStatusInvalidZip;
         result.statusMessage = @"فشل في فك الضغط";
         result.issues = @[@"تعذر فك ضغط ملف IPA"];

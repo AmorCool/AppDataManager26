@@ -1,4 +1,5 @@
 #import "InstallationEngine.h"
+#include <sys/wait.h>
 #import "Logger.h"
 #import "IPAValidator.h"
 #import "AppInstInstallationProvider.h"
@@ -130,8 +131,12 @@
 
 - (void)runUICache {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const char *cmd = "uicache -a || true";
-        system(cmd);
+        const char *path = "/usr/bin/uicache";
+        const char *args[] = { path, "-a", NULL };
+        pid_t pid;
+        int status;
+        posix_spawn(&pid, path, NULL, NULL, (char **)args, NULL);
+        waitpid(pid, &status, 0);
         [[Logger sharedLogger] info:@"uicache executed"];
     });
 }
