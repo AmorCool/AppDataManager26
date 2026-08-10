@@ -33,7 +33,7 @@ IPAInstallerPro_FILES = \
 
 IPAInstallerPro_FRAMEWORKS = UIKit CoreGraphics
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
-IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-format
+IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-format -Wno-error -Wno-incompatible-pointer-types
 IPAInstallerPro_CODESIGN_FLAGS = -Sentitlements.plist
 IPAInstallerPro_RESOURCE_DIRS = Resources
 
