@@ -14,13 +14,14 @@ IPAInstallerPro_FILES = \
     Core/Logger.m \
     Core/JailbreakEnvironment.m \
     Core/RootlessManager.m \
-    Core/DependencyManager.m \
+    Core/CapabilityManager.m \
     Core/IPAValidator.m \
     Core/IPAExtractor.m \
     Core/InstallationProvider.m \
     Core/AppInstInstallationProvider.m \
     Core/SystemInstallationProvider.m \
     Core/InstallationEngine.m \
+    Core/VerificationEngine.m \
     Core/ApplicationManager.m \
     UI/MainViewController.m \
     UI/IPAFileBrowserViewController.m \
