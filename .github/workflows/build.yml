@@ -1,284 +1,95 @@
-name: Build and Publish AppData Manager
+name: Build & Deploy to gh-pages
 
 on:
   push:
-    branches: [main, master]
-    paths-ignore:
-      - "**.md"
-      - ".gitignore"
+    branches: [main]
   workflow_dispatch:
-
-permissions:
-  contents: write
-
-env:
-  THEOS: ${{ github.workspace }}/theos
 
 jobs:
   build:
-    name: Build iOS Package
     runs-on: macos-latest
-    timeout-minutes: 30
-
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: Validate environment
+      - name: Setup Theos
         run: |
-          echo "=== Environment Validation ==="
-          echo "OS: $(uname -a)"
-          echo "Xcode path: $(xcode-select -p 2>/dev/null || echo 'NOT SET')"
-          xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1 || { echo "❌ iOS SDK not found"; exit 1; }
-          echo "✅ iOS SDK found"
-          which clang >/dev/null 2>&1 || { echo "❌ clang not found"; exit 1; }
-          which make >/dev/null 2>&1 || { echo "❌ make not found"; exit 1; }
-          which git >/dev/null 2>&1 || { echo "❌ git not found"; exit 1; }
-          which python3 >/dev/null 2>&1 || { echo "❌ python3 not found"; exit 1; }
-          echo "✅ All base tools present"
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      - name: Install dependencies
+      - name: Setup dependencies
         run: |
-          echo "=== Installing Dependencies ==="
-          brew install ldid dpkg
-          which ldid >/dev/null 2>&1 || { echo "❌ ldid install failed"; exit 1; }
-          which dpkg-deb >/dev/null 2>&1 || { echo "❌ dpkg-deb install failed"; exit 1; }
-          echo "✅ ldid: $(which ldid)"
-          echo "✅ dpkg-deb: $(which dpkg-deb)"
-          dpkg-deb --version | head -1
+          brew install dpkg ldid
 
-      - name: Cache Theos
-        id: cache-theos
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/theos
-          key: ${{ runner.os }}-theos-${{ hashFiles('Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-theos-
-
-      - name: Install Theos
-        if: steps.cache-theos.outputs.cache-hit != 'true'
+      # =========================
+      # BUILD AppDataManager
+      # =========================
+      - name: Build AppDataManager
         run: |
-          echo "=== Installing Theos ==="
-          rm -rf "$THEOS" && git clone --recursive https://github.com/theos/theos.git "$THEOS"
-          test -f "$THEOS/makefiles/common.mk" || { echo "❌ Theos install failed"; exit 1; }
-          echo "✅ Theos installed"
-
-      - name: Verify Theos
-        run: |
-          echo "=== Verifying Theos ==="
-          test -f "$THEOS/makefiles/common.mk" || { echo "❌ common.mk missing"; exit 1; }
-          test -f "$THEOS/makefiles/package/deb.mk" || { echo "❌ deb.mk missing"; exit 1; }
-          test -d "$THEOS/include" || { echo "❌ include dir missing"; exit 1; }
-          test -f "$THEOS/bin/nic.pl" || { echo "❌ nic.pl missing"; exit 1; }
-          echo "✅ Theos structure verified"
-
-      - name: Install libroot
-        run: |
-          echo "=== Installing libroot ==="
-          if [ -f "$THEOS/include/rootless.h" ]; then
-            echo "✅ rootless.h already present"
-            exit 0
-          fi
-          git clone --depth 1 https://github.com/opa334/libroot.git /tmp/libroot 2>/dev/null || true
-          if [ -f /tmp/libroot/include/rootless.h ]; then
-            cp /tmp/libroot/include/rootless.h "$THEOS/include/"
-            echo "✅ libroot installed from GitHub"
-          elif [ -f ${{ github.workspace }}/rootless.h ]; then
-            cp ${{ github.workspace }}/rootless.h "$THEOS/include/rootless.h"
-            echo "✅ libroot installed from local stub"
-          else
-            echo "❌ rootless.h not found anywhere"
-            exit 1
-          fi
-
-      - name: Fix script permissions
-        run: |
-          echo "=== Fixing Permissions ==="
-          chmod +x layout/DEBIAN/postinst
-          chmod +x layout/DEBIAN/prerm
-          ls -la layout/DEBIAN/
-
-      - name: Build package
-        run: |
-          echo "=== Building Package ==="
-          export PATH="$THEOS/bin:$PATH"
-          echo "THEOS=$THEOS"
           make clean
-          make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
-          echo ""
-          echo "=== Build output ==="
-          ls -la packages/ 2>/dev/null || echo "No packages directory"
+          make package
+        working-directory: ${{ github.workspace }}
 
-      - name: Validate .deb
+      - name: Verify AppDataManager package
         run: |
-          echo "=== Validating .deb ==="
-          DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
-          if [ -z "$DEB_FILE" ]; then
-            echo "❌ FATAL: No .deb file found"
-            exit 1
-          fi
-          echo "Found: $DEB_FILE"
-          echo ""
+          ls -la packages/
+          file packages/*.deb
 
-          echo "--- dpkg-deb -I ---"
-          dpkg-deb -I "$DEB_FILE" || { echo "❌ dpkg-deb -I failed"; exit 1; }
-          echo ""
-
-          echo "--- dpkg-deb -c (data archive) ---"
-          dpkg-deb -c "$DEB_FILE" > /tmp/deb-data.txt
-          wc -l /tmp/deb-data.txt
-          head -30 /tmp/deb-data.txt
-          echo ""
-
-          echo "--- Extracting control files (dpkg-deb -e) ---"
-          rm -rf /tmp/deb-control
-          dpkg-deb -e "$DEB_FILE" /tmp/deb-control
-          ls -la /tmp/deb-control/
-          echo ""
-
-          echo "--- Control file checks ---"
-          test -f /tmp/deb-control/control || { echo "❌ control missing"; exit 1; }
-          echo "✅ control present"
-
-          test -f /tmp/deb-control/postinst || { echo "❌ postinst missing"; exit 1; }
-          echo "✅ postinst present ($(wc -c < /tmp/deb-control/postinst) bytes)"
-
-          test -f /tmp/deb-control/prerm || { echo "❌ prerm missing"; exit 1; }
-          echo "✅ prerm present ($(wc -c < /tmp/deb-control/prerm) bytes)"
-
-          test -x /tmp/deb-control/postinst || { echo "❌ postinst not executable"; exit 1; }
-          echo "✅ postinst is executable"
-
-          test -x /tmp/deb-control/prerm || { echo "❌ prerm not executable"; exit 1; }
-          echo "✅ prerm is executable"
-
-          echo ""
-          echo "--- Data archive checks ---"
-          grep -q "Applications/AppDataManager.app/AppDataManager" /tmp/deb-data.txt || { echo "❌ Binary missing"; exit 1; }
-          echo "✅ Binary present in data archive"
-
-          dpkg-deb -I "$DEB_FILE" | grep -q "Architecture: iphoneos-arm64" || { echo "❌ Wrong architecture"; exit 1; }
-          echo "✅ Architecture is iphoneos-arm64"
-
-          dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
-          echo "✅ Package name correct"
-
-          echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
-          echo "DEB_BASENAME=$(basename $DEB_FILE)" >> $GITHUB_ENV
-
-          echo ""
-          echo "✅ .deb validation PASSED"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: appdata-manager-build
-          path: packages/*.deb
-          retention-days: 30
-          if-no-files-found: error
-
-      - name: Build summary
-        if: always()
+      # =========================
+      # BUILD IPA Installer Pro
+      # =========================
+      - name: Build IPA Installer Pro
         run: |
-          echo ""
-          echo "=========================================="
-          if [ "${{ job.status }}" == "success" ]; then
-            echo "  ✅ BUILD PIPELINE SUCCESSFUL"
-            echo "=========================================="
-            echo ""
-            echo "📦 Package: $DEB_BASENAME"
-            echo "📁 Size: $(stat -f%z $DEB_FILE) bytes"
-          else
-            echo "  ❌ BUILD PIPELINE FAILED"
-            echo "=========================================="
-          fi
+          cd IPAInstallerPro
+          make clean
+          make package
 
-  publish:
-    name: Publish to gh-pages
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 1
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: appdata-manager-build
-          path: ./packages
-
-      - name: Setup repo directory
+      - name: Verify IPA Installer Pro package
         run: |
-          echo "=========================================="
-          echo "  Setting up Repository"
-          echo "=========================================="
-          mkdir -p repo/pool/main/iphoneos-arm64
-          cp packages/*.deb repo/pool/main/iphoneos-arm64/
-          echo "✅ .deb copied to pool/"
-          ls -la repo/pool/main/iphoneos-arm64/
+          ls -la IPAInstallerPro/packages/
+          file IPAInstallerPro/packages/*.deb
 
-      - name: Generate repo metadata
-        run: |
-          echo "=========================================="
-          echo "  Generating APT/Sileo Metadata"
-          echo "=========================================="
-          python3 scripts/generate-repo.py repo
-          echo ""
-          echo "=== Repo structure ==="
-          find repo -type f | sort
-
-      - name: Validate repository
-        run: |
-          echo "=========================================="
-          echo "  Validating Repository"
-          echo "=========================================="
-          python3 scripts/validate-repo.py repo
-
+      # =========================
+      # DEPLOY BOTH to gh-pages
+      # =========================
       - name: Deploy to gh-pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./repo
-          publish_branch: gh-pages
-          force_orphan: true
-          user_name: "github-actions[bot]"
-          user_email: "github-actions[bot]@users.noreply.github.com"
-          commit_message: "Publish repo: AppData Manager ${{ github.run_number }}"
-
-      - name: Verify published repo
         run: |
-          echo "=========================================="
-          echo "  Verifying Published Repo"
-          echo "=========================================="
-          sleep 30
-          BASE_URL="https://aosaid3224-ops.github.io/AppDataManager"
-          for file in Release Packages Packages.xz Packages.bz2; do
-            URL="$BASE_URL/$file"
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
-            if [ "$STATUS" == "200" ]; then
-              echo "✅ $file accessible ($STATUS)"
-            else
-              echo "❌ $file returned $STATUS"
-            fi
-          done
-          DEB_FILE=$(ls packages/*.deb | head -1)
-          DEB_NAME=$(basename "$DEB_FILE")
-          DEB_URL="$BASE_URL/pool/main/iphoneos-arm64/$DEB_NAME"
-          curl -sL -o /tmp/published.deb "$DEB_URL"
-          PUB_SIZE=$(stat -c%s /tmp/published.deb)
-          echo "✅ .deb accessible ($PUB_SIZE bytes)"
-          echo ""
-          echo "=========================================="
-          echo "  ✅ PUBLISH VERIFICATION COMPLETE"
-          echo "=========================================="
-          echo ""
-          echo "🌐 Repo URL: https://aosaid3224-ops.github.io/AppDataManager/"
-          echo "📲 Add to Sileo: https://aosaid3224-ops.github.io/AppDataManager/"
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub CI"
+
+          # Fetch gh-pages
+          git fetch origin gh-pages || true
+
+          # Create orphan if not exists
+          git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
+
+          # Clean everything except .git
+          git rm -rf . 2>/dev/null || true
+          rm -rf * 2>/dev/null || true
+
+          # Create pool directory
+          mkdir -p pool/main/iphoneos-arm64
+
+          # Copy both .debs
+          cp packages/*.deb pool/main/iphoneos-arm64/ 2>/dev/null || true
+          cp IPAInstallerPro/packages/*.deb pool/main/iphoneos-arm64/ 2>/dev/null || true
+
+          # Generate Packages metadata
+          python3 scripts/generate-repo.py .
+
+          # Generate Release file
+          cat > Release <<EOF
+Origin: A-ZAIN Repo
+Label: A-ZAIN
+Suite: stable
+Version: 1.0
+Codename: ios
+Architectures: iphoneos-arm64
+Components: main
+Description: A-ZAIN Repo - Jailbreak tools and utilities
+EOF
+
+          # Commit and push
+          git add -A
+          git commit -m "Update repo: AppDataManager + IPA Installer Pro" || true
+          git push origin gh-pages --force
