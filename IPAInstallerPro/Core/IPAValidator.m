@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #import "Logger.h"
 #import "JailbreakEnvironment.h"
+#import "RootlessManager.h"
 
 @implementation IPAValidationResult
 @end
@@ -70,7 +71,11 @@
     [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
 
     // Unzip using posix_spawn
-    const char *unzipPath = "/usr/bin/unzip";
+    NSString *unzipPathStr = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPathStr]) {
+        unzipPathStr = @"/usr/bin/unzip";
+    }
+    const char *unzipPath = [unzipPathStr UTF8String];
     const char *unzipArgs[] = { unzipPath, "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL };
     pid_t unzipPid;
     int unzipStatus;
