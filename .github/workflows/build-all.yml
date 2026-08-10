@@ -29,10 +29,12 @@ jobs:
       - name: Setup dependencies
         run: brew install dpkg ldid
 
-      - name: Fix postinst permissions
+      - name: Fix postinst/prerm permissions
         run: |
           chmod +x source/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/layout/DEBIAN/prerm 2>/dev/null || true
           chmod +x source/IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/IPAInstallerPro/layout/DEBIAN/prerm 2>/dev/null || true
 
       - name: Build AppDataManager
         run: |
