@@ -106,7 +106,7 @@
 
 - (void)addIPATapped:(id)sender {
     // Use iOS native Files app (UIDocumentPickerViewController)
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"com.apple.itunes.ipa"] inMode:UIDocumentPickerModeImport];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data", @"public.item", @"com.apple.itunes.ipa"] inMode:UIDocumentPickerModeImport];
     picker.delegate = self;
     picker.allowsMultipleSelection = YES;
     picker.modalPresentationStyle = UIModalPresentationFormSheet;
