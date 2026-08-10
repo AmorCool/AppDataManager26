@@ -35,12 +35,22 @@ jobs:
           token: ${{ secrets.REPO_PAT }}
           path: repo
 
-      - name: Download latest .deb from gh-pages
+      - name: Download AppDataManager .deb from gh-pages
         run: |
           VERSION=${{ steps.get_version.outputs.version }}
           DEB_URL="https://raw.githubusercontent.com/aosaid3224-ops/AppDataManager/gh-pages/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_${VERSION}_iphoneos-arm64.deb"
           mkdir -p repo/pool/main/iphoneos-arm64
-          wget -q "$DEB_URL" -O "repo/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_${VERSION}_iphoneos-arm64.deb"
+          wget -q "$DEB_URL" -O "repo/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_${VERSION}_iphoneos-arm64.deb" || true
+          ls -la repo/pool/main/iphoneos-arm64/
+
+      - name: Download IPA Installer Pro .deb from gh-pages
+        run: |
+          mkdir -p repo/pool/main/iphoneos-arm64
+          # Find latest IPAInstallerPro .deb
+          IPA_DEB=$(curl -s https://api.github.com/repos/aosaid3224-ops/AppDataManager/contents/gh-pages/pool/main/iphoneos-arm64?ref=gh-pages | grep -o 'com.aosaid.ipainstallerpro_[^"]*' | head -1)
+          if [ -n "$IPA_DEB" ]; then
+            wget -q "https://raw.githubusercontent.com/aosaid3224-ops/AppDataManager/gh-pages/pool/main/iphoneos-arm64/${IPA_DEB}" -O "repo/pool/main/iphoneos-arm64/${IPA_DEB}" || true
+          fi
           ls -la repo/pool/main/iphoneos-arm64/
 
       - name: Generate repo metadata

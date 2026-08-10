@@ -44,7 +44,7 @@ jobs:
         run: |
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub CI"
-          git fetch origin gh-pages || git checkout --orphan gh-pages
+          git fetch origin gh-pages || true
           git checkout gh-pages || git checkout --orphan gh-pages
           mkdir -p pool/main/iphoneos-arm64
           cp IPAInstallerPro/packages/*.deb pool/main/iphoneos-arm64/
