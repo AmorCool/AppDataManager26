@@ -92,6 +92,7 @@ MIT License
 
 ---
 
-**الإصدار الحالي: 1.0.0** — First Stable Release
+**الإصدار الحالي: 1.4.0** — First Stable Release
 
 **Developed by ZAIN**
+**تم حل بعض المشاكل المعقده بواسطة kimi**
