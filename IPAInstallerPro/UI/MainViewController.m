@@ -9,6 +9,8 @@
 @property (nonatomic, strong) NSMutableArray<IPAExtractedInfo *> *ipaFiles;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, strong) UIRefreshControl *refreshControl;
+@property (nonatomic, strong) UIView *toastView;
+@property (nonatomic, strong) UILabel *toastLabel;
 @end
 
 @implementation MainViewController
@@ -23,6 +25,7 @@
     [self setupTableView];
     [self setupEmptyState];
     [self setupAddButton];
+    [self setupToast];
     [self loadIPAFiles];
 }
 
@@ -72,10 +75,46 @@
     self.navigationItem.rightBarButtonItem = addBtn;
 }
 
+- (void)setupToast {
+    self.toastView = [[UIView alloc] initWithFrame:CGRectMake(20, -60, self.view.bounds.size.width - 40, 50)];
+    self.toastView.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:0.95];
+    self.toastView.layer.cornerRadius = 12;
+    self.toastView.layer.masksToBounds = YES;
+    self.toastView.alpha = 0;
+    [self.view addSubview:self.toastView];
+
+    self.toastLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, self.toastView.bounds.size.width - 32, 50)];
+    self.toastLabel.textColor = [UIColor whiteColor];
+    self.toastLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    self.toastLabel.textAlignment = NSTextAlignmentCenter;
+    [self.toastView addSubview:self.toastLabel];
+}
+
+- (void)showToast:(NSString *)message isError:(BOOL)isError {
+    self.toastLabel.text = message;
+    self.toastView.backgroundColor = isError
+        ? [UIColor colorWithRed:0.8 green:0.25 blue:0.2 alpha:0.95]
+        : [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:0.95];
+
+    [UIView animateWithDuration:0.3 animations:^{
+        self.toastView.alpha = 1;
+        self.toastView.frame = CGRectMake(20, 60, self.view.bounds.size.width - 40, 50);
+    } completion:^(BOOL finished) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [UIView animateWithDuration:0.3 animations:^{
+                self.toastView.alpha = 0;
+                self.toastView.frame = CGRectMake(20, -60, self.view.bounds.size.width - 40, 50);
+            }];
+        });
+    }];
+}
+
 - (void)loadIPAFiles {
     [self.ipaFiles removeAllObjects];
 
+    // FIXED: Added IPAInstaller directory to search paths!
     NSArray *directories = @[
+        @"/var/mobile/Documents/IPAInstaller",
         @"/var/mobile/Documents",
         @"/var/mobile/Downloads",
         @"/var/mobile/Media/Downloads"
@@ -83,7 +122,13 @@
 
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *dir in directories) {
-        if (![fm fileExistsAtPath:dir]) continue;
+        if (![fm fileExistsAtPath:dir]) {
+            // Create IPAInstaller dir if missing
+            if ([dir isEqualToString:@"/var/mobile/Documents/IPAInstaller"]) {
+                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+            }
+            continue;
+        }
         NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
         for (NSString *file in contents) {
             if ([file.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
@@ -106,7 +151,15 @@
 
 - (void)addIPATapped:(id)sender {
     // Use iOS native Files app (UIDocumentPickerViewController)
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data", @"public.item", @"com.apple.itunes.ipa"] inMode:UIDocumentPickerModeImport];
+    // Support multiple document types for maximum compatibility
+    NSArray *docTypes = @[
+        @"com.apple.itunes.ipa",
+        @"public.data",
+        @"public.item",
+        @"public.archive",
+        @"public.zip-archive"
+    ];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:docTypes inMode:UIDocumentPickerModeImport];
     picker.delegate = self;
     picker.allowsMultipleSelection = YES;
     picker.modalPresentationStyle = UIModalPresentationFormSheet;
@@ -116,39 +169,83 @@
 #pragma mark - UIDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    if (urls.count == 0) return;
+
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *destDir = @"/var/mobile/Documents/IPAInstaller";
-    [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    // Ensure destination directory exists
+    if (![fm fileExistsAtPath:destDir]) {
+        NSError *dirError = nil;
+        [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:&dirError];
+        if (dirError) {
+            [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to create IPAInstaller dir: %@", dirError.localizedDescription]];
+            [self showToast:@"فشل إنشاء مجلد التخزين" isError:YES];
+            return;
+        }
+    }
+
+    __block NSInteger successCount = 0;
+    __block NSInteger failCount = 0;
 
     for (NSURL *url in urls) {
-        // Start accessing security-scoped resource
         [url startAccessingSecurityScopedResource];
 
         NSString *fileName = url.lastPathComponent;
+        if (!fileName || fileName.length == 0) {
+            fileName = @"imported.ipa";
+        }
+        // Ensure .ipa extension
+        if (![fileName.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
+            fileName = [fileName stringByAppendingPathExtension:@"ipa"];
+        }
+
         NSString *destPath = [destDir stringByAppendingPathComponent:fileName];
 
-        // Copy file
-        NSError *error = nil;
+        // Remove existing
         if ([fm fileExistsAtPath:destPath]) {
             [fm removeItemAtPath:destPath error:nil];
         }
 
-        // For security-scoped resources, we need to use NSFileCoordinator
-        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-        [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:&error byAccessor:^(NSURL *newURL) {
-            NSError *copyError = nil;
-            [fm copyItemAtPath:newURL.path toPath:destPath error:&copyError];
-            if (copyError) {
-                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to copy %@: %@", fileName, copyError.localizedDescription]];
+        // Simple copy using NSData (most reliable for jailbreak apps)
+        NSError *readError = nil;
+        NSData *fileData = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&readError];
+
+        if (fileData && fileData.length > 0) {
+            BOOL written = [fileData writeToFile:destPath options:NSDataWritingAtomic error:nil];
+            if (written) {
+                successCount++;
+                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Copied %@ (%lu bytes)", fileName, (unsigned long)fileData.length]];
             } else {
-                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Copied %@ to Documents", fileName]];
+                failCount++;
+                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to write %@", fileName]];
             }
-        }];
+        } else {
+            // Fallback: try direct file copy
+            NSError *copyError = nil;
+            BOOL copied = [fm copyItemAtPath:url.path toPath:destPath error:&copyError];
+            if (copied) {
+                successCount++;
+                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Copied %@ via file manager", fileName]];
+            } else {
+                failCount++;
+                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to copy %@: %@", fileName, copyError.localizedDescription]];
+            }
+        }
 
         [url stopAccessingSecurityScopedResource];
     }
 
+    // Reload and show feedback
     [self loadIPAFiles];
+
+    if (successCount > 0 && failCount == 0) {
+        [self showToast:[NSString stringWithFormat:@"تمت إضافة %ld ملف IPA", (long)successCount] isError:NO];
+    } else if (successCount > 0 && failCount > 0) {
+        [self showToast:[NSString stringWithFormat:@"%ld نجح، %ld فشل", (long)successCount, (long)failCount] isError:YES];
+    } else {
+        [self showToast:@"فشل إضافة الملفات" isError:YES];
+    }
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
@@ -215,7 +312,8 @@
         [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
         completionHandler(YES);
     }];
-    deleteAction.backgroundColor = [UIColor colorWithRed:0.8 green:0.2 blue:0.2 alpha:1.0];
+    deleteAction.backgroundColor = [UIColor colorWithRed:0.8 green:0.25 blue:0.2 alpha:1.0];
+
     return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction]];
 }
 
