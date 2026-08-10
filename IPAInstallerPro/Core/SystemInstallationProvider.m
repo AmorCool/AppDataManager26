@@ -1,9 +1,8 @@
 #import "SystemInstallationProvider.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import "Logger.h"
 #import "RootlessManager.h"
-#include <spawn.h>
-#include <sys/wait.h>
 
 @implementation SystemInstallationProvider
 
@@ -23,7 +22,6 @@
     [[Logger sharedLogger] info:[NSString stringWithFormat:@"System: Installing %@", ipaPath]];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Try using LSApplicationWorkspace for installation
         Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
         if (!LSApplicationWorkspace_class) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -42,40 +40,46 @@
             return;
         }
 
-        // Try installApplication:withOptions:error: or installApplication:withOptions:
+        NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
+        NSMutableDictionary *options = [NSMutableDictionary dictionary];
+        options[@"PackageType"] = @"User";
+        options[@"ApplicationType"] = @"User";
+
         BOOL installed = NO;
         NSString *errorMsg = nil;
 
         @try {
-            // Method 1: installApplication:withOptions:error: (iOS 11+)
-            if ([workspace respondsToSelector:@selector(installApplication:withOptions:error:)]) {
-                NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
-                NSMutableDictionary *options = [NSMutableDictionary dictionary];
-                options[@"PackageType"] = @"User";
-                options[@"ApplicationType"] = @"User";
-
+            // Try installApplication:withOptions:error: using objc_msgSend
+            SEL installSel = NSSelectorFromString(@"installApplication:withOptions:error:");
+            if ([workspace respondsToSelector:installSel]) {
+                typedef BOOL (*InstallMethod)(id, SEL, NSURL *, NSDictionary *, NSError **);
+                InstallMethod method = (InstallMethod)objc_msgSend;
                 NSError *installError = nil;
-                installed = [workspace installApplication:ipaURL withOptions:options error:&installError];
+                installed = method(workspace, installSel, ipaURL, options, &installError);
                 if (!installed && installError) {
                     errorMsg = installError.localizedDescription;
                 }
             }
-            // Method 2: installApplication:withOptions: (older iOS)
-            else if ([workspace respondsToSelector:@selector(installApplication:withOptions:)]) {
-                NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
-                NSMutableDictionary *options = [NSMutableDictionary dictionary];
-                options[@"PackageType"] = @"User";
-                options[@"ApplicationType"] = @"User";
-
-                installed = [workspace installApplication:ipaURL withOptions:options];
-            }
-            // Method 3: installApplication: (oldest)
-            else if ([workspace respondsToSelector:@selector(installApplication:)]) {
-                NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
-                installed = [workspace installApplication:ipaURL];
-            }
+            // Try installApplication:withOptions:
             else {
-                errorMsg = @"لا توجد طريقة تثبيت متاحة عبر النظام";
+                SEL installSel2 = NSSelectorFromString(@"installApplication:withOptions:");
+                if ([workspace respondsToSelector:installSel2]) {
+                    typedef BOOL (*InstallMethod2)(id, SEL, NSURL *, NSDictionary *);
+                    InstallMethod2 method2 = (InstallMethod2)objc_msgSend;
+                    installed = method2(workspace, installSel2, ipaURL, options);
+                }
+                // Try installApplication:
+                else {
+                    SEL installSel3 = NSSelectorFromString(@"installApplication:");
+                    if ([workspace respondsToSelector:installSel3]) {
+                        typedef BOOL (*InstallMethod3)(id, SEL, NSURL *);
+                        InstallMethod3 method3 = (InstallMethod3)objc_msgSend;
+                        installed = method3(workspace, installSel3, ipaURL);
+                    }
+                    else {
+                        errorMsg = @"لا توجد طريقة تثبيت متاحة عبر النظام";
+                    }
+                }
             }
         } @catch (NSException *e) {
             errorMsg = [NSString stringWithFormat:@"استثناء أثناء التثبيت: %@", e.reason];
@@ -115,13 +119,20 @@
             return;
         }
 
-        // Try uninstallApplication:
         BOOL success = NO;
         @try {
-            if ([workspace respondsToSelector:@selector(uninstallApplication:)]) {
-                success = [workspace performSelector:@selector(uninstallApplication:) withObject:bundleID];
-            } else if ([workspace respondsToSelector:@selector(uninstallApplication:withOptions:)]) {
-                success = [workspace performSelector:@selector(uninstallApplication:withOptions:) withObject:bundleID withObject:@{}];
+            SEL uninstallSel = NSSelectorFromString(@"uninstallApplication:");
+            if ([workspace respondsToSelector:uninstallSel]) {
+                typedef BOOL (*UninstallMethod)(id, SEL, NSString *);
+                UninstallMethod method = (UninstallMethod)objc_msgSend;
+                success = method(workspace, uninstallSel, bundleID);
+            } else {
+                SEL uninstallSel2 = NSSelectorFromString(@"uninstallApplication:withOptions:");
+                if ([workspace respondsToSelector:uninstallSel2]) {
+                    typedef BOOL (*UninstallMethod2)(id, SEL, NSString *, NSDictionary *);
+                    UninstallMethod2 method2 = (UninstallMethod2)objc_msgSend;
+                    success = method2(workspace, uninstallSel2, bundleID, @{});
+                }
             }
         } @catch (NSException *e) {
             [[Logger sharedLogger] error:[NSString stringWithFormat:@"Uninstall exception: %@", e.reason]];
