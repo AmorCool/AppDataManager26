@@ -20,6 +20,9 @@ jobs:
       - name: Setup dependencies
         run: brew install dpkg ldid
 
+      - name: Fix postinst permissions
+        run: chmod +x IPAInstallerPro/layout/DEBIAN/postinst
+
       - name: Build IPA Installer Pro
         run: |
           cd IPAInstallerPro
