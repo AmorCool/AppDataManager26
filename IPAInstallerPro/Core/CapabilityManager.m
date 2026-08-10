@@ -66,6 +66,15 @@
     sysInstall.statusMessage = sysInstall.isAvailable ? @"متاح ✓" : @"محدود";
     [self.capabilities addObject:sysInstall];
 
+    // Direct installation (ldid + root access)
+    Capability *directInstall = [[Capability alloc] init];
+    directInstall.name = @"Direct Installation";
+    directInstall.identifier = @"direct_install";
+    directInstall.isAvailable = [self checkDirectInstall];
+    directInstall.statusMessage = directInstall.isAvailable ? @"جاهز ✓" : @"غير متوفر";
+    directInstall.path = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
+    [self.capabilities addObject:directInstall];
+
     [[Logger sharedLogger] info:[NSString stringWithFormat:@"Capabilities scanned: %lu ready", 
         (unsigned long)[[self.capabilities filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isAvailable == YES"]] count]]];
 }
@@ -77,13 +86,19 @@
 }
 
 - (BOOL)checkAppInst {
-    RootlessManager *rl = [RootlessManager sharedManager];
-    return [rl fileExistsAtLogicalPath:@"/usr/bin/appinst"];
+    return [[RootlessManager sharedManager] fileExistsAtLogicalPath:@"/usr/bin/appinst"];
 }
 
 - (BOOL)checkUnzip {
+    return [[RootlessManager sharedManager] fileExistsAtLogicalPath:@"/usr/bin/unzip"];
+}
+
+- (BOOL)checkDirectInstall {
+    // Check for ldid (signing tool) and root access
     RootlessManager *rl = [RootlessManager sharedManager];
-    return [rl fileExistsAtLogicalPath:@"/usr/bin/unzip"];
+    BOOL hasLdid = [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"];
+    BOOL hasRoot = (getuid() == 0);
+    return hasLdid && hasRoot;
 }
 
 - (NSArray<Capability *> *)allCapabilities {
@@ -92,25 +107,68 @@
 
 - (Capability *)capabilityForIdentifier:(NSString *)identifier {
     for (Capability *cap in self.capabilities) {
-        if ([cap.identifier isEqualToString:identifier]) return cap;
+        if ([cap.identifier isEqualToString:identifier]) {
+            return cap;
+        }
     }
     return nil;
 }
 
-- (BOOL)isAppSyncAvailable { return [self capabilityForIdentifier:@"appsync"].isAvailable; }
-- (BOOL)isAppInstAvailable { return [self capabilityForIdentifier:@"appinst"].isAvailable; }
-- (BOOL)isUnzipAvailable { return [self capabilityForIdentifier:@"unzip"].isAvailable; }
-- (BOOL)isSystemInstallationAvailable { return [self capabilityForIdentifier:@"system_install"].isAvailable; }
+- (BOOL)isAppSyncAvailable {
+    return [self capabilityForIdentifier:@"appsync"].isAvailable;
+}
+
+- (BOOL)isAppInstAvailable {
+    return [self capabilityForIdentifier:@"appinst"].isAvailable;
+}
+
+- (BOOL)isUnzipAvailable {
+    return [self capabilityForIdentifier:@"unzip"].isAvailable;
+}
+
+- (BOOL)isSystemInstallationAvailable {
+    return [self capabilityForIdentifier:@"system_install"].isAvailable;
+}
+
+- (BOOL)isDirectInstallationAvailable {
+    return [self capabilityForIdentifier:@"direct_install"].isAvailable;
+}
 
 - (NSString *)installationReadinessStatus {
-    if (!self.isAppSyncAvailable) return @"يتطلب AppSync Unified";
-    if (!self.isUnzipAvailable) return @"يتطلب أداة فك الضغط";
-    if (!self.isAppInstAvailable && !self.isSystemInstallationAvailable) return @"لا توجد طريقة تثبيت متاحة";
-    return @"جاهز للتثبيت ✓";
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    [lines addObject:@"═══ جاهزية التثبيت ═══"];
+    [lines addObject:@""];
+
+    for (Capability *cap in self.capabilities) {
+        NSString *status = cap.isAvailable ? @"✓" : @"✗";
+        [lines addObject:[NSString stringWithFormat:@"%@ %@: %@", status, cap.name, cap.statusMessage]];
+    }
+
+    [lines addObject:@""];
+
+    if (self.canInstallIPA) {
+        [lines addObject:@"✅ يمكن تثبيت IPA"];
+    } else {
+        [lines addObject:@"❌ لا يمكن تثبيت IPA"];
+        [lines addObject:@""];
+        [lines addObject:@"للتثبيت المباشر (بدون AppSync):"];
+        [lines addObject:@"• تأكد من تثبيت ldid"];
+        [lines addObject:@"• تأكد من تشغيل الأداة بصلاحيات root"];
+        [lines addObject:@""];
+        [lines addObject:@"للتثبيت عبر appinst:"];
+        [lines addObject:@"• تأكد من تثبيت appinst"];
+    }
+
+    return [lines componentsJoinedByString:@"\n"];
 }
 
 - (BOOL)canInstallIPA {
-    return self.isAppSyncAvailable && self.isUnzipAvailable && (self.isAppInstAvailable || self.isSystemInstallationAvailable);
+    // Can install if ANY of these is available:
+    // 1. appinst backend
+    // 2. System installation (LSApplicationWorkspace)
+    // 3. Direct installation (ldid + root)
+    // 4. Unzip (for extraction, but needs a provider too)
+    return self.isAppInstAvailable || self.isSystemInstallationAvailable || self.isDirectInstallationAvailable;
 }
 
 @end
