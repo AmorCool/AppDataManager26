@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: aosaid3224-ops/repo
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.REPO_TOKEN }}
           path: repo
 
       - name: Setup Theos
@@ -43,7 +43,6 @@ jobs:
 
       - name: Copy generate-repo.py to repo
         run: |
-          cp source/scripts/generate-repo.py repo/scripts/generate-repo.py 2>/dev/null || true
           mkdir -p repo/scripts
           cp source/scripts/generate-repo.py repo/scripts/
 
