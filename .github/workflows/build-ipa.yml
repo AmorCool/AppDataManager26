@@ -43,6 +43,11 @@ jobs:
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub CI"
 
+          # Save .deb and scripts before switching branches
+          mkdir -p /tmp/deploy
+          find . -name '*.deb' -type f -exec cp {} /tmp/deploy/ \;
+          cp -r scripts /tmp/deploy/scripts
+
           git fetch origin gh-pages || true
           git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
 
@@ -50,9 +55,9 @@ jobs:
           rm -rf * 2>/dev/null || true
 
           mkdir -p pool/main/iphoneos-arm64
-          find . -name '*.deb' -type f -exec cp {} pool/main/iphoneos-arm64/ \;
+          cp /tmp/deploy/*.deb pool/main/iphoneos-arm64/
 
-          python3 scripts/generate-repo.py .
+          python3 /tmp/deploy/scripts/generate-repo.py .
 
           echo "Origin: A-ZAIN Repo" > Release
           echo "Label: A-ZAIN" >> Release
