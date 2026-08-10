@@ -7,6 +7,7 @@
 #import "IPAValidator.h"
 #import "AppInstInstallationProvider.h"
 #import "SystemInstallationProvider.h"
+#import "DirectInstallationProvider.h"
 
 @interface InstallationEngine ()
 @property (nonatomic, strong) NSMutableArray<id<InstallationProvider>> *providers;
@@ -28,6 +29,7 @@
         _providers = [NSMutableArray array];
         [_providers addObject:[[AppInstInstallationProvider alloc] init]];
         [_providers addObject:[[SystemInstallationProvider alloc] init]];
+        [_providers addObject:[[DirectInstallationProvider alloc] init]];
 
         // Sort by priority (highest first)
         [_providers sortUsingComparator:^NSComparisonResult(id<InstallationProvider> a, id<InstallationProvider> b) {
