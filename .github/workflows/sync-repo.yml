@@ -1,0 +1,63 @@
+name: Auto Sync to ZAIN-D Repo
+
+on:
+  workflow_run:
+    workflows: ["Build and Publish AppData Manager"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync to External Repo
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Checkout AppDataManager
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          path: source
+
+      - name: Get version from control
+        id: get_version
+        run: |
+          VERSION=$(grep "^Version:" source/control | cut -d' ' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION"
+
+      - name: Checkout external repo
+        uses: actions/checkout@v4
+        with:
+          repository: aosaid3224-ops/repo
+          token: ${{ secrets.REPO_PAT }}
+          path: repo
+
+      - name: Download latest .deb from gh-pages
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          DEB_URL="https://raw.githubusercontent.com/aosaid3224-ops/AppDataManager/gh-pages/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_${VERSION}_iphoneos-arm64.deb"
+          mkdir -p repo/pool/main/iphoneos-arm64
+          wget -q "$DEB_URL" -O "repo/pool/main/iphoneos-arm64/com.aosaid.appdatamgr_${VERSION}_iphoneos-arm64.deb"
+          ls -la repo/pool/main/iphoneos-arm64/
+
+      - name: Generate repo metadata
+        run: |
+          cd repo
+          python3 scripts/generate-repo.py .
+          python3 scripts/validate-repo.py .
+
+      - name: Commit and push
+        run: |
+          cd repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --cached --quiet || git commit -m "Auto-sync: AppData Manager v${{ steps.get_version.outputs.version }}"
+          git push
+
+      - name: Force GitHub Pages rebuild
+        run: |
+          curl -X POST             -H "Authorization: token ${{ secrets.REPO_PAT }}"             -H "Accept: application/vnd.github.v3+json"             https://api.github.com/repos/aosaid3224-ops/repo/pages/builds
