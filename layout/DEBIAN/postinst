@@ -2,8 +2,9 @@
 set -e
 
 echo "=========================================="
-echo "  📱 AppData Manager v1.0.0"
-echo "  Dopamine 3.0 / Rootless Compatible"
+echo " 📱 AppData Manager v1.0.0"
+echo " Dopamine 3.0 / Rootless Compatible"
+echo " First Stable Release"
 echo "=========================================="
 
 # تحديد مسار الجيلبريك (Dopamine 3.0 يستخدم /var/jb/)
@@ -41,13 +42,10 @@ if [ -d "$APP_PATH" ]; then
     chmod +x "$APP_PATH/AppDataManager" 2>/dev/null || true
 fi
 
-# إعادة تشغيل SpringBoard (اختياري - للتأكد من ظهور الأيقونة)
-# killall -9 SpringBoard 2>/dev/null || true
-
 echo ""
 echo "✅ Installation Complete!"
 echo "📲 Open 'AppData Manager' from your home screen"
-echo "🔧 Compatible with Dopamine 3.0 & iOS 18.3.1"
+echo "🔧 Compatible with Dopamine 3.0 & Rootless Jailbreak"
 echo ""
 
 exit 0
