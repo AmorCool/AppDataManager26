@@ -111,4 +111,18 @@
     return self.lastLog;
 }
 
+
+- (NSString *)stageDescription:(InstallationStage)stage {
+    switch (stage) {
+        case InstallationStageIdle: return @"Idle";
+        case InstallationStagePreparing: return @"Preparing";
+        case InstallationStageValidating: return @"Validating";
+        case InstallationStageInstalling: return @"Installing";
+        case InstallationStageRegistering: return @"Registering";
+        case InstallationStageCompleted: return @"Completed";
+        case InstallationStageFailed: return @"Failed";
+        default: return @"Unknown";
+    }
+}
+
 @end
