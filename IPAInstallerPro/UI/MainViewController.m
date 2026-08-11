@@ -4,13 +4,15 @@
 #import "Core/IPAExtractor.h"
 #import "Core/Logger.h"
 
-@interface MainViewController () <UIDocumentPickerDelegate>
+@interface MainViewController ()
 @property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) NSMutableArray<IPAExtractedInfo *> *ipaFiles;
+@property (nonatomic, strong) NSMutableArray *ipaFiles;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, strong) UIRefreshControl *refreshControl;
 @property (nonatomic, strong) UIView *toastView;
 @property (nonatomic, strong) UILabel *toastLabel;
+@property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
+@property (nonatomic, assign) BOOL isLoading;
 @end
 
 @implementation MainViewController
@@ -20,18 +22,20 @@
     self.title = @"ملفات IPA";
     self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
     self.ipaFiles = [NSMutableArray array];
+    self.isLoading = NO;
 
     [self setupNavigationBar];
     [self setupTableView];
     [self setupEmptyState];
     [self setupAddButton];
     [self setupToast];
+    [self setupLoadingIndicator];
     [self loadIPAFiles];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    [self loadIPAFiles];
+    // Don't reload here to avoid lag — use pull-to-refresh instead
 }
 
 - (void)setupNavigationBar {
@@ -90,57 +94,88 @@
     [self.toastView addSubview:self.toastLabel];
 }
 
-- (void)showToast:(NSString *)message isError:(BOOL)isError {
-    self.toastLabel.text = message;
-    self.toastView.backgroundColor = isError
-        ? [UIColor colorWithRed:0.8 green:0.25 blue:0.2 alpha:0.95]
-        : [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:0.95];
+- (void)setupLoadingIndicator {
+    self.loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    self.loadingIndicator.color = [UIColor colorWithWhite:0.5 alpha:1.0];
+    self.loadingIndicator.center = CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2 - 40);
+    self.loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+    self.loadingIndicator.hidden = YES;
+    [self.view addSubview:self.loadingIndicator];
+}
 
-    [UIView animateWithDuration:0.3 animations:^{
-        self.toastView.alpha = 1;
-        self.toastView.frame = CGRectMake(20, 60, self.view.bounds.size.width - 40, 50);
-    } completion:^(BOOL finished) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [UIView animateWithDuration:0.3 animations:^{
-                self.toastView.alpha = 0;
-                self.toastView.frame = CGRectMake(20, -60, self.view.bounds.size.width - 40, 50);
-            }];
-        });
-    }];
+- (void)showToast:(NSString *)message isError:(BOOL)isError {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.toastLabel.text = message;
+        self.toastView.backgroundColor = isError
+            ? [UIColor colorWithRed:0.8 green:0.25 blue:0.2 alpha:0.95]
+            : [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:0.95];
+
+        [UIView animateWithDuration:0.3 animations:^{
+            self.toastView.alpha = 1;
+            self.toastView.frame = CGRectMake(20, 60, self.view.bounds.size.width - 40, 50);
+        } completion:^(BOOL finished) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [UIView animateWithDuration:0.3 animations:^{
+                    self.toastView.alpha = 0;
+                    self.toastView.frame = CGRectMake(20, -60, self.view.bounds.size.width - 40, 50);
+                }];
+            });
+        }];
+    });
 }
 
 - (void)loadIPAFiles {
-    [self.ipaFiles removeAllObjects];
+    if (self.isLoading) return;
+    self.isLoading = YES;
 
-    NSArray *directories = @[
-        @"/var/mobile/Documents/IPAInstaller",
-        @"/var/mobile/Documents",
-        @"/var/mobile/Downloads",
-        @"/var/mobile/Media/Downloads"
-    ];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.loadingIndicator.hidden = NO;
+        [self.loadingIndicator startAnimating];
+        self.emptyLabel.hidden = YES;
+    });
 
-    NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *dir in directories) {
-        if (![fm fileExistsAtPath:dir]) {
-            if ([dir isEqualToString:@"/var/mobile/Documents/IPAInstaller"]) {
-                [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    // Run heavy file operations on background thread
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSMutableArray *foundFiles = [NSMutableArray array];
+
+        NSArray *directories = @[
+            @"/var/mobile/Documents/IPAInstaller",
+            @"/var/mobile/Documents",
+            @"/var/mobile/Downloads",
+            @"/var/mobile/Media/Downloads"
+        ];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        for (NSString *dir in directories) {
+            if (![fm fileExistsAtPath:dir]) {
+                if ([dir isEqualToString:@"/var/mobile/Documents/IPAInstaller"]) {
+                    [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+                }
+                continue;
             }
-            continue;
-        }
-        NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
-        for (NSString *file in contents) {
-            if ([file.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
-                NSString *path = [dir stringByAppendingPathComponent:file];
-                IPAExtractedInfo *info = [[IPAExtractor sharedExtractor] extractInfoFromIPA:path];
-                if (info) [self.ipaFiles addObject:info];
+            NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
+            for (NSString *file in contents) {
+                if ([file.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
+                    NSString *path = [dir stringByAppendingPathComponent:file];
+                    IPAExtractedInfo *info = [[IPAExtractor sharedExtractor] extractInfoFromIPA:path];
+                    if (info) [foundFiles addObject:info];
+                }
             }
         }
-    }
 
-    [self.tableView reloadData];
-    self.emptyLabel.hidden = (self.ipaFiles.count > 0);
-    self.emptyLabel.frame = CGRectMake(20, self.view.bounds.size.height / 2 - 40, self.view.bounds.size.width - 40, 80);
-    [self.refreshControl endRefreshing];
+        // Update UI on main thread
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.ipaFiles removeAllObjects];
+            [self.ipaFiles addObjectsFromArray:foundFiles];
+            [self.tableView reloadData];
+            self.emptyLabel.hidden = (self.ipaFiles.count > 0);
+            self.emptyLabel.frame = CGRectMake(20, self.view.bounds.size.height / 2 - 40, self.view.bounds.size.width - 40, 80);
+            [self.refreshControl endRefreshing];
+            [self.loadingIndicator stopAnimating];
+            self.loadingIndicator.hidden = YES;
+            self.isLoading = NO;
+        });
+    });
 }
 
 - (void)refreshPulled:(UIRefreshControl *)sender {
@@ -164,7 +199,7 @@
 
 #pragma mark - UIDocumentPickerDelegate
 
-- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray *)urls {
     if (urls.count == 0) return;
 
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -181,50 +216,53 @@
 
     __block NSInteger successCount = 0;
     __block NSInteger failCount = 0;
-    NSInteger totalUrls = urls.count;
 
-    for (NSURL *url in urls) {
-        [url startAccessingSecurityScopedResource];
+    // Process imports on background thread
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        for (NSURL *url in urls) {
+            [url startAccessingSecurityScopedResource];
 
-        NSString *fileName = url.lastPathComponent;
-        if (!fileName || fileName.length == 0) {
-            fileName = @"imported.ipa";
-        }
-        if (![fileName.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
-            fileName = [fileName stringByAppendingPathExtension:@"ipa"];
-        }
-
-        NSString *destPath = [destDir stringByAppendingPathComponent:fileName];
-        if ([fm fileExistsAtPath:destPath]) {
-            [fm removeItemAtPath:destPath error:nil];
-        }
-
-        // Use NSFileCoordinator for proper security-scoped resource access
-        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-        [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:nil byAccessor:^(NSURL *newURL) {
-            NSError *copyError = nil;
-            BOOL copied = [fm copyItemAtPath:newURL.path toPath:destPath error:&copyError];
-            if (copied) {
-                successCount++;
-                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Imported %@ to %@", fileName, destPath]];
-            } else {
-                failCount++;
-                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to import %@: %@", fileName, copyError.localizedDescription]];
+            NSString *fileName = url.lastPathComponent;
+            if (!fileName || fileName.length == 0) {
+                fileName = @"imported.ipa";
             }
-        }];
+            if (![fileName.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
+                fileName = [fileName stringByAppendingPathExtension:@"ipa"];
+            }
 
-        [url stopAccessingSecurityScopedResource];
-    }
+            NSString *destPath = [destDir stringByAppendingPathComponent:fileName];
+            if ([fm fileExistsAtPath:destPath]) {
+                [fm removeItemAtPath:destPath error:nil];
+            }
 
-    [self loadIPAFiles];
+            NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+            [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:nil byAccessor:^(NSURL *newURL) {
+                NSError *copyError = nil;
+                BOOL copied = [fm copyItemAtPath:newURL.path toPath:destPath error:&copyError];
+                if (copied) {
+                    successCount++;
+                    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Imported %@ to %@", fileName, destPath]];
+                } else {
+                    failCount++;
+                    [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to import %@: %@", fileName, copyError.localizedDescription]];
+                }
+            }];
 
-    if (successCount > 0 && failCount == 0) {
-        [self showToast:[NSString stringWithFormat:@"تمت إضافة %ld ملف IPA", (long)successCount] isError:NO];
-    } else if (successCount > 0 && failCount > 0) {
-        [self showToast:[NSString stringWithFormat:@"%ld نجح، %ld فشل", (long)successCount, (long)failCount] isError:YES];
-    } else {
-        [self showToast:@"فشل إضافة الملفات" isError:YES];
-    }
+            [url stopAccessingSecurityScopedResource];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self loadIPAFiles];
+
+            if (successCount > 0 && failCount == 0) {
+                [self showToast:[NSString stringWithFormat:@"تمت إضافة %ld ملف IPA", (long)successCount] isError:NO];
+            } else if (successCount > 0 && failCount > 0) {
+                [self showToast:[NSString stringWithFormat:@"%ld نجح، %ld فشل", (long)successCount, (long)failCount] isError:YES];
+            } else {
+                [self showToast:@"فشل إضافة الملفات" isError:YES];
+            }
+        });
+    });
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
@@ -259,7 +297,7 @@
     NSString *versionStr = info.version ?: @"غير معروف";
     NSString *bundleStr = info.bundleID ?: @"غير معروف";
     NSString *sizeStr = info.formattedSize ?: @"غير معروف";
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@  •  %@", versionStr, bundleStr, sizeStr];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ • %@ • %@", versionStr, bundleStr, sizeStr];
 
     UIImage *icon = info.icon;
     if (icon) {
