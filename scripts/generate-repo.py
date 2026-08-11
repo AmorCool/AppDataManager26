@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-import os, sys, hashlib, subprocess
+import os, sys, hashlib, subprocess, argparse
 
-REPO_DIR = sys.argv[1] if len(sys.argv) > 1 else "."
+parser = argparse.ArgumentParser(description="Generate APT repository Packages/Release files")
+parser.add_argument("repo_dir", nargs="?", default=".", help="Repository root directory")
+parser.add_argument("--dev", action="store_true", help="Generate for dev repo (repo-dev)")
+parser.add_argument("--prod", action="store_true", help="Generate for production repo (repo)")
+args = parser.parse_args()
+
+REPO_DIR = args.repo_dir
 POOL_DIR = os.path.join(REPO_DIR, "pool", "main", "iphoneos-arm64")
 
 def hash_file(path, algo):
@@ -56,7 +62,74 @@ def main():
         import lzma
         f.write(lzma.compress(packages_text.encode()))
 
-    print(f"Generated Packages for {len(packages)} packages")
+    # Generate Release file with proper hashes
+    pkg_size = len(packages_text)
+    pkg_md5 = hashlib.md5(packages_text.encode()).hexdigest()
+    pkg_sha1 = hashlib.sha1(packages_text.encode()).hexdigest()
+    pkg_sha256 = hashlib.sha256(packages_text.encode()).hexdigest()
+
+    gz_data = gzip.compress(packages_text.encode())
+    gz_size = len(gz_data)
+    gz_md5 = hashlib.md5(gz_data).hexdigest()
+    gz_sha1 = hashlib.sha1(gz_data).hexdigest()
+    gz_sha256 = hashlib.sha256(gz_data).hexdigest()
+
+    bz2_data = bz2.compress(packages_text.encode())
+    bz2_size = len(bz2_data)
+    bz2_md5 = hashlib.md5(bz2_data).hexdigest()
+    bz2_sha1 = hashlib.sha1(bz2_data).hexdigest()
+    bz2_sha256 = hashlib.sha256(bz2_data).hexdigest()
+
+    xz_data = lzma.compress(packages_text.encode())
+    xz_size = len(xz_data)
+    xz_md5 = hashlib.md5(xz_data).hexdigest()
+    xz_sha1 = hashlib.sha1(xz_data).hexdigest()
+    xz_sha256 = hashlib.sha256(xz_data).hexdigest()
+
+    if args.dev:
+        origin = "A-ZAIN Dev Repo"
+        label = "A-ZAIN Development"
+        codename = "ios-dev"
+        description = "A-ZAIN Development Repo - Private testing channel"
+    else:
+        origin = "A-ZAIN Repo"
+        label = "A-ZAIN"
+        codename = "ios"
+        description = "A-ZAIN Repo - Jailbreak tools and utilities"
+
+    release_lines = [
+        f"Origin: {origin}",
+        f"Label: {label}",
+        "Suite: stable",
+        "Version: 1.0",
+        f"Codename: {codename}",
+        "Architectures: iphoneos-arm64",
+        "Components: main",
+        f"Description: {description}",
+        "",
+        "MD5Sum:",
+        f" {pkg_md5} {pkg_size} Packages",
+        f" {gz_md5} {gz_size} Packages.gz",
+        f" {bz2_md5} {bz2_size} Packages.bz2",
+        f" {xz_md5} {xz_size} Packages.xz",
+        "",
+        "SHA1:",
+        f" {pkg_sha1} {pkg_size} Packages",
+        f" {gz_sha1} {gz_size} Packages.gz",
+        f" {bz2_sha1} {bz2_size} Packages.bz2",
+        f" {xz_sha1} {xz_size} Packages.xz",
+        "",
+        "SHA256:",
+        f" {pkg_sha256} {pkg_size} Packages",
+        f" {gz_sha256} {gz_size} Packages.gz",
+        f" {bz2_sha256} {bz2_size} Packages.bz2",
+        f" {xz_sha256} {xz_size} Packages.xz",
+    ]
+
+    with open(os.path.join(REPO_DIR, "Release"), "w") as f:
+        f.write("\n".join(release_lines) + "\n")
+
+    print(f"Generated Packages for {len(packages)} packages ({'dev' if args.dev else 'production'})")
 
 if __name__ == "__main__":
     main()
