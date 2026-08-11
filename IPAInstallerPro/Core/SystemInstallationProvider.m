@@ -1,14 +1,12 @@
 #import "SystemInstallationProvider.h"
 #import "Logger.h"
-#import "RootlessManager.h"
-#import "CapabilityManager.h"
-#import <spawn.h>
-#import <sys/wait.h>
+#import "JailbreakEnvironment.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
 @interface SystemInstallationProvider ()
 @property (nonatomic, strong) id lsApplicationWorkspace;
+@property (nonatomic, strong) NSString *appsPath;
 @end
 
 @implementation SystemInstallationProvider
@@ -16,123 +14,64 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
-        Class LSApplicationWorkspaceClass = NSClassFromString(@"LSApplicationWorkspace");
-        if (LSApplicationWorkspaceClass) {
-            self.lsApplicationWorkspace = [LSApplicationWorkspaceClass performSelector:@selector(defaultWorkspace)];
-        }
+        JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
+        self.lsApplicationWorkspace = env.lsApplicationWorkspace;
+        self.appsPath = env.applicationsPath;
     }
     return self;
 }
 
 - (NSString *)providerName { return @"System"; }
-- (NSString *)providerDescription { return @"تثبيت عبر نظام iOS (يتطلب AppSync)"; }
+- (NSString *)providerDescription { return @"تثبيت عبر النظام (LSApplicationWorkspace)"; }
 - (NSInteger)priority { return 10; }
 
 - (BOOL)isAvailable {
-    if (self.lsApplicationWorkspace == nil) return NO;
-    CapabilityManager *capMgr = [CapabilityManager sharedManager];
-    if (!capMgr.isAppSyncAvailable) {
-        [[Logger sharedLogger] info:@"SystemInstallationProvider: AppSync not available, disabling System provider"];
-        return NO;
-    }
-    return YES;
+    return self.lsApplicationWorkspace != nil;
 }
 
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
     if (!completion) return;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSFileManager *fm = [NSFileManager defaultManager];
         NSMutableString *log = [NSMutableString string];
-        void (^logStep)(NSString *) = ^(NSString *msg) {
-            NSString *entry = [NSString stringWithFormat:@"[System] %@", msg];
+        void (^logStep)(NSString *, NSString *) = ^(NSString *step, NSString *detail) {
+            NSString *entry = [NSString stringWithFormat:@"[System] %@: %@", step, detail];
             [[Logger sharedLogger] info:entry];
             [log appendFormat:@"%@\n", entry];
         };
-        logStep([NSString stringWithFormat:@"START: Installing %@", [ipaPath lastPathComponent]]);
+
+        logStep(@"START", [NSString stringWithFormat:@"Installing %@", [ipaPath lastPathComponent]]);
+
         if (!self.lsApplicationWorkspace) {
-            logStep(@"ERROR: LSApplicationWorkspace not available");
+            logStep(@"ERROR", @"LSApplicationWorkspace not available");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:@"LSApplicationWorkspace غير متاح" error:nil];
-                result.detailedOutput = log;
-                completion(result);
+                InstallationResult *r = [InstallationResult failureResult:@"LSApplicationWorkspace غير متاح" error:nil];
+                r.detailedOutput = log; completion(r);
             });
             return;
         }
-        NSString *bundleID = [self extractBundleIDFromIPA:ipaPath];
-        logStep([NSString stringWithFormat:@"BUNDLE_ID: %@", bundleID ?: @"unknown"]);
-        NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
-        NSMutableDictionary *options = [NSMutableDictionary dictionary];
-        if (bundleID) options[@"CFBundleIdentifier"] = bundleID;
-        options[@"SkipUninstall"] = @YES;
-        logStep([NSString stringWithFormat:@"OPTIONS: BundleID=%@, SkipUninstall=YES", bundleID ?: @"nil"]);
-        logStep(@"INSTALL: Calling LSApplicationWorkspace...");
-        @try {
-            SEL installSelector = NSSelectorFromString(@"installApplication:withOptions:error:");
-            NSMethodSignature *sig = [self.lsApplicationWorkspace methodSignatureForSelector:installSelector];
-            if (!sig) {
-                logStep(@"ERROR: installApplication:withOptions:error: not found");
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    InstallationResult *result = [InstallationResult failureResult:@"LSApplicationWorkspace method not found" error:nil];
-                    result.detailedOutput = log;
-                    completion(result);
-                });
-                return;
-            }
-            NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
-            [invocation setTarget:self.lsApplicationWorkspace];
-            [invocation setSelector:installSelector];
-            [invocation setArgument:&ipaURL atIndex:2];
-            [invocation setArgument:&options atIndex:3];
-            NSError *installError = nil;
-            [invocation setArgument:&installError atIndex:4];
-            [invocation invoke];
-            BOOL success = NO;
-            [invocation getReturnValue:&success];
-            if (success && !installError) {
-                logStep(@"SUCCESS: App installed via System");
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    InstallationResult *result = [InstallationResult successResult:@"تم التثبيت بنجاح عبر النظام"];
-                    result.bundleID = bundleID;
-                    result.detailedOutput = log;
-                    completion(result);
-                });
-            } else {
-                NSString *errorMsg = installError ? installError.localizedDescription : @"فشل التثبيت عبر النظام";
-                logStep([NSString stringWithFormat:@"ERROR: %@", errorMsg]);
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    InstallationResult *result = [InstallationResult failureResult:errorMsg error:installError];
-                    result.detailedOutput = log;
-                    completion(result);
-                });
-            }
-        }
-        @catch (NSException *exception) {
-            NSString *errorMsg = [NSString stringWithFormat:@"Exception: %@", exception.reason];
-            logStep([NSString stringWithFormat:@"ERROR: %@", errorMsg]);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:errorMsg error:nil];
-                result.detailedOutput = log;
-                completion(result);
-            });
-        }
-    });
-}
 
-- (NSString *)extractBundleIDFromIPA:(NSString *)ipaPath {
-    @try {
-        NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
-        [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
-        NSString *unzipPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) unzipPath = @"/usr/bin/unzip";
-        const char *cmd = [unzipPath UTF8String];
-        char *args[] = {(char*)cmd, (char*)"-q", (char*)"-o", (char*)[ipaPath UTF8String], (char*)"-d", (char*)[tempDir UTF8String], NULL};
-        pid_t pid;
-        posix_spawn(&pid, cmd, NULL, NULL, args, NULL);
-        int status;
-        waitpid(pid, &status, 0);
-        NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
-        NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:payloadPath error:nil];
+        NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
         NSString *bundleID = nil;
-        for (NSString *item in contents) {
+
+        // Extract bundle ID from IPA
+        NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+        [fm createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *unzipPath = @"/usr/bin/unzip";
+        if (![fm fileExistsAtPath:unzipPath]) unzipPath = @"/var/jb/usr/bin/unzip";
+
+        pid_t pid;
+        char *argv[] = {(char *)[unzipPath UTF8String], (char *)"-q", (char *)"-o", (char *)[ipaPath UTF8String], (char *)"-d", (char *)[tempDir UTF8String], NULL};
+        extern char **environ;
+        int status = posix_spawn(&pid, [unzipPath UTF8String], NULL, NULL, argv, environ);
+        if (status == 0) {
+            int waitStatus;
+            waitpid(pid, &waitStatus, 0);
+        }
+
+        NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
+        NSArray *items = [fm contentsOfDirectoryAtPath:payloadPath error:nil];
+        for (NSString *item in items) {
             if ([item hasSuffix:@".app"]) {
                 NSString *infoPath = [payloadPath stringByAppendingPathComponent:[item stringByAppendingPathComponent:@"Info.plist"]];
                 NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
@@ -140,38 +79,107 @@
                 break;
             }
         }
-        [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-        return bundleID;
-    }
-    @catch (NSException *exception) {
-        return nil;
-    }
+        [fm removeItemAtPath:tempDir error:nil];
+
+        NSMutableDictionary *options = [NSMutableDictionary dictionary];
+        options[@"PackageType"] = @"Developer";
+        if (bundleID) options[@"CFBundleIdentifier"] = bundleID;
+
+        NSError *error = nil;
+        SEL installSel = NSSelectorFromString(@"installApplication:withOptions:error:");
+        typedef BOOL (*InstallMethod)(id, SEL, NSURL *, NSDictionary *, NSError **);
+        InstallMethod method = (InstallMethod)objc_msgSend;
+        BOOL installed = method(self.lsApplicationWorkspace, installSel, ipaURL, options, &error);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (installed && !error) {
+                logStep(@"SUCCESS", @"Installed via LSApplicationWorkspace");
+                InstallationResult *r = [InstallationResult successResult:@"تم التثبيت عبر النظام"];
+                r.bundleID = bundleID;
+                r.detailedOutput = log;
+                completion(r);
+            } else {
+                logStep(@"ERROR", error ? error.localizedDescription : @"Unknown error");
+                InstallationResult *r = [InstallationResult failureResult:@"فشل التثبيت عبر النظام" error:error];
+                r.detailedOutput = log;
+                completion(r);
+            }
+        });
+    });
 }
 
+// FIX: Implement uninstall via LSApplicationWorkspace
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
     if (!self.lsApplicationWorkspace) {
         if (completion) completion(NO, @"LSApplicationWorkspace غير متاح");
         return;
     }
-    @try {
-        SEL uninstallSelector = NSSelectorFromString(@"uninstallApplication:withOptions:");
-        if ([self.lsApplicationWorkspace respondsToSelector:uninstallSelector]) {
-            NSMethodSignature *sig = [self.lsApplicationWorkspace methodSignatureForSelector:uninstallSelector];
-            NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
-            [invocation setTarget:self.lsApplicationWorkspace];
-            [invocation setSelector:uninstallSelector];
-            [invocation setArgument:&bundleID atIndex:2];
-            NSMutableDictionary *opts = [NSMutableDictionary dictionary];
-            [invocation setArgument:&opts atIndex:3];
-            [invocation invoke];
-            if (completion) completion(YES, nil);
-        } else {
-            if (completion) completion(NO, @"uninstallApplication not available");
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSError *error = nil;
+        SEL uninstallSel = NSSelectorFromString(@"uninstallApplication:withOptions:");
+
+        // Try modern API first
+        if ([self.lsApplicationWorkspace respondsToSelector:uninstallSel]) {
+            typedef void (*UninstallMethod)(id, SEL, NSString *, NSDictionary *);
+            UninstallMethod method = (UninstallMethod)objc_msgSend;
+            method(self.lsApplicationWorkspace, uninstallSel, bundleID, @{});
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) completion(YES, nil);
+            });
+            return;
         }
-    }
-    @catch (NSException *exception) {
-        if (completion) completion(NO, exception.reason);
-    }
+
+        // Fallback: try uninstallApplication:withOptions:usingBlock:
+        SEL uninstallBlockSel = NSSelectorFromString(@"uninstallApplication:withOptions:usingBlock:");
+        if ([self.lsApplicationWorkspace respondsToSelector:uninstallBlockSel]) {
+            typedef void (*UninstallBlockMethod)(id, SEL, NSString *, NSDictionary *, id);
+            UninstallBlockMethod method = (UninstallBlockMethod)objc_msgSend;
+            method(self.lsApplicationWorkspace, uninstallBlockSel, bundleID, @{}, nil);
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) completion(YES, nil);
+            });
+            return;
+        }
+
+        // Last resort: remove from filesystem + uicache
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSArray *apps = [fm contentsOfDirectoryAtPath:self.appsPath error:nil];
+        for (NSString *app in apps) {
+            if (![app hasSuffix:@".app"]) continue;
+            NSString *appPath = [self.appsPath stringByAppendingPathComponent:app];
+            NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+            if ([info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
+                NSString *rmPath = @"/bin/rm";
+                if (![fm fileExistsAtPath:rmPath]) rmPath = @"/var/jb/bin/rm";
+
+                pid_t pid;
+                char *argv[] = {(char *)[rmPath UTF8String], (char *)"-rf", (char *)[appPath UTF8String], NULL};
+                extern char **environ;
+                posix_spawn(&pid, [rmPath UTF8String], NULL, NULL, argv, environ);
+                int waitStatus;
+                waitpid(pid, &waitStatus, 0);
+
+                NSString *uicachePath = @"/usr/bin/uicache";
+                if (![fm fileExistsAtPath:uicachePath]) uicachePath = @"/var/jb/usr/bin/uicache";
+                char *uiargv[] = {(char *)[uicachePath UTF8String], (char *)"-p", (char *)[[@"/Applications" stringByAppendingPathComponent:app] UTF8String], NULL};
+                posix_spawn(&pid, [uicachePath UTF8String], NULL, NULL, uiargv, environ);
+                waitpid(pid, &waitStatus, 0);
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (completion) completion(YES, nil);
+                });
+                return;
+            }
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(NO, @"التطبيق غير موجود");
+        });
+    });
 }
 
 @end
