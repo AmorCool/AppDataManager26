@@ -8,8 +8,8 @@
 #import "AppInstInstallationProvider.h"
 
 @interface InstallationEngine ()
-@property (nonatomic, strong) NSArray *providers;
-@property (nonatomic, strong) id currentProvider;
+@property (nonatomic, strong) NSArray<id<InstallationProvider>> *providers;
+@property (nonatomic, strong) id<InstallationProvider> currentProvider;
 @property (nonatomic, strong) InstallationResult *lastResult;
 @property (nonatomic, strong) NSString *lastLog;
 @end
@@ -49,11 +49,11 @@
     [[Logger sharedLogger] info:[NSString stringWithFormat:@"InstallationEngine: %lu providers available", (unsigned long)available.count]];
 }
 
-- (NSArray *)availableProviders {
+- (NSArray<id<InstallationProvider>> *)availableProviders {
     return self.providers;
 }
 
-- (id)bestProvider {
+- (id<InstallationProvider>)bestProvider {
     NSArray *available = [self availableProviders];
     if (available.count == 0) return nil;
 
@@ -62,20 +62,20 @@
     // 2. appinst — reliable CLI tool if available
     // 3. System (LSApplicationWorkspace) — requires AppSync, often fails on unsigned IPAs
 
-    for (id provider in available) {
+    for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"Direct Install"]) return provider;
     }
-    for (id provider in available) {
+    for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"appinst"]) return provider;
     }
-    for (id provider in available) {
+    for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"System"]) return provider;
     }
     return available.firstObject;
 }
 
 - (void)installIPA:(NSString *)ipaPath progress:(void (^)(NSString *))progress completion:(void (^)(InstallationResult *))completion {
-    id provider = [self bestProvider];
+    id<InstallationProvider> provider = [self bestProvider];
     if (!provider) {
         InstallationResult *result = [InstallationResult failureResult:@"لا يوجد محرك تثبيت متاح" error:nil];
         if (completion) completion(result);
@@ -95,7 +95,7 @@
 }
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
-    id provider = [self bestProvider];
+    id<InstallationProvider> provider = [self bestProvider];
     if (!provider) {
         if (completion) completion(NO, @"لا يوجد محرك إلغاء تثبيت متاح");
         return;
