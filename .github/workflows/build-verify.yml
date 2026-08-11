@@ -1,0 +1,38 @@
+name: Build Only (Verify)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout AppDataManager
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Setup dependencies
+        run: brew install dpkg ldid
+
+      - name: Fix permissions
+        run: |
+          chmod +x IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x IPAInstallerPro/layout/DEBIAN/prerm 2>/dev/null || true
+
+      - name: Build IPA Installer Pro
+        run: |
+          cd IPAInstallerPro
+          make clean
+          make package
+
+      - name: Verify build
+        run: |
+          ls -la IPAInstallerPro/packages/
+          echo "✅ Build verified!"
