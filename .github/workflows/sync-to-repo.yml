@@ -57,15 +57,6 @@ jobs:
           cd repo-dev
           python3 scripts/generate-repo.py . --dev
 
-          echo "Origin: A-ZAIN Dev Repo" > Release
-          echo "Label: A-ZAIN Development" >> Release
-          echo "Suite: stable" >> Release
-          echo "Version: 1.0" >> Release
-          echo "Codename: ios-dev" >> Release
-          echo "Architectures: iphoneos-arm64" >> Release
-          echo "Components: main" >> Release
-          echo "Description: A-ZAIN Development Repo - Private testing channel" >> Release
-
           git add -A
           git commit -m "Add IPA Installer Pro (dev build)" || true
           git push origin main
