@@ -11,8 +11,9 @@
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // Initialize logger and environment (safe, no heavy blocking)
     [Logger sharedLogger];
-    [[JailbreakEnvironment sharedEnvironment] detectEnvironment];
+    [JailbreakEnvironment sharedEnvironment];  // detectEnvironment is now called in init
 
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
 
@@ -21,20 +22,20 @@
     MainViewController *mainVC = [[MainViewController alloc] init];
     UINavigationController *mainNav = [[UINavigationController alloc] initWithRootViewController:mainVC];
     mainNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"ملفات IPA"
-        image:[UIImage systemImageNamed:@"doc.zipper"]
-        selectedImage:[UIImage systemImageNamed:@"doc.zipper"]];
+                                                         image:[UIImage systemImageNamed:@"doc.zipper"]
+                                                 selectedImage:[UIImage systemImageNamed:@"doc.zipper"]];
 
     InstalledAppsViewController *installedVC = [[InstalledAppsViewController alloc] init];
     UINavigationController *installedNav = [[UINavigationController alloc] initWithRootViewController:installedVC];
     installedNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"التطبيقات"
-        image:[UIImage systemImageNamed:@"apps.iphone"]
-        selectedImage:[UIImage systemImageNamed:@"apps.iphone"]];
+                                                            image:[UIImage systemImageNamed:@"apps.iphone"]
+                                                    selectedImage:[UIImage systemImageNamed:@"apps.iphone"]];
 
     SettingsViewController *settingsVC = [[SettingsViewController alloc] init];
     UINavigationController *settingsNav = [[UINavigationController alloc] initWithRootViewController:settingsVC];
     settingsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"الإعدادات"
-        image:[UIImage systemImageNamed:@"gearshape"]
-        selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
+                                                           image:[UIImage systemImageNamed:@"gearshape"]
+                                                   selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
 
     tabBarController.viewControllers = @[mainNav, installedNav, settingsNav];
     tabBarController.tabBar.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
