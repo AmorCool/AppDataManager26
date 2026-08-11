@@ -135,6 +135,41 @@
     return [self.capabilities[@"LSApplicationWorkspace"] boolValue];
 }
 
+
+- (Capability *)capabilityForIdentifier:(NSString *)identifier {
+    if (!self.hasScanned) [self scanCapabilities];
+    // Map identifier to capability object
+    Capability *cap = [[Capability alloc] init];
+    cap.identifier = identifier;
+    cap.isAvailable = [self.capabilities[identifier] boolValue];
+
+    if ([identifier isEqualToString:@"AppSync"]) {
+        cap.name = @"AppSync Unified";
+        cap.statusMessage = cap.isAvailable ? @"مثبت ✓" : @"غير مثبت ✗";
+    } else if ([identifier isEqualToString:@"appinst"]) {
+        cap.name = @"appinst";
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    } else if ([identifier isEqualToString:@"ldid"]) {
+        cap.name = @"ldid";
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    } else if ([identifier isEqualToString:@"uicache"]) {
+        cap.name = @"uicache";
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    } else if ([identifier isEqualToString:@"unzip"]) {
+        cap.name = @"unzip";
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    } else if ([identifier isEqualToString:@"root_helper"]) {
+        cap.name = @"Root Helper";
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    } else if ([identifier isEqualToString:@"LSApplicationWorkspace"]) {
+        cap.name = @"LSApplicationWorkspace";
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    } else {
+        cap.name = identifier;
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    }
+    return cap;
+}
 - (NSDictionary *)allCapabilities {
     if (!self.hasScanned) [self scanCapabilities];
     return [self.capabilities copy];
