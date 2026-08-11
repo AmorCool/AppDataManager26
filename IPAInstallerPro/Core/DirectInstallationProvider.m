@@ -7,11 +7,11 @@
 #include <sys/wait.h>
 #include <copyfile.h>
 #include <errno.h>
+#include <unistd.h>
 
 @interface DirectInstallationProvider ()
 @property (nonatomic, strong) NSString *appsPath;
 @property (nonatomic, strong) NSString *jbPrefix;
-@property (nonatomic, assign) BOOL hasRootAccess;
 @end
 
 @implementation DirectInstallationProvider
@@ -22,23 +22,24 @@
         NSString *resolvedApps = [[RootlessManager sharedManager] resolvePath:@"/Applications"];
         _appsPath = resolvedApps;
         _jbPrefix = [resolvedApps hasPrefix:@"/var/jb"] ? @"/var/jb" : @"";
-        _hasRootAccess = (getuid() == 0);
     }
     return self;
 }
 
 - (NSString *)providerName { return @"Direct Install"; }
-- (NSString *)providerDescription { return @"تثبيت مباشر (يتطلب root)"; }
+- (NSString *)providerDescription { return @"تثبيت مباشر (Dopamine/Jailbreak)"; }
 - (NSInteger)priority { return 100; }
 
 - (BOOL)isAvailable {
-    // Direct install requires root access + ldid
-    if (!self.hasRootAccess) {
-        [[Logger sharedLogger] warning:@"DirectInstall: No root access (getuid != 0)"];
+    // Check ldid and uicache exist — on Dopamine they have setuid, no root needed
+    @try {
+        RootlessManager *rl = [RootlessManager sharedManager];
+        return [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"] &&
+               [rl fileExistsAtLogicalPath:@"/usr/bin/uicache"];
+    }
+    @catch (NSException *exception) {
         return NO;
     }
-    NSString *ldidPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
-    return [[NSFileManager defaultManager] fileExistsAtPath:ldidPath];
 }
 
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
@@ -54,7 +55,23 @@
         };
 
         logStep(@"START", [NSString stringWithFormat:@"Installing %@", [ipaPath lastPathComponent]]);
-        logStep(@"INFO", [NSString stringWithFormat:@"Root access: %@, Apps path: %@", self.hasRootAccess ? @"YES" : @"NO", self.appsPath]);
+        logStep(@"INFO", [NSString stringWithFormat:@"Apps path: %@", self.appsPath]);
+
+        // Try to escalate to root using setuid(0) — works on Dopamine if binary has setuid
+        uid_t originalUid = getuid();
+        BOOL gotRoot = NO;
+        if (originalUid != 0) {
+            int setuidResult = setuid(0);
+            if (setuidResult == 0) {
+                gotRoot = YES;
+                logStep(@"ROOT", @"Escalated to root via setuid(0)");
+            } else {
+                logStep(@"ROOT", [NSString stringWithFormat:@"setuid(0) failed (errno=%d), continuing as mobile...", errno]);
+            }
+        } else {
+            gotRoot = YES;
+            logStep(@"ROOT", @"Already running as root");
+        }
 
         // 1. Create temp extraction dir
         NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
@@ -112,7 +129,6 @@
         int result = rename([sourceAppPath UTF8String], [destAppPath UTF8String]);
         if (result != 0) {
             if (errno == EXDEV) {
-                // Cross-filesystem: fallback to copyfile()
                 logStep(@"FALLBACK", @"Cross-filesystem, using copyfile()...");
                 if (copyfile([sourceAppPath UTF8String], [destAppPath UTF8String], NULL, COPYFILE_ALL | COPYFILE_RECURSIVE) != 0) {
                     [fm removeItemAtPath:tempDir error:nil];
@@ -153,7 +169,7 @@
         logStep(@"UICACHE", @"Refreshing UI cache...");
         [self runUICache:destAppPath log:logStep];
 
-        // 9. Cleanup temp dir (source already moved/removed)
+        // 9. Cleanup temp dir
         [fm removeItemAtPath:tempDir error:nil];
         logStep(@"CLEAN", @"Temp files removed");
 
@@ -161,6 +177,11 @@
         logStep(@"VERIFY", @"Verifying installation...");
         BOOL exists = [fm fileExistsAtPath:destAppPath];
         logStep(@"VERIFY", exists ? @"App exists at destination" : @"App NOT found at destination!");
+
+        // Restore original UID
+        if (gotRoot && originalUid != 0) {
+            setuid(originalUid);
+        }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             InstallationResult *result = [InstallationResult successResult:@"تم التثبيت بنجاح"];
