@@ -137,7 +137,7 @@
         if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) unzipPath = @"/usr/bin/unzip";
 
         const char *cmd = [unzipPath UTF8String];
-        const char *args[] = {[cmd], "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL};
+        char *args[] = {(char*)cmd, (char*)"-q", (char*)"-o", (char*)[ipaPath UTF8String], (char*)"-d", (char*)[tempDir UTF8String], NULL};
         pid_t pid;
         posix_spawn(&pid, cmd, NULL, NULL, (char **)args, NULL);
         int status;
