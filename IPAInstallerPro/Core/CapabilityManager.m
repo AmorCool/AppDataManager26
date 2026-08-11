@@ -77,7 +77,7 @@
         self.capabilities[@"unzip"] = @([fm fileExistsAtPath:unzipPath]);
 
         // Check root helper
-        NSString *helperPath = [rl resolvePath:@"/usr/bin/ipainstallerpro-helper"];
+        NSString *helperPath = [rl resolvePath:@"/usr/bin/ipainstallerpro_helper"];
         self.capabilities[@"root_helper"] = @([fm fileExistsAtPath:helperPath]);
 
         // Check LSApplicationWorkspace
