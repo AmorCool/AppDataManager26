@@ -20,5 +20,6 @@ typedef NS_ENUM(NSInteger, InstallationStage) {
         completion:(void (^)(InstallationResult *result))completion;
 - (void)uninstallAppWithBundleID:(NSString *)bundleID
         completion:(void (^)(BOOL success, NSString *error))completion;
+- (NSString *)currentProviderName;
 - (NSString *)stageDescription:(InstallationStage)stage;
 @end
