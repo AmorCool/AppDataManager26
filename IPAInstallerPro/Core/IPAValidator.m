@@ -246,4 +246,86 @@
     return 0;
 }
 
+
+
+- (NSArray<NSString *> *)checkDependenciesAtAppPath:(NSString *)appPath {
+    NSMutableArray<NSString *> *missing = [NSMutableArray array];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    // 1. Check Frameworks directory exists
+    NSString *frameworksPath = [appPath stringByAppendingPathComponent:@"Frameworks"];
+    BOOL hasFrameworks = [fm fileExistsAtPath:frameworksPath];
+
+    // 2. Get executable name from Info.plist
+    NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+    NSString *exeName = info[@"CFBundleExecutable"];
+    if (!exeName) return missing;
+
+    NSString *exePath = [appPath stringByAppendingPathComponent:exeName];
+    if (![fm fileExistsAtPath:exePath]) return missing;
+
+    // 3. Use otool to list dependencies
+    NSString *otoolPath = @"/usr/bin/otool";
+    if (![fm fileExistsAtPath:otoolPath]) {
+        otoolPath = @"/var/jb/usr/bin/otool";
+    }
+    if (![fm fileExistsAtPath:otoolPath]) {
+        [[Logger sharedLogger] warning:@"otool not found, skipping dependency check"];
+        return missing;
+    }
+
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath:otoolPath];
+    [task setArguments:@[@"-L", exePath]];
+
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput:pipe];
+    [task setStandardError:[NSPipe pipe]];
+
+    @try {
+        [task launch];
+        [task waitUntilExit];
+
+        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+
+        NSArray *lines = [output componentsSeparatedByString:@"\n"];
+        for (NSString *line in lines) {
+            // Look for @rpath/ or @executable_path/ references
+            if ([line containsString:@"@rpath/"] || [line containsString:@"@executable_path/"]) {
+                NSString *libName = nil;
+                NSRange rpathRange = [line rangeOfString:@"@rpath/"];
+                if (rpathRange.location != NSNotFound) {
+                    NSString *after = [line substringFromIndex:rpathRange.location + 7];
+                    NSRange parenRange = [after rangeOfString:@" ("];
+                    if (parenRange.location != NSNotFound) {
+                        libName = [after substringToIndex:parenRange.location];
+                    } else {
+                        libName = after;
+                    }
+                }
+
+                if (libName) {
+                    // Check if library exists in Frameworks
+                    NSString *libInFrameworks = [frameworksPath stringByAppendingPathComponent:libName];
+                    NSString *libInApp = [appPath stringByAppendingPathComponent:libName];
+
+                    BOOL existsInFrameworks = hasFrameworks && [fm fileExistsAtPath:libInFrameworks];
+                    BOOL existsInApp = [fm fileExistsAtPath:libInApp];
+
+                    if (!existsInFrameworks && !existsInApp) {
+                        [missing addObject:libName];
+                        [[Logger sharedLogger] warning:[NSString stringWithFormat:@"Missing dependency: %@", libName]];
+                    }
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        [[Logger sharedLogger] error:[NSString stringWithFormat:@"Dependency check failed: %@", e.reason]];
+    }
+
+    return missing;
+}
+
 @end
