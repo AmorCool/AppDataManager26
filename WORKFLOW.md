@@ -1,8 +1,8 @@
 # دليل المطور — AppDataManager / IPA Installer Pro
 
-> **الإصدار:** 1.0  
-> **التاريخ:** 2026-08-11  
-> **المؤلف:** ZAIN (@Zainqkvd)  
+> **الإصدار:** 2.0
+> **التاريخ:** 2026-08-11
+> **المؤلف:** ZAIN (@Zainqkvd)
 > **البيئة:** Dopamine 3.0 (Rootless) | iOS 15.0+ | arm64/arm64e
 
 ---
@@ -13,31 +13,76 @@
 
 ```
 AppDataManager/
-├── AppDataManager/          ← الأداة الأولى (مكتملة ومستقرة)
+├── AppDataManager/ ← الأداة الأولى (مكتملة ومستقرة)
 │   ├── Core/
 │   ├── UI/
 │   ├── Makefile
 │   └── control
 │
-├── IPAInstallerPro/         ← الأداة الثانية (قيد التطوير)
-│   ├── Core/                ← محركات التثبيت + التحقق
-│   ├── UI/                  ← واجهات المستخدم
+├── IPAInstallerPro/ ← الأداة الثانية (قيد التطوير)
+│   ├── Core/ ← محركات التثبيت + التحقق
+│   ├── UI/ ← واجهات المستخدم
 │   ├── Resources/
 │   ├── Makefile
 │   ├── control
 │   └── entitlements.plist
 │
 ├── scripts/
-│   ├── generate-repo.py     ← توليد Packages & Release
-│   └── validate-repo.py     ← التحقق من سلامة الريبو
+│   ├── generate-repo.py ← توليد Packages & Release
+│   └── validate-repo.py ← التحقق من سلامة الريبو
 │
 ├── .github/workflows/
-│   └── sync-to-repo.yml     ← CI/CD تلقائي
+│   └── sync-to-repo.yml ← CI/CD تلقائي
 │
-├── Makefile                 ← بناء الأداتين معاً
-├── build.sh                 ← سكربت البناء المحلي
-└── WORKFLOW.md              ← هذا الملف
+├── Makefile ← بناء الأداتين معاً
+├── build.sh ← سكربت البناء المحلي
+└── WORKFLOW.md ← هذا الملف
 ```
+
+---
+
+## 🏛️ نظام الريبو المزدوج (Repo Architecture)
+
+| الريبو | الرابط | الغرض | الجمهور |
+|--------|--------|-------|---------|
+| **الريبو الرئيسي** | `https://aosaid3224-ops.github.io/repo/` | الإطلاق العام (Production) | **جميع المستخدمين** |
+| **ريبو التطوير** | `https://aosaid3224-ops.github.io/repo-dev/` | التطوير والاختبار (Dev) | **المطور فقط** |
+
+### ⚠️ قاعدة ذهبية
+
+> **أثناء التطوير** → ارفع إلى `repo-dev`  
+> **عند اكتمال النسخة** → ارفع إلى `repo` الرئيسي  
+> **لا ترفع أبداً** نسخ غير مكتملة إلى الريبو الرئيسي.
+
+### 🔧 كيفية التبديل بين الريبوين
+
+#### أثناء التطوير (repo-dev)
+```python
+# 1. بناء IPA Installer Pro
+make clean && make package -C IPAInstallerPro/
+
+# 2. رفع .deb إلى repo-dev
+# الملفات تُرفع تلقائياً إلى:
+# https://github.com/aosaid3224-ops/repo-dev
+```
+
+#### عند الإطلاق (repo)
+```python
+# 1. تأكد من أن الإصدار نهائي ومستقر
+# 2. ارفع .deb إلى repo الرئيسي
+# 3. حدث Packages و Release في repo الرئيسي
+```
+
+### 📱 في Sileo
+
+**المستخدمون العاديون:**
+- يضيفون فقط: `https://aosaid3224-ops.github.io/repo/`
+- يرون: AppData Manager فقط ✅
+
+**المطور (أنت):**
+- تضيف المصدر الرئيسي: `https://aosaid3224-ops.github.io/repo/`
+- **وتضيف أيضاً:** `https://aosaid3224-ops.github.io/repo-dev/`
+- ترى: AppData Manager + IPA Installer Pro ✅
 
 ---
 
@@ -52,7 +97,7 @@ AppDataManager/
 ```yaml
 name: Build & Sync to Repo
 on:
-  workflow_dispatch:        ← يدوي فقط
+  workflow_dispatch: ← يدوي فقط
 jobs:
   build-and-sync:
     runs-on: macos-latest
@@ -61,17 +106,18 @@ jobs:
       - Setup Theos
       - Build AppDataManager
       - Build IPAInstallerPro
-      - Copy .deb → repo/pool/
+      - Copy .deb → repo/pool/ (للريبو الرئيسي)
+      - Copy .deb → repo-dev/pool/ (للريبو التطويري)
       - Run generate-repo.py
-      - Push to aosaid3224-ops/repo
+      - Push إلى repo + repo-dev
 ```
 
 ### 2. المزامنة التلقائية
 
 عندما ينجح البناء:
-1. ينسخ الـ `.deb` الجديد إلى `repo/pool/main/iphoneos-arm64/`
-2. يشغل `generate-repo.py` لتحديث `Packages` و `Release`
-3. يدفع (push) تلقائياً إلى `aosaid3224-ops/repo`
+1. ينسخ الـ `.deb` الجديد إلى `repo/pool/main/iphoneos-arm64/` (للإطلاق)
+2. ينسخ الـ `.deb` الجديد إلى `repo-dev/pool/main/iphoneos-arm64/` (للتطوير)
+3. يشغل `generate-repo.py` لتحديث `Packages` و `Release` في كلا الريبوين
 4. **GitHub Pages** ينشر التغييرات خلال 30-60 ثانية
 5. **Sileo** يكتشف الترقية فور **Refresh**
 
@@ -90,26 +136,32 @@ https://github.com/aosaid3224-ops/AppDataManager/actions
 
 ### الخطوة 2: التعديل عبر GitHub API (Python)
 
+```python
+import requests, base64
 
-    # 1. احصل على SHA الحالي
-    r = requests.get(
-        f"https://api.github.com/repos/{REPO}/contents/{path}?ref=main",
-        headers=HEADERS
-    )
-    sha = r.json()['sha']
+TOKEN = "ghp_..."
+HEADERS = {"Authorization": f"token {TOKEN}"}
+REPO = "aosaid3224-ops/AppDataManager"
 
-    # 2. ارسل التعديل
-    payload = {
-        "message": message,
-        "content": base64.b64encode(content.encode()).decode(),
-        "sha": sha,
-        "branch": "main"
-    }
-    requests.put(
-        f"https://api.github.com/repos/{REPO}/contents/{path}",
-        headers=HEADERS,
-        json=payload
-    )
+# 1. احصل على SHA الحالي
+r = requests.get(
+    f"https://api.github.com/repos/{REPO}/contents/{path}?ref=main",
+    headers=HEADERS
+)
+sha = r.json()['sha']
+
+# 2. ارسل التعديل
+payload = {
+    "message": message,
+    "content": base64.b64encode(content.encode()).decode(),
+    "sha": sha,
+    "branch": "main"
+}
+requests.put(
+    f"https://api.github.com/repos/{REPO}/contents/{path}",
+    headers=HEADERS,
+    json=payload
+)
 ```
 
 ### الخطوة 3: تشغيل البناء
@@ -141,25 +193,32 @@ print(run['conclusion'])  # "success" أو "failure"
 
 ## 📦 كيفية رفع إصدار جديد (Version Bump)
 
-### 1. تعديل `control`
-
-```
-Package: com.aosaid.ipainstallerpro
-Name: IPA Installer Pro
-Version: 1.0.4          ← غيّر هذا الرقم
-Architecture: iphoneos-arm64
-```
-
-### 2. Commit + Build
+### أثناء التطوير (repo-dev)
 
 ```python
+# 1. تعديل control
 update_file(
     "IPAInstallerPro/control",
     new_control_content,
-    "Bump IPA Installer Pro version to 1.0.5"
+    "Bump IPA Installer Pro dev version to 1.0.5"
 )
 
-# شغل Workflow
+# 2. رفع إلى repo-dev
+# يدوياً أو عبر CI/CD
+```
+
+### عند الإطلاق (repo)
+
+```python
+# 1. تأكد من الاستقرار
+# 2. تعديل control
+update_file(
+    "IPAInstallerPro/control",
+    new_control_content,
+    "Release IPA Installer Pro v1.0.5"
+)
+
+# 3. شغل Workflow للريبو الرئيسي
 requests.post(
     f"https://api.github.com/repos/{REPO}/actions/workflows/sync-to-repo.yml/dispatches",
     headers=HEADERS,
@@ -167,7 +226,7 @@ requests.post(
 )
 ```
 
-### 3. النتيجة في Sileo
+### النتيجة في Sileo
 
 بعد 2-3 دقائق:
 ```
@@ -229,9 +288,9 @@ BOOL installed = method(workspace, installSel, ipaURL, options, &error);
 ```objc
 NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
 [coordinator coordinateReadingItemAtURL:url
-                                  options:NSFileCoordinatorReadingForUploading
-                                    error:nil
-                               byAccessor:^(NSURL *newURL) {
+                                options:NSFileCoordinatorReadingForUploading
+                                  error:nil
+                             byAccessor:^(NSURL *newURL) {
     [fm copyItemAtPath:newURL.path toPath:destPath error:&error];
 }];
 ```
@@ -245,9 +304,6 @@ cell.textLabel.text = info.displayName ?: info.name;
 // ✅ صح:
 cell.textLabel.text = info.displayName ?: info.name ?: [info.filePath lastPathComponent];
 ```
-
----
-
 
 ---
 
