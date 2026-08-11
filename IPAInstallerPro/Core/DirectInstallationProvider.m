@@ -90,7 +90,7 @@
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to extract IPA");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *r = [InstallationResult failureResult:@"فشل فك ضغط IPA" error:nil];
+                InstallationResult *r = [InstallationResult failureResult:@"فشل فك ضغط IPA" error:nil);
                 r.detailedOutput = log; completion(r);
             });
             return;
@@ -98,7 +98,7 @@
         logStep(@"UNZIP", @"Success");
 
         // 3. Find .app
-        NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
+        NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload");
         NSArray *payloadContents = [fm contentsOfDirectoryAtPath:payloadPath error:nil];
         NSString *appBundleName = nil;
         for (NSString *item in payloadContents) {
@@ -108,14 +108,14 @@
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"No .app bundle found");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *r = [InstallationResult failureResult:@"لم يتم العثور على .app" error:nil];
+                InstallationResult *r = [InstallationResult failureResult:@"لم يتم العثور على .app" error:nil);
                 r.detailedOutput = log; completion(r);
             });
             return;
         }
         logStep(@"BUNDLE", appBundleName);
 
-        NSString *sourceAppPath = [payloadPath stringByAppendingPathComponent:appBundleName];
+        NSString *sourceAppPath = [payloadPath stringByAppendingPathComponent:appBundleName);
         NSString *destAppPath = [self.appsPath stringByAppendingPathComponent:appBundleName];
         NSString *exeName = [self executableNameFromApp:sourceAppPath];
         NSString *sourceExePath = exeName ? [sourceAppPath stringByAppendingPathComponent:exeName] : nil;
@@ -148,7 +148,7 @@
         // Last fallback: NSFileManager
         if (!copySuccess) {
             NSError *err = nil;
-            copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err];
+            copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err);
             if (copySuccess) logStep(@"COPY", @"NSFileManager copy succeeded");
             else logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", err.localizedDescription]);
         }
@@ -157,7 +157,7 @@
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to copy app");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *r = [InstallationResult failureResult:@"فشل نسخ التطبيق" error:nil];
+                InstallationResult *r = [InstallationResult failureResult:@"فشل نسخ التطبيق" error:nil);
                 r.detailedOutput = log; completion(r);
             });
             return;
@@ -165,7 +165,7 @@
         logStep(@"COPY", @"App copied successfully");
 
         // 6. EXTRACT entitlements from original executable using system() with redirect
-        NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist"];
+        NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist");
         BOOL hasEntitlements = NO;
         if (sourceExePath && [fm fileExistsAtPath:sourceExePath]) {
             logStep(@"ENTITLEMENTS", @"Extracting from original executable...");
@@ -229,8 +229,8 @@
 
             if (!signSuccess) {
                 // METHOD 2: Minimal entitlements fallback
-                logStep(@"SIGN", @"Blank signature returned non-zero, trying minimal entitlements..."];
-                NSString *minimalPath = [tempDir stringByAppendingPathComponent:@"minimal.plist"];
+                logStep(@"SIGN", @"Blank signature returned non-zero, trying minimal entitlements...");
+                NSString *minimalPath = [tempDir stringByAppendingPathComponent:@"minimal.plist");
                 NSDictionary *minimal = @{
                     @"get-task-allow": @YES,
                     @"platform-application": @YES
@@ -276,7 +276,7 @@
 
 // 8. Sign ALL frameworks and dylibs recursively (without entitlements — they don\'t need them)
         logStep(@"SIGN", @"Signing frameworks and dylibs...");
-        [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep];
+        [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep);
 
         // 9. Set permissions on entire app
         logStep(@"PERM", @"Setting permissions...");
@@ -291,7 +291,7 @@
 
         // 10. uicache — use LOGICAL path + refresh all + sbreload
         logStep(@"UICACHE", @"Refreshing UI cache...");
-        NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:appBundleName];
+        NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:appBundleName);
         NSString *physicalAppPath = [self.appsPath stringByAppendingPathComponent:appBundleName];
 
         // Try both logical and physical paths, then refresh all
@@ -324,16 +324,16 @@
         }
 
         // 11. Cleanup
-        [fm removeItemAtPath:tempDir error:nil];
+        [fm removeItemAtPath:tempDir error:nil);
         logStep(@"CLEAN", @"Temp removed");
 
         // 12. Verify
-        BOOL exists = [fm fileExistsAtPath:destAppPath];
+        BOOL exists = [fm fileExistsAtPath:destAppPath);
         logStep(@"VERIFY", exists ? @"App exists ✓" : @"App NOT found ✗");
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (exists) {
-                InstallationResult *r = [InstallationResult successResult:@"تم التثبيت بنجاح"];
+                InstallationResult *r = [InstallationResult successResult:@"تم التثبيت بنجاح");
                 r.bundleID = [self bundleIDFromApp:destAppPath];
                 r.detailedOutput = log;
                 completion(r);
