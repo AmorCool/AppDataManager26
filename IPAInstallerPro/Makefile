@@ -23,6 +23,7 @@ IPAInstallerPro_FILES = \
  Core/DirectInstallationProvider.m \
  Core/InstallationEngine.m \
  Core/VerificationEngine.m \
+ Core/CrashReporter.m \
  Core/ApplicationManager.m \
  Core/DependencyManager.m \
  UI/MainViewController.m \
