@@ -16,9 +16,9 @@ typedef NS_ENUM(NSInteger, InstallationStage) {
 - (NSArray<id<InstallationProvider>> *)availableProviders;
 - (id<InstallationProvider>)bestProvider;
 - (void)installIPA:(NSString *)ipaPath
-    progress:(void (^)(NSString *statusMessage))progress
-       completion:(void (^)(InstallationResult *result))completion;
+     progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
+        completion:(void (^)(InstallationResult *result))completion;
 - (void)uninstallAppWithBundleID:(NSString *)bundleID
-                      completion:(void (^)(BOOL success, NSString *error))completion;
+        completion:(void (^)(BOOL success, NSString *error))completion;
 - (NSString *)stageDescription:(InstallationStage)stage;
 @end
