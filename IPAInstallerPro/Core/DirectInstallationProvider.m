@@ -130,19 +130,28 @@
         // 5. Copy app
         logStep(@"INSTALL", [NSString stringWithFormat:@"Copying to %@...", destAppPath]);
         BOOL copySuccess = NO;
+
+        // Try helper first (root cp)
         if (hasHelper) {
-            copySuccess = [self runCommandAsRoot:self.cpPath args:@[@"-R", sourceAppPath, destAppPath]];
+            copySuccess = [self runCommandAsRoot:self.cpPath args:@[@"-R", @"-f", sourceAppPath, destAppPath]];
+            if (copySuccess) logStep(@"COPY", @"Root cp succeeded");
         }
+
+        // Fallback: copyfile()
         if (!copySuccess) {
             if (copyfile([sourceAppPath UTF8String], [destAppPath UTF8String], NULL, COPYFILE_ALL | COPYFILE_RECURSIVE) == 0) {
                 copySuccess = YES; logStep(@"COPY", @"copyfile() succeeded");
-            } else {
-                NSError *err = nil;
-                copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err];
-                if (copySuccess) logStep(@"COPY", @"NSFileManager copy succeeded");
-                else logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", err.localizedDescription]);
             }
         }
+
+        // Last fallback: NSFileManager
+        if (!copySuccess) {
+            NSError *err = nil;
+            copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err];
+            if (copySuccess) logStep(@"COPY", @"NSFileManager copy succeeded");
+            else logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", err.localizedDescription]);
+        }
+
         if (!copySuccess) {
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to copy app");
@@ -237,12 +246,39 @@
         }
         logStep(@"PERM", @"Set to root:wheel, 755");
 
-        // 10. uicache — use LOGICAL path (NOT physical /var/jb path) — CRITICAL FIX
+        // 10. uicache — use LOGICAL path + refresh all + sbreload
         logStep(@"UICACHE", @"Refreshing UI cache...");
         NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:appBundleName];
-        if (hasHelper) [self runCommandAsRoot:self.uicachePath args:@[@"-p", logicalAppPath]];
-        else [self runCommand:self.uicachePath args:@[@"-p", logicalAppPath]];
+        NSString *physicalAppPath = [self.appsPath stringByAppendingPathComponent:appBundleName];
+
+        // Try both logical and physical paths, then refresh all
+        if (hasHelper) {
+            [self runCommandAsRoot:self.uicachePath args:@[@"-p", logicalAppPath]];
+            [self runCommandAsRoot:self.uicachePath args:@[@"-p", physicalAppPath]];
+            [self runCommandAsRoot:self.uicachePath args:@[@"-a"]];
+        } else {
+            [self runCommand:self.uicachePath args:@[@"-p", logicalAppPath]];
+            [self runCommand:self.uicachePath args:@[@"-p", physicalAppPath]];
+            [self runCommand:self.uicachePath args:@[@"-a"]];
+        }
         logStep(@"UICACHE", @"Done");
+
+        // 10b. SpringBoard reload (CRITICAL for Dopamine 3.0)
+        logStep(@"SPRINGBOARD", @"Reloading SpringBoard...");
+        NSString *sbreloadPath = @"/var/jb/usr/bin/sbreload";
+        if (![[NSFileManager defaultManager] fileExistsAtPath:sbreloadPath]) sbreloadPath = @"/usr/bin/sbreload";
+        if ([[NSFileManager defaultManager] fileExistsAtPath:sbreloadPath]) {
+            if (hasHelper) [self runCommandAsRoot:sbreloadPath args:@[]];
+            else [self runCommand:sbreloadPath args:@[]];
+            logStep(@"SPRINGBOARD", @"Reloaded");
+        } else {
+            // Fallback: killall SpringBoard
+            NSString *killallPath = @"/var/jb/usr/bin/killall";
+            if (![[NSFileManager defaultManager] fileExistsAtPath:killallPath]) killallPath = @"/usr/bin/killall";
+            if (hasHelper) [self runCommandAsRoot:killallPath args:@[@"SpringBoard"]];
+            else [self runCommand:killallPath args:@[@"SpringBoard"]];
+            logStep(@"SPRINGBOARD", @"Killed SpringBoard");
+        }
 
         // 11. Cleanup
         [fm removeItemAtPath:tempDir error:nil];
