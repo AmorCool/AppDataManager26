@@ -245,18 +245,17 @@
             }
             logStep(@"SIGN", [NSString stringWithFormat:@"chmod 755 applied: %@", exeName]);
 
-            // Log for crash analysis
+            // Log installation event (separate from crash reporter)
             NSString *installedBundleID = [self bundleIDFromApp:destAppPath];
-            [[CrashReporter sharedReporter] logCrash:installedBundleID
-                                             appName:appBundleName
-                                          crashType:@"INSTALL_SIGNING"
-                                         crashReason:signSuccess ? @"Signing completed" : @"Signing failed"
-                                       signingMethod:signingMethod
-                                      entitlements:@{}
-                                            teamID:@"Removed"
-                                    executablePath:destExePath
-                                      wasEncrypted:NO
-                                       detailedLog:log];
+            [[CrashReporter sharedReporter] logInstallationEvent:@"INSTALL_SIGNING"
+                                                        bundleID:installedBundleID
+                                                         appName:appBundleName
+                                                         details:@{
+                                                             @"signingMethod": signingMethod ?: @"Unknown",
+                                                             @"signingSuccess": @(signSuccess),
+                                                             @"executablePath": destExePath ?: @"Unknown",
+                                                             @"log": log ?: @""
+                                                         }];
         }
 
         // 8. Sign frameworks and dylibs
