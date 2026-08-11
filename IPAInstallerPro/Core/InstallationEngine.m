@@ -78,7 +78,7 @@
     CapabilityManager *capMgr = [CapabilityManager sharedManager];
     [capMgr scanCapabilities];
     if (!capMgr.canInstallIPA) {
-        [[Logger sharedLogger] warn:@"AppSync not detected — installed apps may crash on iOS 15+"];
+        [[Logger sharedLogger] warning:@"AppSync not detected — installed apps may crash on iOS 15+"];
     }
 
     id<InstallationProvider> provider = [self bestProvider];
