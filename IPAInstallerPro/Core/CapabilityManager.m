@@ -2,12 +2,12 @@
 #import "Logger.h"
 #import "RootlessManager.h"
 
-@implementation Capability
-@end
-
 @interface CapabilityManager ()
 @property (nonatomic, strong) NSMutableDictionary *capabilities;
 @property (nonatomic, assign) BOOL hasScanned;
+@end
+
+@implementation Capability
 @end
 
 @implementation CapabilityManager
@@ -103,6 +103,65 @@
     }
 }
 
+- (NSArray *)allCapabilities {
+    if (!self.hasScanned) [self scanCapabilities];
+    NSMutableArray *result = [NSMutableArray array];
+    NSArray *keys = @[@"AppSync", @"appinst", @"ldid", @"uicache", @"unzip", @"root_helper", @"LSApplicationWorkspace"];
+    for (NSString *key in keys) {
+        Capability *cap = [[Capability alloc] init];
+        cap.identifier = key;
+        cap.isAvailable = [self.capabilities[key] boolValue];
+
+        if ([key isEqualToString:@"AppSync"]) {
+            cap.name = @"AppSync Unified";
+        } else if ([key isEqualToString:@"appinst"]) {
+            cap.name = @"appinst";
+        } else if ([key isEqualToString:@"ldid"]) {
+            cap.name = @"ldid";
+        } else if ([key isEqualToString:@"uicache"]) {
+            cap.name = @"uicache";
+        } else if ([key isEqualToString:@"unzip"]) {
+            cap.name = @"unzip";
+        } else if ([key isEqualToString:@"root_helper"]) {
+            cap.name = @"Root Helper";
+        } else if ([key isEqualToString:@"LSApplicationWorkspace"]) {
+            cap.name = @"LSApplicationWorkspace";
+        } else {
+            cap.name = key;
+        }
+        cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+        [result addObject:cap];
+    }
+    return result;
+}
+
+- (Capability *)capabilityForIdentifier:(NSString *)identifier {
+    if (!self.hasScanned) [self scanCapabilities];
+    Capability *cap = [[Capability alloc] init];
+    cap.identifier = identifier;
+    cap.isAvailable = [self.capabilities[identifier] boolValue];
+
+    if ([identifier isEqualToString:@"AppSync"]) {
+        cap.name = @"AppSync Unified";
+    } else if ([identifier isEqualToString:@"appinst"]) {
+        cap.name = @"appinst";
+    } else if ([identifier isEqualToString:@"ldid"]) {
+        cap.name = @"ldid";
+    } else if ([identifier isEqualToString:@"uicache"]) {
+        cap.name = @"uicache";
+    } else if ([identifier isEqualToString:@"unzip"]) {
+        cap.name = @"unzip";
+    } else if ([identifier isEqualToString:@"root_helper"]) {
+        cap.name = @"Root Helper";
+    } else if ([identifier isEqualToString:@"LSApplicationWorkspace"]) {
+        cap.name = @"LSApplicationWorkspace";
+    } else {
+        cap.name = identifier;
+    }
+    cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
+    return cap;
+}
+
 - (BOOL)isAppSyncAvailable {
     if (!self.hasScanned) [self scanCapabilities];
     return [self.capabilities[@"AppSync"] boolValue];
@@ -138,52 +197,6 @@
     return [self.capabilities[@"LSApplicationWorkspace"] boolValue];
 }
 
-- (Capability *)capabilityForIdentifier:(NSString *)identifier {
-    if (!self.hasScanned) [self scanCapabilities];
-    Capability *cap = [[Capability alloc] init];
-    cap.identifier = identifier;
-    cap.isAvailable = [self.capabilities[identifier] boolValue];
-
-    if ([identifier isEqualToString:@"AppSync"]) {
-        cap.name = @"AppSync Unified";
-    } else if ([identifier isEqualToString:@"appinst"]) {
-        cap.name = @"appinst";
-    } else if ([identifier isEqualToString:@"ldid"]) {
-        cap.name = @"ldid";
-    } else if ([identifier isEqualToString:@"uicache"]) {
-        cap.name = @"uicache";
-    } else if ([identifier isEqualToString:@"unzip"]) {
-        cap.name = @"unzip";
-    } else if ([identifier isEqualToString:@"root_helper"]) {
-        cap.name = @"Root Helper";
-    } else if ([identifier isEqualToString:@"LSApplicationWorkspace"]) {
-        cap.name = @"LSApplicationWorkspace";
-    } else {
-        cap.name = identifier;
-    }
-    cap.statusMessage = cap.isAvailable ? @"متوفر ✓" : @"غير متوفر ✗";
-    return cap;
-}
-
-- (NSDictionary *)allCapabilities {
-    if (!self.hasScanned) [self scanCapabilities];
-    return [self.capabilities copy];
-}
-
-- (NSString *)capabilityStatusString {
-    if (!self.hasScanned) [self scanCapabilities];
-    NSMutableString *status = [NSMutableString string];
-    [status appendFormat:@"AppSync: %@\n", self.isAppSyncAvailable ? @"✅" : @"❌"];
-    [status appendFormat:@"appinst: %@\n", self.isAppInstAvailable ? @"✅" : @"❌"];
-    [status appendFormat:@"ldid: %@\n", self.isLDIDAvailable ? @"✅" : @"❌"];
-    [status appendFormat:@"uicache: %@\n", self.isUICacheAvailable ? @"✅" : @"❌"];
-    [status appendFormat:@"unzip: %@\n", self.isUnzipAvailable ? @"✅" : @"❌"];
-    [status appendFormat:@"Root Helper: %@\n", self.isRootHelperAvailable ? @"✅" : @"❌"];
-    [status appendFormat:@"LSApplicationWorkspace: %@", self.isLSApplicationWorkspaceAvailable ? @"✅" : @"❌"];
-    return status;
-}
-
-
 - (BOOL)isSystemInstallationAvailable {
     if (!self.hasScanned) [self scanCapabilities];
     return [self.capabilities[@"LSApplicationWorkspace"] boolValue] && [self.capabilities[@"AppSync"] boolValue];
@@ -208,6 +221,19 @@
 - (BOOL)canInstallIPA {
     if (!self.hasScanned) [self scanCapabilities];
     return self.isDirectInstallationAvailable || self.isAppInstAvailable || self.isSystemInstallationAvailable;
+}
+
+- (NSString *)capabilityStatusString {
+    if (!self.hasScanned) [self scanCapabilities];
+    NSMutableString *status = [NSMutableString string];
+    [status appendFormat:@"AppSync: %@\n", self.isAppSyncAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"appinst: %@\n", self.isAppInstAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"ldid: %@\n", self.isLDIDAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"uicache: %@\n", self.isUICacheAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"unzip: %@\n", self.isUnzipAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"Root Helper: %@\n", self.isRootHelperAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"LSApplicationWorkspace: %@", self.isLSApplicationWorkspaceAvailable ? @"✅" : @"❌"];
+    return status;
 }
 
 @end
