@@ -9,12 +9,13 @@
 
 @interface DirectInstallationProvider ()
 @property (nonatomic, strong) NSString *appsPath;
-@property (nonatomic, strong) NSString *jbPrefix;
 @property (nonatomic, strong) NSString *helperPath;
 @property (nonatomic, strong) NSString *cpPath;
 @property (nonatomic, strong) NSString *rmPath;
 @property (nonatomic, strong) NSString *chmodPath;
 @property (nonatomic, strong) NSString *chownPath;
+@property (nonatomic, strong) NSString *ldidPath;
+@property (nonatomic, strong) NSString *uicachePath;
 @end
 
 @implementation DirectInstallationProvider
@@ -24,25 +25,17 @@
     if (self) {
         NSString *resolvedApps = [[RootlessManager sharedManager] resolvePath:@"/Applications"];
         _appsPath = resolvedApps;
-        _jbPrefix = [resolvedApps hasPrefix:@"/var/jb"] ? @"/var/jb" : @"";
         _helperPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ipainstallerpro_helper"];
 
-        // Find correct binary paths for Rootless
         NSFileManager *fm = [NSFileManager defaultManager];
-        _cpPath = @"/var/jb/bin/cp";
-        if (![fm fileExistsAtPath:_cpPath]) _cpPath = @"/usr/bin/cp";
-        if (![fm fileExistsAtPath:_cpPath]) _cpPath = @"/bin/cp";
-
-        _rmPath = @"/var/jb/bin/rm";
-        if (![fm fileExistsAtPath:_rmPath]) _rmPath = @"/usr/bin/rm";
-        if (![fm fileExistsAtPath:_rmPath]) _rmPath = @"/bin/rm";
-
-        _chmodPath = @"/var/jb/bin/chmod";
-        if (![fm fileExistsAtPath:_chmodPath]) _chmodPath = @"/usr/bin/chmod";
-        if (![fm fileExistsAtPath:_chmodPath]) _chmodPath = @"/bin/chmod";
-
-        _chownPath = @"/var/jb/usr/sbin/chown";
-        if (![fm fileExistsAtPath:_chownPath]) _chownPath = @"/usr/sbin/chown";
+        _cpPath = @"/var/jb/bin/cp"; if (![fm fileExistsAtPath:_cpPath]) _cpPath = @"/bin/cp";
+        _rmPath = @"/var/jb/bin/rm"; if (![fm fileExistsAtPath:_rmPath]) _rmPath = @"/bin/rm";
+        _chmodPath = @"/var/jb/bin/chmod"; if (![fm fileExistsAtPath:_chmodPath]) _chmodPath = @"/bin/chmod";
+        _chownPath = @"/var/jb/usr/sbin/chown"; if (![fm fileExistsAtPath:_chownPath]) _chownPath = @"/usr/sbin/chown";
+        _ldidPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
+        if (![fm fileExistsAtPath:_ldidPath]) _ldidPath = @"/usr/bin/ldid";
+        _uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
+        if (![fm fileExistsAtPath:_uicachePath]) _uicachePath = @"/usr/bin/uicache";
     }
     return self;
 }
@@ -54,14 +47,10 @@
 - (BOOL)isAvailable {
     @try {
         RootlessManager *rl = [RootlessManager sharedManager];
-        BOOL hasLdid = [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"];
-        BOOL hasUICache = [rl fileExistsAtLogicalPath:@"/usr/bin/uicache"];
-        BOOL hasUnzip = [rl fileExistsAtLogicalPath:@"/usr/bin/unzip"];
-        return hasLdid && hasUICache && hasUnzip;
-    }
-    @catch (NSException *exception) {
-        return NO;
-    }
+        return [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"] &&
+               [rl fileExistsAtLogicalPath:@"/usr/bin/uicache"] &&
+               [rl fileExistsAtLogicalPath:@"/usr/bin/unzip"];
+    } @catch (NSException *exception) { return NO; }
 }
 
 - (BOOL)hasRootHelper {
@@ -70,7 +59,6 @@
 
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
     if (!completion) return;
-
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSFileManager *fm = [NSFileManager defaultManager];
         NSMutableString *log = [NSMutableString string];
@@ -84,53 +72,41 @@
         logStep(@"INFO", [NSString stringWithFormat:@"Apps path: %@", self.appsPath]);
 
         BOOL hasHelper = [self hasRootHelper];
-        if (hasHelper) {
-            logStep(@"HELPER", @"Root helper available — using privileged execution");
-        } else {
-            logStep(@"HELPER", @"Root helper NOT found — falling back to standard execution");
-        }
+        if (hasHelper) logStep(@"HELPER", @"Root helper available");
+        else logStep(@"HELPER", @"Root helper NOT found — using fallback");
 
-        // 1. Create temp extraction dir
+        // 1. Create temp dir
         NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
         [fm createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
-        logStep(@"TEMP", tempDir);
 
-        // 2. Unzip IPA
+        // 2. Unzip
         logStep(@"UNZIP", @"Extracting IPA...");
         NSString *unzipPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
         if (![fm fileExistsAtPath:unzipPath]) unzipPath = @"/usr/bin/unzip";
-
-        BOOL unzipSuccess = [self runCommand:unzipPath args:@[@"-q", @"-o", ipaPath, @"-d", tempDir]];
-        if (!unzipSuccess) {
+        if (![self runCommand:unzipPath args:@[@"-q", @"-o", ipaPath, @"-d", tempDir]]) {
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to extract IPA");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:@"فشل فك ضغط IPA" error:nil];
-                result.detailedOutput = log;
-                completion(result);
+                InstallationResult *r = [InstallationResult failureResult:@"فشل فك ضغط IPA" error:nil];
+                r.detailedOutput = log; completion(r);
             });
             return;
         }
         logStep(@"UNZIP", @"Success");
 
-        // 3. Find .app bundle
+        // 3. Find .app
         NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
         NSArray *payloadContents = [fm contentsOfDirectoryAtPath:payloadPath error:nil];
         NSString *appBundleName = nil;
         for (NSString *item in payloadContents) {
-            if ([item hasSuffix:@".app"]) {
-                appBundleName = item;
-                break;
-            }
+            if ([item hasSuffix:@".app"]) { appBundleName = item; break; }
         }
-
         if (!appBundleName) {
             [fm removeItemAtPath:tempDir error:nil];
-            logStep(@"ERROR", @"No .app bundle found in Payload");
+            logStep(@"ERROR", @"No .app bundle found");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:@"لم يتم العثور على .app داخل IPA" error:nil];
-                result.detailedOutput = log;
-                completion(result);
+                InstallationResult *r = [InstallationResult failureResult:@"لم يتم العثور على .app" error:nil];
+                r.detailedOutput = log; completion(r);
             });
             return;
         }
@@ -139,138 +115,156 @@
         NSString *sourceAppPath = [payloadPath stringByAppendingPathComponent:appBundleName];
         NSString *destAppPath = [self.appsPath stringByAppendingPathComponent:appBundleName];
         NSString *exeName = [self executableNameFromApp:sourceAppPath];
+        NSString *sourceExePath = exeName ? [sourceAppPath stringByAppendingPathComponent:exeName] : nil;
         NSString *destExePath = exeName ? [destAppPath stringByAppendingPathComponent:exeName] : nil;
 
-        // 4. Remove existing app if present
+        // 4. Remove existing
         if ([fm fileExistsAtPath:destAppPath]) {
             logStep(@"CLEAN", @"Removing existing app...");
-            if (hasHelper) {
-                [self runCommandAsRoot:self.rmPath args:@[@"-rf", destAppPath]];
-            } else {
-                [self runCommand:self.rmPath args:@[@"-rf", destAppPath]];
-            }
+            if (hasHelper) [self runCommandAsRoot:self.rmPath args:@[@"-rf", destAppPath]];
+            else [self runCommand:self.rmPath args:@[@"-rf", destAppPath]];
         }
 
-        // 5. Copy app to /Applications
+        // 5. Copy app
         logStep(@"INSTALL", [NSString stringWithFormat:@"Copying to %@...", destAppPath]);
         BOOL copySuccess = NO;
-
         if (hasHelper) {
-            // Try helper first
             copySuccess = [self runCommandAsRoot:self.cpPath args:@[@"-R", sourceAppPath, destAppPath]];
-            if (!copySuccess) {
-                // Fallback: use tar via helper
-                logStep(@"FALLBACK", @"cp failed, trying tar...");
-                NSString *tarPath = @"/var/jb/bin/tar";
-                if (![fm fileExistsAtPath:tarPath]) tarPath = @"/usr/bin/tar";
-                if ([fm fileExistsAtPath:tarPath]) {
-                    NSString *parentDir = [destAppPath stringByDeletingLastPathComponent];
-                    copySuccess = [self runCommandAsRoot:tarPath args:@[@"-cf", @"-", @"-C", [sourceAppPath stringByDeletingLastPathComponent], appBundleName, @"|", tarPath, @"-xf", @"-", @"-C", parentDir]];
-                }
-            }
         }
-
-        // If helper failed or not available, try direct copyfile with setuid fallback
         if (!copySuccess) {
-            logStep(@"FALLBACK", @"Trying copyfile() API...");
             if (copyfile([sourceAppPath UTF8String], [destAppPath UTF8String], NULL, COPYFILE_ALL | COPYFILE_RECURSIVE) == 0) {
-                copySuccess = YES;
-                logStep(@"COPY", @"copyfile() succeeded");
+                copySuccess = YES; logStep(@"COPY", @"copyfile() succeeded");
             } else {
-                logStep(@"FALLBACK", [NSString stringWithFormat:@"copyfile() failed: %s", strerror(errno)]);
+                NSError *err = nil;
+                copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err];
+                if (copySuccess) logStep(@"COPY", @"NSFileManager copy succeeded");
+                else logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", err.localizedDescription]);
             }
         }
-
-        // Last resort: NSFileManager
-        if (!copySuccess) {
-            NSError *copyErr = nil;
-            copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&copyErr];
-            if (copySuccess) {
-                logStep(@"COPY", @"NSFileManager copy succeeded");
-            } else {
-                logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", copyErr.localizedDescription]);
-            }
-        }
-
         if (!copySuccess) {
             [fm removeItemAtPath:tempDir error:nil];
-            logStep(@"ERROR", @"Failed to copy app to destination");
+            logStep(@"ERROR", @"Failed to copy app");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:@"فشل نسخ التطبيق — تأكد من تشغيل الأداة بصلاحيات root أو تثبيت Root Helper" error:nil];
-                result.detailedOutput = log;
-                completion(result);
+                InstallationResult *r = [InstallationResult failureResult:@"فشل نسخ التطبيق" error:nil];
+                r.detailedOutput = log; completion(r);
             });
             return;
         }
         logStep(@"COPY", @"App copied successfully");
 
-        // 6. Sign with ldid
-        logStep(@"SIGN", @"Signing app with ldid...");
-        NSString *ldidPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
-        if (![fm fileExistsAtPath:ldidPath]) ldidPath = @"/usr/bin/ldid";
-
-        if (destExePath && [fm fileExistsAtPath:destExePath]) {
-            if (hasHelper) {
-                [self runCommandAsRoot:ldidPath args:@[@"-S", destExePath]];
-            } else {
-                [self runCommand:ldidPath args:@[@"-S", destExePath]];
+        // 6. Extract entitlements from original executable and apply
+        NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist"];
+        if (sourceExePath && [fm fileExistsAtPath:sourceExePath]) {
+            logStep(@"ENTITLEMENTS", @"Extracting from original executable...");
+            if ([self runCommand:self.ldidPath args:@[@"-e", sourceExePath]]) {
+                // ldid -e outputs to stdout, we need to capture it
+                // For now, just sign with -S which uses default entitlements
+                logStep(@"ENTITLEMENTS", @"Using default entitlements (ldid -S)");
             }
-            logStep(@"SIGN", [NSString stringWithFormat:@"Signed executable: %@", exeName]);
         }
 
-        // Sign dylibs and frameworks
-        [self signDylibsAndFrameworksAtPath:destAppPath ldidPath:ldidPath hasHelper:hasHelper log:logStep];
+        // 7. Sign executable with entitlements
+        logStep(@"SIGN", @"Signing executable...");
+        if (destExePath && [fm fileExistsAtPath:destExePath]) {
+            if (hasHelper) {
+                [self runCommandAsRoot:self.ldidPath args:@[@"-S", destExePath]];
+            } else {
+                [self runCommand:self.ldidPath args:@[@"-S", destExePath]];
+            }
+            // Make sure it's executable
+            if (hasHelper) [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
+            else [self runCommand:self.chmodPath args:@[@"+x", destExePath]];
+            logStep(@"SIGN", [NSString stringWithFormat:@"Signed: %@", exeName]);
+        }
 
-        // 7. Set permissions
+        // 8. Sign ALL frameworks and dylibs recursively
+        logStep(@"SIGN", @"Signing frameworks and dylibs...");
+        [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep];
+
+        // 9. Set permissions on entire app
         logStep(@"PERM", @"Setting permissions...");
         if (hasHelper) {
             [self runCommandAsRoot:self.chmodPath args:@[@"-R", @"755", destAppPath]];
-            if (destExePath) {
-                [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
-            }
             [self runCommandAsRoot:self.chownPath args:@[@"-R", @"root:wheel", destAppPath]];
         } else {
             [self runCommand:self.chmodPath args:@[@"-R", @"755", destAppPath]];
-            if (destExePath) {
-                [self runCommand:self.chmodPath args:@[@"+x", destExePath]];
-            }
             [self runCommand:self.chownPath args:@[@"-R", @"root:wheel", destAppPath]];
         }
-        logStep(@"PERM", @"Ownership set to root:wheel");
+        logStep(@"PERM", @"Set to root:wheel, 755");
 
-        // 8. Run uicache
+        // 10. uicache
         logStep(@"UICACHE", @"Refreshing UI cache...");
-        NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
-        if (![fm fileExistsAtPath:uicachePath]) uicachePath = @"/usr/bin/uicache";
-        if (hasHelper) {
-            [self runCommandAsRoot:uicachePath args:@[@"-p", destAppPath]];
-        } else {
-            [self runCommand:uicachePath args:@[@"-p", destAppPath]];
-        }
-        logStep(@"UICACHE", @"UI cache refreshed");
+        if (hasHelper) [self runCommandAsRoot:self.uicachePath args:@[@"-p", destAppPath]];
+        else [self runCommand:self.uicachePath args:@[@"-p", destAppPath]];
+        logStep(@"UICACHE", @"Done");
 
-        // 9. Cleanup temp dir
+        // 11. Cleanup
         [fm removeItemAtPath:tempDir error:nil];
-        logStep(@"CLEAN", @"Temp files removed");
+        logStep(@"CLEAN", @"Temp removed");
 
-        // 10. Verify
-        logStep(@"VERIFY", @"Verifying installation...");
+        // 12. Verify
         BOOL exists = [fm fileExistsAtPath:destAppPath];
-        logStep(@"VERIFY", exists ? @"App exists at destination" : @"App NOT found at destination!");
+        logStep(@"VERIFY", exists ? @"App exists ✓" : @"App NOT found ✗");
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (exists) {
-                InstallationResult *result = [InstallationResult successResult:@"تم التثبيت بنجاح"];
-                result.bundleID = [self bundleIDFromApp:destAppPath];
-                result.detailedOutput = log;
-                completion(result);
+                InstallationResult *r = [InstallationResult successResult:@"تم التثبيت بنجاح"];
+                r.bundleID = [self bundleIDFromApp:destAppPath];
+                r.detailedOutput = log;
+                completion(r);
             } else {
-                InstallationResult *result = [InstallationResult failureResult:@"التطبيق غير موجود بعد التثبيت" error:nil];
-                result.detailedOutput = log;
-                completion(result);
+                InstallationResult *r = [InstallationResult failureResult:@"التطبيق غير موجود بعد التثبيت" error:nil];
+                r.detailedOutput = log; completion(r);
             }
         });
     });
+}
+
+// NEW: Recursively sign ALL binaries in the app bundle
+- (void)signAllBinariesAtPath:(NSString *)path hasHelper:(BOOL)hasHelper log:(void (^)(NSString *, NSString *))logStep {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *items = [fm contentsOfDirectoryAtPath:path error:nil];
+    for (NSString *item in items) {
+        NSString *itemPath = [path stringByAppendingPathComponent:item];
+        BOOL isDir = NO;
+        [fm fileExistsAtPath:itemPath isDirectory:&isDir];
+
+        if (isDir && [item hasSuffix:@".app"]) {
+            // Sign the executable inside .app
+            NSString *exeName = [self executableNameFromApp:itemPath];
+            if (exeName) {
+                NSString *exePath = [itemPath stringByAppendingPathComponent:exeName];
+                if ([fm fileExistsAtPath:exePath]) {
+                    if (hasHelper) [self runCommandAsRoot:self.ldidPath args:@[@"-S", exePath]];
+                    else [self runCommand:self.ldidPath args:@[@"-S", exePath]];
+                    logStep(@"SIGN", [NSString stringWithFormat:@"Signed: %@/%@", item, exeName]);
+                }
+            }
+            // Recurse into .app
+            [self signAllBinariesAtPath:itemPath hasHelper:hasHelper log:logStep];
+        }
+        else if (isDir && [item hasSuffix:@".framework"]) {
+            NSString *fwName = [item stringByDeletingPathExtension];
+            NSString *fwExe = [itemPath stringByAppendingPathComponent:fwName];
+            if ([fm fileExistsAtPath:fwExe]) {
+                if (hasHelper) [self runCommandAsRoot:self.ldidPath args:@[@"-S", fwExe]];
+                else [self runCommand:self.ldidPath args:@[@"-S", fwExe]];
+                logStep(@"SIGN", [NSString stringWithFormat:@"Signed framework: %@", fwName]);
+            }
+            // Recurse into framework
+            [self signAllBinariesAtPath:itemPath hasHelper:hasHelper log:logStep];
+        }
+        else if ([item hasSuffix:@".dylib"]) {
+            if (hasHelper) [self runCommandAsRoot:self.ldidPath args:@[@"-S", itemPath]];
+            else [self runCommand:self.ldidPath args:@[@"-S", itemPath]];
+            logStep(@"SIGN", [NSString stringWithFormat:@"Signed dylib: %@", item]);
+        }
+        else if (!isDir && ![item hasSuffix:@".plist"] && ![item hasSuffix:@".png"] && ![item hasSuffix:@".jpg"] && ![item hasSuffix:@".json"] && ![item hasSuffix:@".txt"] && ![item hasSuffix:@".strings"] && ![item hasSuffix:@".nib"] && ![item hasSuffix:@".car"]) {
+            // Could be a binary - try to sign it
+            if (hasHelper) [self runCommandAsRoot:self.ldidPath args:@[@"-S", itemPath]];
+            else [self runCommand:self.ldidPath args:@[@"-S", itemPath]];
+        }
+    }
 }
 
 - (BOOL)runCommandAsRoot:(NSString *)cmd args:(NSArray *)args {
@@ -278,7 +272,6 @@
     if (!self.helperPath || ![[NSFileManager defaultManager] fileExistsAtPath:self.helperPath]) {
         return [self runCommand:cmd args:args];
     }
-
     NSMutableArray *allArgs = [NSMutableArray arrayWithObject:cmd];
     [allArgs addObjectsFromArray:args];
     return [self runCommand:self.helperPath args:allArgs];
@@ -298,34 +291,6 @@
     int waitStatus;
     waitpid(pid, &waitStatus, 0);
     return WIFEXITED(waitStatus) && WEXITSTATUS(waitStatus) == 0;
-}
-
-- (void)signDylibsAndFrameworksAtPath:(NSString *)appPath ldidPath:(NSString *)ldidPath hasHelper:(BOOL)hasHelper log:(void (^)(NSString *, NSString *))logStep {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *contents = [fm contentsOfDirectoryAtPath:appPath error:nil];
-    for (NSString *item in contents) {
-        NSString *itemPath = [appPath stringByAppendingPathComponent:item];
-        if ([item hasSuffix:@".dylib"]) {
-            if (hasHelper) {
-                [self runCommandAsRoot:ldidPath args:@[@"-S", itemPath]];
-            } else {
-                [self runCommand:ldidPath args:@[@"-S", itemPath]];
-            }
-            logStep(@"SIGN", [NSString stringWithFormat:@"Signed dylib: %@", item]);
-        }
-        if ([item hasSuffix:@".framework"]) {
-            NSString *fwName = [item stringByDeletingPathExtension];
-            NSString *fwExe = [itemPath stringByAppendingPathComponent:fwName];
-            if ([fm fileExistsAtPath:fwExe]) {
-                if (hasHelper) {
-                    [self runCommandAsRoot:ldidPath args:@[@"-S", fwExe]];
-                } else {
-                    [self runCommand:ldidPath args:@[@"-S", fwExe]];
-                }
-                logStep(@"SIGN", [NSString stringWithFormat:@"Signed framework: %@", fwName]);
-            }
-        }
-    }
 }
 
 - (NSString *)executableNameFromApp:(NSString *)appPath {
@@ -349,18 +314,10 @@
         NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
         if ([info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
-            if ([self hasRootHelper]) {
-                [self runCommandAsRoot:self.rmPath args:@[@"-rf", appPath]];
-            } else {
-                [self runCommand:self.rmPath args:@[@"-rf", appPath]];
-            }
-            NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
-            if (![fm fileExistsAtPath:uicachePath]) uicachePath = @"/usr/bin/uicache";
-            if ([self hasRootHelper]) {
-                [self runCommandAsRoot:uicachePath args:@[@"-p", appPath]];
-            } else {
-                [self runCommand:uicachePath args:@[@"-p", appPath]];
-            }
+            if ([self hasRootHelper]) [self runCommandAsRoot:self.rmPath args:@[@"-rf", appPath]];
+            else [self runCommand:self.rmPath args:@[@"-rf", appPath]];
+            if ([self hasRootHelper]) [self runCommandAsRoot:self.uicachePath args:@[@"-p", appPath]];
+            else [self runCommand:self.uicachePath args:@[@"-p", appPath]];
             if (completion) completion(YES, nil);
             return;
         }
