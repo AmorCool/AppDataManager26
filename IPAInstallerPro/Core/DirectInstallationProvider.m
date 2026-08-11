@@ -158,7 +158,6 @@
 
         // 6. EXTRACT entitlements from original executable
         NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist"];
-        BOOL hasEntitlements = NO;
         if (sourceExePath && [fm fileExistsAtPath:sourceExePath]) {
             logStep(@"ENTITLEMENTS", @"Extracting from original executable...");
             int extractStatus = -1;
@@ -190,7 +189,6 @@
             if (extractStatus == 0) {
                 NSDictionary *entitlements = [NSDictionary dictionaryWithContentsOfFile:entitlementsPath];
                 if (entitlements && entitlements.count > 0) {
-                    hasEntitlements = YES;
                     logStep(@"ENTITLEMENTS", [NSString stringWithFormat:@"Extracted %lu entitlements", (unsigned long)entitlements.count]);
                 } else {
                     logStep(@"ENTITLEMENTS", @"Extraction returned empty");
