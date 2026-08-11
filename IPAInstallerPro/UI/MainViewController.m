@@ -344,4 +344,12 @@
     return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction]];
 }
 
+
+- (void)openCrashReporter:(id)sender {
+    CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFormSheet;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
 @end
