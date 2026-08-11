@@ -2,6 +2,9 @@
 #import "Logger.h"
 #import "RootlessManager.h"
 
+@implementation Capability
+@end
+
 @interface CapabilityManager ()
 @property (nonatomic, strong) NSMutableDictionary *capabilities;
 @property (nonatomic, assign) BOOL hasScanned;
