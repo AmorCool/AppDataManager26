@@ -2,6 +2,8 @@
 #import "Logger.h"
 #import "RootlessManager.h"
 #import "CapabilityManager.h"
+#import <spawn.h>
+#import <sys/wait.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -137,7 +139,7 @@
         if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) unzipPath = @"/usr/bin/unzip";
 
         const char *cmd = [unzipPath UTF8String];
-        char *args[] = {(char*)cmd, (char*)"-q", (char*)"-o", (char*)[ipaPath UTF8String], (char*)"-d", (char*)[tempDir UTF8String], NULL};
+        const char *args[] = {[cmd], "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL};
         pid_t pid;
         posix_spawn(&pid, cmd, NULL, NULL, (char **)args, NULL);
         int status;
