@@ -1,4 +1,5 @@
 #import "CrashReporter.h"
+#import "Logger.h"
 #import "CrashLogParser.h"
 #import "ProcessMonitor.h"
 #import "LaunchDetector.h"
@@ -31,7 +32,7 @@ static NSString * const kCrashEventsKey = @"IPAInstallerPro_CrashEvents_v3";
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _queue = dispatch_queue_create(@"com.aosaid.crashreporter", DISPATCH_QUEUE_SERIAL);
+        _queue = dispatch_queue_create("com.aosaid.crashreporter", DISPATCH_QUEUE_SERIAL);
         _formatter = [[NSDateFormatter alloc] init];
         [_formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
         _installationLogger = [InstallationLogger sharedLogger];
