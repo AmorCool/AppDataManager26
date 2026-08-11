@@ -57,12 +57,15 @@
     NSArray *available = [self availableProviders];
     if (available.count == 0) return nil;
 
-    // FIX: Prefer System provider if available (more reliable on iOS 15+)
-    for (id<InstallationProvider> provider in available) {
-        if ([provider.providerName isEqualToString:@"System"]) return provider;
-    }
+    // Direct Install is preferred: it extracts, signs with entitlements, copies to /Applications
     for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"Direct Install"]) return provider;
+    }
+    for (id<InstallationProvider> provider in available) {
+        if ([provider.providerName isEqualToString:@"appinst"]) return provider;
+    }
+    for (id<InstallationProvider> provider in available) {
+        if ([provider.providerName isEqualToString:@"System"]) return provider;
     }
     for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"appinst"]) return provider;
