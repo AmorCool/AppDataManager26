@@ -5,6 +5,8 @@
 #import <objc/message.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <copyfile.h>
+#include <errno.h>
 
 @interface DirectInstallationProvider ()
 @property (nonatomic, strong) NSString *appsPath;
@@ -19,11 +21,7 @@
     if (self) {
         NSString *resolvedApps = [[RootlessManager sharedManager] resolvePath:@"/Applications"];
         _appsPath = resolvedApps;
-        if ([resolvedApps hasPrefix:@"/var/jb"]) {
-            _jbPrefix = @"/var/jb";
-        } else {
-            _jbPrefix = @"";
-        }
+        _jbPrefix = [resolvedApps hasPrefix:@"/var/jb"] ? @"/var/jb" : @"";
         _hasRootAccess = (getuid() == 0);
     }
     return self;
@@ -49,7 +47,6 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSFileManager *fm = [NSFileManager defaultManager];
         NSMutableString *log = [NSMutableString string];
-
         void (^logStep)(NSString *, NSString *) = ^(NSString *step, NSString *detail) {
             NSString *entry = [NSString stringWithFormat:@"[DirectInstall] %@: %@", step, detail];
             [[Logger sharedLogger] info:entry];
@@ -110,26 +107,39 @@
             [self runCommand:@"/bin/rm" args:@[@"-rf", destAppPath]];
         }
 
-        // 5. Copy to Applications using cp -R (requires root)
-        logStep(@"COPY", [NSString stringWithFormat:@"Copying to %@...", destAppPath]);
-        BOOL copied = [self runCommand:@"/bin/cp" args:@[@"-R", sourceAppPath, destAppPath]];
-        if (!copied) {
-            // Fallback: try with NSFileManager (if permissions allow)
-            NSError *copyError = nil;
-            copied = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&copyError];
-            if (!copied) {
+        // 5. Install using atomic rename() (TrollStore method) — fastest
+        logStep(@"INSTALL", [NSString stringWithFormat:@"Atomic rename to %@...", destAppPath]);
+        int result = rename([sourceAppPath UTF8String], [destAppPath UTF8String]);
+        if (result != 0) {
+            if (errno == EXDEV) {
+                // Cross-filesystem: fallback to copyfile()
+                logStep(@"FALLBACK", @"Cross-filesystem, using copyfile()...");
+                if (copyfile([sourceAppPath UTF8String], [destAppPath UTF8String], NULL, COPYFILE_ALL | COPYFILE_RECURSIVE) != 0) {
+                    [fm removeItemAtPath:tempDir error:nil];
+                    NSString *errMsg = [NSString stringWithFormat:@"copyfile failed: %s", strerror(errno)];
+                    logStep(@"ERROR", errMsg);
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        InstallationResult *result = [InstallationResult failureResult:errMsg error:nil];
+                        result.detailedOutput = log;
+                        completion(result);
+                    });
+                    return;
+                }
+                logStep(@"COPY", @"copyfile() success");
+            } else {
                 [fm removeItemAtPath:tempDir error:nil];
-                NSString *errMsg = [NSString stringWithFormat:@"فشل النسخ: %@", copyError.localizedDescription];
+                NSString *errMsg = [NSString stringWithFormat:@"rename failed: %s", strerror(errno)];
                 logStep(@"ERROR", errMsg);
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    InstallationResult *result = [InstallationResult failureResult:errMsg error:copyError];
+                    InstallationResult *result = [InstallationResult failureResult:errMsg error:nil];
                     result.detailedOutput = log;
                     completion(result);
                 });
                 return;
             }
+        } else {
+            logStep(@"RENAME", @"Atomic rename success");
         }
-        logStep(@"COPY", @"Success");
 
         // 6. Sign with ldid
         logStep(@"SIGN", @"Signing app with ldid...");
@@ -143,7 +153,7 @@
         logStep(@"UICACHE", @"Refreshing UI cache...");
         [self runUICache:destAppPath log:logStep];
 
-        // 9. Cleanup
+        // 9. Cleanup temp dir (source already moved/removed)
         [fm removeItemAtPath:tempDir error:nil];
         logStep(@"CLEAN", @"Temp files removed");
 
@@ -163,17 +173,13 @@
 
 - (BOOL)unzipIPA:(NSString *)ipaPath toDirectory:(NSString *)destDir {
     NSString *unzipPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) {
-        unzipPath = @"/usr/bin/unzip";
-    }
+    if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) unzipPath = @"/usr/bin/unzip";
     return [self runCommand:unzipPath args:@[@"-q", @"-o", ipaPath, @"-d", destDir]];
 }
 
 - (void)signAppAtPath:(NSString *)appPath log:(void (^)(NSString *, NSString *))logStep {
     NSString *ldidPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:ldidPath]) {
-        ldidPath = @"/usr/bin/ldid";
-    }
+    if (![[NSFileManager defaultManager] fileExistsAtPath:ldidPath]) ldidPath = @"/usr/bin/ldid";
 
     NSString *exeName = [self executableNameFromApp:appPath];
     if (exeName) {
@@ -209,37 +215,28 @@
         logStep(@"PERM", [NSString stringWithFormat:@"chmod +x %@", exeName]);
         [self runCommand:@"/bin/chmod" args:@[@"+x", exePath]];
     }
-    // Set ownership to root:wheel for system apps
     [self runCommand:@"/usr/sbin/chown" args:@[@"-R", @"root:wheel", appPath]];
     logStep(@"PERM", @"Ownership set to root:wheel");
 }
 
 - (void)runUICache:(NSString *)appPath log:(void (^)(NSString *, NSString *))logStep {
     NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:uicachePath]) {
-        uicachePath = @"/usr/bin/uicache";
-    }
+    if (![[NSFileManager defaultManager] fileExistsAtPath:uicachePath]) uicachePath = @"/usr/bin/uicache";
     logStep(@"UICACHE", [NSString stringWithFormat:@"Running: %@ -p %@", uicachePath, appPath]);
     [self runCommand:uicachePath args:@[@"-p", appPath]];
 }
 
 - (BOOL)runCommand:(NSString *)cmd args:(NSArray *)args {
     if (!cmd || args.count == 0) return NO;
-
     const char *cmdPath = [cmd UTF8String];
     char **argv = (char **)malloc((args.count + 2) * sizeof(char *));
     argv[0] = (char *)cmdPath;
-    for (int i = 0; i < args.count; i++) {
-        argv[i + 1] = (char *)[[args objectAtIndex:i] UTF8String];
-    }
+    for (int i = 0; i < args.count; i++) argv[i + 1] = (char *)[[args objectAtIndex:i] UTF8String];
     argv[args.count + 1] = NULL;
-
     pid_t pid;
     int status = posix_spawn(&pid, cmdPath, NULL, NULL, argv, NULL);
     free(argv);
-
     if (status != 0) return NO;
-
     int waitStatus;
     waitpid(pid, &waitStatus, 0);
     return WIFEXITED(waitStatus) && WEXITSTATUS(waitStatus) == 0;
