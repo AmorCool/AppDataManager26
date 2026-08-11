@@ -94,7 +94,7 @@
     switch (row) {
         case 0:
             cell.textLabel.text = @"الإصدار";
-            cell.detailTextLabel.text = @"1.0.24";
+            cell.detailTextLabel.text = @"1.0.26";
             break;
         case 1: {
             cell.textLabel.text = @"المحرك المفضل";
