@@ -7,8 +7,8 @@
 #include <copyfile.h>
 #include <errno.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <stdlib.h>
+#include <fcntl.h>
 
 @interface DirectInstallationProvider ()
 @property (nonatomic, strong) NSString *appsPath;
@@ -90,7 +90,7 @@
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to extract IPA");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *r = [InstallationResult failureResult:@"فشل فك ضغط IPA" error:nil);
+                InstallationResult *r = [InstallationResult failureResult:@"فشل فك ضغط IPA" error:nil];
                 r.detailedOutput = log; completion(r);
             });
             return;
@@ -98,7 +98,7 @@
         logStep(@"UNZIP", @"Success");
 
         // 3. Find .app
-        NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload");
+        NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
         NSArray *payloadContents = [fm contentsOfDirectoryAtPath:payloadPath error:nil];
         NSString *appBundleName = nil;
         for (NSString *item in payloadContents) {
@@ -108,14 +108,14 @@
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"No .app bundle found");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *r = [InstallationResult failureResult:@"لم يتم العثور على .app" error:nil);
+                InstallationResult *r = [InstallationResult failureResult:@"لم يتم العثور على .app" error:nil];
                 r.detailedOutput = log; completion(r);
             });
             return;
         }
         logStep(@"BUNDLE", appBundleName);
 
-        NSString *sourceAppPath = [payloadPath stringByAppendingPathComponent:appBundleName);
+        NSString *sourceAppPath = [payloadPath stringByAppendingPathComponent:appBundleName];
         NSString *destAppPath = [self.appsPath stringByAppendingPathComponent:appBundleName];
         NSString *exeName = [self executableNameFromApp:sourceAppPath];
         NSString *sourceExePath = exeName ? [sourceAppPath stringByAppendingPathComponent:exeName] : nil;
@@ -131,45 +131,36 @@
         // 5. Copy app
         logStep(@"INSTALL", [NSString stringWithFormat:@"Copying to %@...", destAppPath]);
         BOOL copySuccess = NO;
-
-        // Try helper first (root cp)
         if (hasHelper) {
             copySuccess = [self runCommandAsRoot:self.cpPath args:@[@"-R", @"-f", sourceAppPath, destAppPath]];
             if (copySuccess) logStep(@"COPY", @"Root cp succeeded");
         }
-
-        // Fallback: copyfile()
         if (!copySuccess) {
             if (copyfile([sourceAppPath UTF8String], [destAppPath UTF8String], NULL, COPYFILE_ALL | COPYFILE_RECURSIVE) == 0) {
                 copySuccess = YES; logStep(@"COPY", @"copyfile() succeeded");
+            } else {
+                NSError *err = nil;
+                copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err];
+                if (copySuccess) logStep(@"COPY", @"NSFileManager copy succeeded");
+                else logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", err.localizedDescription]);
             }
         }
-
-        // Last fallback: NSFileManager
-        if (!copySuccess) {
-            NSError *err = nil;
-            copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&err);
-            if (copySuccess) logStep(@"COPY", @"NSFileManager copy succeeded");
-            else logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", err.localizedDescription]);
-        }
-
         if (!copySuccess) {
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to copy app");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *r = [InstallationResult failureResult:@"فشل نسخ التطبيق" error:nil);
+                InstallationResult *r = [InstallationResult failureResult:@"فشل نسخ التطبيق" error:nil];
                 r.detailedOutput = log; completion(r);
             });
             return;
         }
         logStep(@"COPY", @"App copied successfully");
 
-        // 6. EXTRACT entitlements from original executable using system() with redirect
-        NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist");
+        // 6. EXTRACT entitlements from original executable
+        NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist"];
         BOOL hasEntitlements = NO;
         if (sourceExePath && [fm fileExistsAtPath:sourceExePath]) {
             logStep(@"ENTITLEMENTS", @"Extracting from original executable...");
-            // Use posix_spawn with stdout redirect to file
             int extractStatus = -1;
             {
                 int out_fd = open([entitlementsPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -202,21 +193,17 @@
                     hasEntitlements = YES;
                     logStep(@"ENTITLEMENTS", [NSString stringWithFormat:@"Extracted %lu entitlements", (unsigned long)entitlements.count]);
                 } else {
-                    logStep(@"ENTITLEMENTS", @"Extraction returned empty, using default");
+                    logStep(@"ENTITLEMENTS", @"Extraction returned empty");
                 }
             } else {
-                logStep(@"ENTITLEMENTS", @"Extraction failed, using default entitlements");
+                logStep(@"ENTITLEMENTS", @"Extraction failed");
             }
         }
 
-        // 7. Sign executable — Dopamine 3.0 BLANK SIGNATURE METHOD
-        // CRITICAL: iOS 15+ kills apps with Apple Team ID in entitlements
-        // Solution: ldid -S (BLANK) — most compatible for jailbreak
+        // 7. Sign executable — BLANK SIGNATURE METHOD (Dopamine 3.0)
         logStep(@"SIGN", @"Signing executable...");
         if (destExePath && [fm fileExistsAtPath:destExePath]) {
-
-            // METHOD 1: BLANK signature (ldid -S with no entitlements file)
-            // This is the standard Dopamine 3.0 approach
+            // METHOD 1: Blank signature (ldid -S with no entitlements file)
             logStep(@"SIGN", @"Attempting blank signature (ldid -S)...");
             BOOL signSuccess = NO;
             if (hasHelper) {
@@ -230,7 +217,7 @@
             if (!signSuccess) {
                 // METHOD 2: Minimal entitlements fallback
                 logStep(@"SIGN", @"Blank signature returned non-zero, trying minimal entitlements...");
-                NSString *minimalPath = [tempDir stringByAppendingPathComponent:@"minimal.plist");
+                NSString *minimalPath = [tempDir stringByAppendingPathComponent:@"minimal.plist"];
                 NSDictionary *minimal = @{
                     @"get-task-allow": @YES,
                     @"platform-application": @YES
@@ -252,7 +239,7 @@
                 logStep(@"SIGN", [NSString stringWithFormat:@"✅ Blank signature succeeded: %@", exeName]);
             }
 
-            // CRITICAL: chmod +x (must be executable)
+            // chmod +x
             if (hasHelper) {
                 [self runCommandAsRoot:self.chmodPath args:@[@"755", destExePath]];
             } else {
@@ -274,11 +261,11 @@
                                        detailedLog:log];
         }
 
-// 8. Sign ALL frameworks and dylibs recursively (without entitlements — they don\'t need them)
+        // 8. Sign frameworks and dylibs
         logStep(@"SIGN", @"Signing frameworks and dylibs...");
-        [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep);
+        [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep];
 
-        // 9. Set permissions on entire app
+        // 9. Set permissions
         logStep(@"PERM", @"Setting permissions...");
         if (hasHelper) {
             [self runCommandAsRoot:self.chmodPath args:@[@"-R", @"755", destAppPath]];
@@ -289,12 +276,10 @@
         }
         logStep(@"PERM", @"Set to root:wheel, 755");
 
-        // 10. uicache — use LOGICAL path + refresh all + sbreload
+        // 10. uicache + sbreload
         logStep(@"UICACHE", @"Refreshing UI cache...");
-        NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:appBundleName);
+        NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:appBundleName];
         NSString *physicalAppPath = [self.appsPath stringByAppendingPathComponent:appBundleName];
-
-        // Try both logical and physical paths, then refresh all
         if (hasHelper) {
             [self runCommandAsRoot:self.uicachePath args:@[@"-p", logicalAppPath]];
             [self runCommandAsRoot:self.uicachePath args:@[@"-p", physicalAppPath]];
@@ -306,7 +291,6 @@
         }
         logStep(@"UICACHE", @"Done");
 
-        // 10b. SpringBoard reload (CRITICAL for Dopamine 3.0)
         logStep(@"SPRINGBOARD", @"Reloading SpringBoard...");
         NSString *sbreloadPath = @"/var/jb/usr/bin/sbreload";
         if (![[NSFileManager defaultManager] fileExistsAtPath:sbreloadPath]) sbreloadPath = @"/usr/bin/sbreload";
@@ -315,7 +299,6 @@
             else [self runCommand:sbreloadPath args:@[]];
             logStep(@"SPRINGBOARD", @"Reloaded");
         } else {
-            // Fallback: killall SpringBoard
             NSString *killallPath = @"/var/jb/usr/bin/killall";
             if (![[NSFileManager defaultManager] fileExistsAtPath:killallPath]) killallPath = @"/usr/bin/killall";
             if (hasHelper) [self runCommandAsRoot:killallPath args:@[@"SpringBoard"]];
@@ -324,16 +307,16 @@
         }
 
         // 11. Cleanup
-        [fm removeItemAtPath:tempDir error:nil);
+        [fm removeItemAtPath:tempDir error:nil];
         logStep(@"CLEAN", @"Temp removed");
 
         // 12. Verify
-        BOOL exists = [fm fileExistsAtPath:destAppPath);
+        BOOL exists = [fm fileExistsAtPath:destAppPath];
         logStep(@"VERIFY", exists ? @"App exists ✓" : @"App NOT found ✗");
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (exists) {
-                InstallationResult *r = [InstallationResult successResult:@"تم التثبيت بنجاح");
+                InstallationResult *r = [InstallationResult successResult:@"تم التثبيت بنجاح"];
                 r.bundleID = [self bundleIDFromApp:destAppPath];
                 r.detailedOutput = log;
                 completion(r);
@@ -345,7 +328,6 @@
     });
 }
 
-// Recursively sign ALL binaries in the app bundle (dylibs/frameworks only — no entitlements needed)
 - (void)signAllBinariesAtPath:(NSString *)path hasHelper:(BOOL)hasHelper log:(void (^)(NSString *, NSString *))logStep {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *items = [fm contentsOfDirectoryAtPath:path error:nil];
@@ -355,7 +337,6 @@
         [fm fileExistsAtPath:itemPath isDirectory:&isDir];
 
         if (isDir && [item hasSuffix:@".app"]) {
-            // Sign the executable inside .app
             NSString *exeName = [self executableNameFromApp:itemPath];
             if (exeName) {
                 NSString *exePath = [itemPath stringByAppendingPathComponent:exeName];
@@ -365,7 +346,6 @@
                     logStep(@"SIGN", [NSString stringWithFormat:@"Signed: %@/%@", item, exeName]);
                 }
             }
-            // Recurse into .app
             [self signAllBinariesAtPath:itemPath hasHelper:hasHelper log:logStep];
         }
         else if (isDir && [item hasSuffix:@".framework"]) {
@@ -376,7 +356,6 @@
                 else [self runCommand:self.ldidPath args:@[@"-S", fwExe]];
                 logStep(@"SIGN", [NSString stringWithFormat:@"Signed framework: %@", fwName]);
             }
-            // Recurse into framework
             [self signAllBinariesAtPath:itemPath hasHelper:hasHelper log:logStep];
         }
         else if ([item hasSuffix:@".dylib"]) {
@@ -405,7 +384,7 @@
     for (int i = 0; i < args.count; i++) argv[i + 1] = (char *)[[args objectAtIndex:i] UTF8String];
     argv[args.count + 1] = NULL;
     pid_t pid;
-    extern char **environ;  // FIX: pass environment variables
+    extern char **environ;
     int status = posix_spawn(&pid, cmdPath, NULL, NULL, argv, environ);
     free(argv);
     if (status != 0) return NO;
@@ -435,17 +414,15 @@
         NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
         if ([info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
-            // FIX: Use LOGICAL path for uicache (not physical /var/jb path)
             NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:app];
-
             if ([self hasRootHelper]) {
                 [self runCommandAsRoot:self.rmPath args:@[@"-rf", appPath]];
                 [self runCommandAsRoot:self.uicachePath args:@[@"-p", logicalAppPath]];
-                [self runCommandAsRoot:self.uicachePath args:@[@"-a"]]; // Refresh all
+                [self runCommandAsRoot:self.uicachePath args:@[@"-a"]];
             } else {
                 [self runCommand:self.rmPath args:@[@"-rf", appPath]];
                 [self runCommand:self.uicachePath args:@[@"-p", logicalAppPath]];
-                [self runCommand:self.uicachePath args:@[@"-a"]]; // Refresh all
+                [self runCommand:self.uicachePath args:@[@"-a"]];
             }
             if (completion) completion(YES, nil);
             return;
