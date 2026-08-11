@@ -1,5 +1,5 @@
 #import "SettingsViewController.h"
-#import "CrashReporter.h"
+#import "../Core/CrashReporter.h"
 #import "CrashReporterViewController.h"
 #import "Core/JailbreakEnvironment.h"
 #import "Core/CapabilityManager.h"
