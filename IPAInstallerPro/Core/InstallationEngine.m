@@ -57,11 +57,6 @@
     NSArray *available = [self availableProviders];
     if (available.count == 0) return nil;
 
-    // PRIORITY ORDER (most reliable first):
-    // 1. Direct Install — works on Dopamine 3.0 Rootless with helper
-    // 2. appinst — reliable CLI tool if available
-    // 3. System (LSApplicationWorkspace) — requires AppSync, often fails on unsigned IPAs
-
     for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"Direct Install"]) return provider;
     }
@@ -74,7 +69,10 @@
     return available.firstObject;
 }
 
-- (void)installIPA:(NSString *)ipaPath progress:(void (^)(NSString *))progress completion:(void (^)(InstallationResult *))completion {
+- (void)installIPA:(NSString *)ipaPath
+     progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
+        completion:(void (^)(InstallationResult *result))completion {
+
     id<InstallationProvider> provider = [self bestProvider];
     if (!provider) {
         InstallationResult *result = [InstallationResult failureResult:@"لا يوجد محرك تثبيت متاح" error:nil];
@@ -85,11 +83,19 @@
     self.currentProvider = provider;
     [[Logger sharedLogger] info:[NSString stringWithFormat:@"Using provider: %@", [provider providerName]]];
 
-    if (progress) progress([NSString stringWithFormat:@"جاري التثبيت عبر %@...", [provider providerName]]);
+    if (progressBlock) progressBlock(InstallationStagePreparing, @"جاري التجهيز...", 0.1);
+    if (progressBlock) progressBlock(InstallationStageValidating, @"جاري التحقق...", 0.2);
+    if (progressBlock) progressBlock(InstallationStageInstalling, [NSString stringWithFormat:@"جاري التثبيت عبر %@...", [provider providerName]], 0.5);
 
     [provider installIPA:ipaPath completion:^(InstallationResult *result) {
         self.lastResult = result;
         self.lastLog = result.detailedOutput;
+        if (result.success) {
+            if (progressBlock) progressBlock(InstallationStageRegistering, @"جاري تسجيل التطبيق...", 0.8);
+            if (progressBlock) progressBlock(InstallationStageCompleted, @"تم التثبيت بنجاح", 1.0);
+        } else {
+            if (progressBlock) progressBlock(InstallationStageFailed, result.message, 1.0);
+        }
         if (completion) completion(result);
     }];
 }
@@ -110,7 +116,6 @@
 - (NSString *)lastInstallationLog {
     return self.lastLog;
 }
-
 
 - (NSString *)stageDescription:(InstallationStage)stage {
     switch (stage) {
