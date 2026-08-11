@@ -6,6 +6,7 @@
 #include <copyfile.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 @interface DirectInstallationProvider ()
 @property (nonatomic, strong) NSString *appsPath;
@@ -152,32 +153,50 @@
         }
         logStep(@"COPY", @"App copied successfully");
 
-        // 6. Extract entitlements from original executable and apply
+        // 6. EXTRACT entitlements from original executable using system() with redirect
         NSString *entitlementsPath = [tempDir stringByAppendingPathComponent:@"extracted_entitlements.plist"];
+        BOOL hasEntitlements = NO;
         if (sourceExePath && [fm fileExistsAtPath:sourceExePath]) {
             logStep(@"ENTITLEMENTS", @"Extracting from original executable...");
-            if ([self runCommand:self.ldidPath args:@[@"-e", sourceExePath]]) {
-                // ldid -e outputs to stdout, we need to capture it
-                // For now, just sign with -S which uses default entitlements
-                logStep(@"ENTITLEMENTS", @"Using default entitlements (ldid -S)");
+            NSString *extractCmd = [NSString stringWithFormat:@"%@ -e \"%@\" > \"%@\" 2>/dev/null", self.ldidPath, sourceExePath, entitlementsPath];
+            int extractStatus = system([extractCmd UTF8String]);
+            if (extractStatus == 0) {
+                NSDictionary *entitlements = [NSDictionary dictionaryWithContentsOfFile:entitlementsPath];
+                if (entitlements && entitlements.count > 0) {
+                    hasEntitlements = YES;
+                    logStep(@"ENTITLEMENTS", [NSString stringWithFormat:@"Extracted %lu entitlements", (unsigned long)entitlements.count]);
+                } else {
+                    logStep(@"ENTITLEMENTS", @"Extraction returned empty, using default");
+                }
+            } else {
+                logStep(@"ENTITLEMENTS", @"Extraction failed, using default entitlements");
             }
         }
 
-        // 7. Sign executable with entitlements
+        // 7. Sign executable WITH extracted entitlements (CRITICAL FIX)
         logStep(@"SIGN", @"Signing executable...");
         if (destExePath && [fm fileExistsAtPath:destExePath]) {
-            if (hasHelper) {
-                [self runCommandAsRoot:self.ldidPath args:@[@"-S", destExePath]];
+            if (hasEntitlements) {
+                if (hasHelper) {
+                    [self runCommandAsRoot:self.ldidPath args:@[@"-S", entitlementsPath, destExePath]];
+                } else {
+                    [self runCommand:self.ldidPath args:@[@"-S", entitlementsPath, destExePath]];
+                }
+                logStep(@"SIGN", [NSString stringWithFormat:@"Signed with extracted entitlements: %@", exeName]);
             } else {
-                [self runCommand:self.ldidPath args:@[@"-S", destExePath]];
+                if (hasHelper) {
+                    [self runCommandAsRoot:self.ldidPath args:@[@"-S", destExePath]];
+                } else {
+                    [self runCommand:self.ldidPath args:@[@"-S", destExePath]];
+                }
+                logStep(@"SIGN", [NSString stringWithFormat:@"Signed with default entitlements: %@", exeName]);
             }
-            // Make sure it's executable
+            // Make sure it\'s executable
             if (hasHelper) [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
             else [self runCommand:self.chmodPath args:@[@"+x", destExePath]];
-            logStep(@"SIGN", [NSString stringWithFormat:@"Signed: %@", exeName]);
         }
 
-        // 8. Sign ALL frameworks and dylibs recursively
+        // 8. Sign ALL frameworks and dylibs recursively (without entitlements — they don\'t need them)
         logStep(@"SIGN", @"Signing frameworks and dylibs...");
         [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep];
 
@@ -192,10 +211,11 @@
         }
         logStep(@"PERM", @"Set to root:wheel, 755");
 
-        // 10. uicache
+        // 10. uicache — use LOGICAL path (NOT physical /var/jb path) — CRITICAL FIX
         logStep(@"UICACHE", @"Refreshing UI cache...");
-        if (hasHelper) [self runCommandAsRoot:self.uicachePath args:@[@"-p", destAppPath]];
-        else [self runCommand:self.uicachePath args:@[@"-p", destAppPath]];
+        NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:appBundleName];
+        if (hasHelper) [self runCommandAsRoot:self.uicachePath args:@[@"-p", logicalAppPath]];
+        else [self runCommand:self.uicachePath args:@[@"-p", logicalAppPath]];
         logStep(@"UICACHE", @"Done");
 
         // 11. Cleanup
@@ -220,7 +240,7 @@
     });
 }
 
-// NEW: Recursively sign ALL binaries in the app bundle
+// Recursively sign ALL binaries in the app bundle (dylibs/frameworks only — no entitlements needed)
 - (void)signAllBinariesAtPath:(NSString *)path hasHelper:(BOOL)hasHelper log:(void (^)(NSString *, NSString *))logStep {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSArray *items = [fm contentsOfDirectoryAtPath:path error:nil];
@@ -259,11 +279,6 @@
             else [self runCommand:self.ldidPath args:@[@"-S", itemPath]];
             logStep(@"SIGN", [NSString stringWithFormat:@"Signed dylib: %@", item]);
         }
-        else if (!isDir && ![item hasSuffix:@".plist"] && ![item hasSuffix:@".png"] && ![item hasSuffix:@".jpg"] && ![item hasSuffix:@".json"] && ![item hasSuffix:@".txt"] && ![item hasSuffix:@".strings"] && ![item hasSuffix:@".nib"] && ![item hasSuffix:@".car"]) {
-            // Could be a binary - try to sign it
-            if (hasHelper) [self runCommandAsRoot:self.ldidPath args:@[@"-S", itemPath]];
-            else [self runCommand:self.ldidPath args:@[@"-S", itemPath]];
-        }
     }
 }
 
@@ -285,7 +300,8 @@
     for (int i = 0; i < args.count; i++) argv[i + 1] = (char *)[[args objectAtIndex:i] UTF8String];
     argv[args.count + 1] = NULL;
     pid_t pid;
-    int status = posix_spawn(&pid, cmdPath, NULL, NULL, argv, NULL);
+    extern char **environ;  // FIX: pass environment variables
+    int status = posix_spawn(&pid, cmdPath, NULL, NULL, argv, environ);
     free(argv);
     if (status != 0) return NO;
     int waitStatus;
@@ -314,10 +330,18 @@
         NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
         if ([info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
-            if ([self hasRootHelper]) [self runCommandAsRoot:self.rmPath args:@[@"-rf", appPath]];
-            else [self runCommand:self.rmPath args:@[@"-rf", appPath]];
-            if ([self hasRootHelper]) [self runCommandAsRoot:self.uicachePath args:@[@"-p", appPath]];
-            else [self runCommand:self.uicachePath args:@[@"-p", appPath]];
+            // FIX: Use LOGICAL path for uicache (not physical /var/jb path)
+            NSString *logicalAppPath = [@"/Applications" stringByAppendingPathComponent:app];
+
+            if ([self hasRootHelper]) {
+                [self runCommandAsRoot:self.rmPath args:@[@"-rf", appPath]];
+                [self runCommandAsRoot:self.uicachePath args:@[@"-p", logicalAppPath]];
+                [self runCommandAsRoot:self.uicachePath args:@[@"-a"]]; // Refresh all
+            } else {
+                [self runCommand:self.rmPath args:@[@"-rf", appPath]];
+                [self runCommand:self.uicachePath args:@[@"-p", logicalAppPath]];
+                [self runCommand:self.uicachePath args:@[@"-a"]]; // Refresh all
+            }
             if (completion) completion(YES, nil);
             return;
         }
