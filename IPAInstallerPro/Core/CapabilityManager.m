@@ -133,8 +133,9 @@
     @try {
         RootlessManager *rl = [RootlessManager sharedManager];
         BOOL hasLdid = [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"];
-        BOOL hasRoot = (getuid() == 0);
-        return hasLdid && hasRoot;
+        BOOL hasUICache = [rl fileExistsAtLogicalPath:@"/usr/bin/uicache"];
+        // On Dopamine 3.0, we don't need root — ldid and uicache work with setuid
+        return hasLdid && hasUICache;
     }
     @catch (NSException *exception) {
         return NO;
