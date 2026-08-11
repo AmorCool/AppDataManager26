@@ -90,14 +90,7 @@ https://github.com/aosaid3224-ops/AppDataManager/actions
 
 ### الخطوة 2: التعديل عبر GitHub API (Python)
 
-```python
-import requests, base64
 
-TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
-HEADERS = {"Authorization": f"token {TOKEN}"}
-REPO = "aosaid3224-ops/AppDataManager"
-
-def update_file(path, content, message):
     # 1. احصل على SHA الحالي
     r = requests.get(
         f"https://api.github.com/repos/{REPO}/contents/{path}?ref=main",
@@ -255,20 +248,13 @@ cell.textLabel.text = info.displayName ?: info.name ?: [info.filePath lastPathCo
 
 ---
 
-## 🔐 التوكن (PAT)
-
-التالي مطلوب للـ Token:
-- `repo` — للقراءة والكتابة في المستودع
-- `workflow` — لتشغيل GitHub Actions
-
-**لا تشارك التوكن أبداً!** استخدم GitHub Secrets في CI/CD.
 
 ---
 
 ## 📞 دعم
 
 - **GitHub Issues:** [github.com/aosaid3224-ops/AppDataManager/issues](https://github.com/aosaid3224-ops/AppDataManager/issues)
-- **Telegram:** @Zainqkvd
+- **X:** @Zainqkvd
 
 ---
 
