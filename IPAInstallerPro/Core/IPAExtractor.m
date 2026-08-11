@@ -2,6 +2,7 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #import "Logger.h"
+#import "RootlessManager.h"
 
 @implementation IPAExtractedInfo
 @end
@@ -31,7 +32,11 @@
     [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
 
     // Unzip selective
-    const char *unzipPath = "/usr/bin/unzip";
+    NSString *unzipPathStr = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPathStr]) {
+        unzipPathStr = @"/usr/bin/unzip";
+    }
+    const char *unzipPath = [unzipPathStr UTF8String];
     const char *selArgs[] = { unzipPath, "-q", "-o", "-j", [ipaPath UTF8String], "Payload/*/Info.plist", "-d", [tempDir UTF8String], NULL };
     pid_t selPid;
     int selStatus;
