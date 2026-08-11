@@ -1,5 +1,4 @@
 #import "MainViewController.h"
-#import "CrashReporterViewController.h"
 #import "IPAFileBrowserViewController.h"
 #import "IPAInstallViewController.h"
 #import "Core/IPAExtractor.h"
@@ -32,13 +31,6 @@
     [self setupToast];
     [self setupLoadingIndicator];
     [self loadIPAFiles];
-
-    // Crash Reporter button
-    UIBarButtonItem *crashBtn = [[UIBarButtonItem alloc] initWithTitle:@"📊"
-                                                                  style:UIBarButtonItemStylePlain
-                                                                 target:self
-                                                                 action:@selector(openCrashReporter:)];
-    self.navigationItem.rightBarButtonItems = @[crashBtn];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
