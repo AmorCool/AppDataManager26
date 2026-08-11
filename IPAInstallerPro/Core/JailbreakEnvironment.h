@@ -12,4 +12,5 @@
 @property (readonly, nonatomic) NSString *mobileDocumentsPath;
 @property (readonly, nonatomic) NSString *osVersion;
 @property (readonly, nonatomic) NSString *deviceModel;
+@property (readonly, nonatomic) id lsApplicationWorkspace;
 @end
