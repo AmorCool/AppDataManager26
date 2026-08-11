@@ -23,7 +23,7 @@
         NSString *resolvedApps = [[RootlessManager sharedManager] resolvePath:@"/Applications"];
         _appsPath = resolvedApps;
         _jbPrefix = [resolvedApps hasPrefix:@"/var/jb"] ? @"/var/jb" : @"";
-        _helperPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ipainstallerpro-helper"];
+        _helperPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ipainstallerpro_helper"];
     }
     return self;
 }
