@@ -21,7 +21,7 @@ static NSString * const kInstallationLogsKey = @"IPAInstallerPro_InstallationLog
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _queue = dispatch_queue_create(@"com.aosaid.installationlogger", DISPATCH_QUEUE_SERIAL);
+        _queue = dispatch_queue_create("com.aosaid.installationlogger", DISPATCH_QUEUE_SERIAL);
         [self loadLogs];
     }
     return self;
