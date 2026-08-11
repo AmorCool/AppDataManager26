@@ -10,13 +10,15 @@ typedef NS_ENUM(NSInteger, IPAValidationStatus) {
     IPAValidationStatusMissingExecutable = 6,
     IPAValidationStatusIncompatibleArchitecture = 7,
     IPAValidationStatusIncompatibleOS = 8,
-    IPAValidationStatusInvalidBundleID = 9
+    IPAValidationStatusInvalidBundleID = 9,
+    IPAValidationStatusMissingDependencies = 10
 };
 
 @interface IPAValidationResult : NSObject
 @property (nonatomic, assign) IPAValidationStatus status;
 @property (nonatomic, strong) NSString *statusMessage;
 @property (nonatomic, strong) NSArray<NSString *> *issues;
+@property (nonatomic, strong) NSArray<NSString *> *missingLibraries;
 @property (nonatomic, assign) BOOL isReadyForInstall;
 @end
 
@@ -24,4 +26,5 @@ typedef NS_ENUM(NSInteger, IPAValidationStatus) {
 + (instancetype)sharedValidator;
 - (IPAValidationResult *)validateIPAAtPath:(NSString *)ipaPath;
 - (IPAValidationResult *)validateExtractedAppAtPath:(NSString *)appPath;
+- (NSArray<NSString *> *)checkDependenciesAtAppPath:(NSString *)appPath;
 @end
