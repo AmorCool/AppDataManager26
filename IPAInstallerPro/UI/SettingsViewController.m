@@ -1,13 +1,14 @@
 #import "SettingsViewController.h"
-#import "../Core/CrashReporter.h"
-#import "CrashReporterViewController.h"
 #import "../Core/JailbreakEnvironment.h"
 #import "../Core/CapabilityManager.h"
 #import "../Core/Logger.h"
 #import "../Core/InstallationEngine.h"
+#import "../Core/CrashReporter.h"
+#import "CrashReporterViewController.h"
 
 @interface SettingsViewController ()
-@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) NSArray *sectionTitles;
+@property (nonatomic, strong) NSArray *capabilities;
 @property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
 @end
 
@@ -16,170 +17,186 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"الإعدادات";
-    self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-    [self setupNavigationBar];
+    self.view.backgroundColor = [UIColor blackColor];
+
+    // Safe initialization with defaults
+    self.sectionTitles = @[@"معلومات الأداة", @"التبعيات", @"النظام", @"التشخيص", @"المطور"];
+    self.capabilities = @[];
+
     [self setupTableView];
     [self setupLoadingIndicator];
     [self loadCapabilities];
 }
 
-- (void)setupNavigationBar {
-    self.navigationController.navigationBar.prefersLargeTitles = YES;
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
-}
-
 - (void)setupTableView {
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
-    self.tableView.delegate = self;
-    self.tableView.dataSource = self;
-    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.tableView.backgroundColor = [UIColor clearColor];
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 40, 0);
-    [self.view addSubview:self.tableView];
+    self.tableView.backgroundColor = [UIColor blackColor];
+    self.tableView.separatorColor = [UIColor darkGrayColor];
+    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"SettingsCell"];
 }
 
 - (void)setupLoadingIndicator {
     self.loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.loadingIndicator.color = [UIColor colorWithWhite:0.5 alpha:1.0];
-    self.loadingIndicator.center = CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2 - 40);
-    self.loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
-    self.loadingIndicator.hidden = YES;
+    self.loadingIndicator.color = [UIColor whiteColor];
+    self.loadingIndicator.hidesWhenStopped = YES;
+    self.loadingIndicator.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.loadingIndicator];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.loadingIndicator.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.loadingIndicator.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]
+    ]];
 }
 
 - (void)loadCapabilities {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.loadingIndicator.hidden = NO;
-        [self.loadingIndicator startAnimating];
-    });
-
-    // Scan capabilities in background, then reload table
+    [self.loadingIndicator startAnimating];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [[CapabilityManager sharedManager] scanCapabilities];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.loadingIndicator stopAnimating];
-            self.loadingIndicator.hidden = YES;
-            [self.tableView reloadData];
-        });
+        @try {
+            NSArray *caps = [[CapabilityManager sharedManager] allCapabilities];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.capabilities = caps ?: @[];
+                [self.loadingIndicator stopAnimating];
+                [self.tableView reloadData];
+            });
+        } @catch (NSException *e) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.capabilities = @[];
+                [self.loadingIndicator stopAnimating];
+                [self.tableView reloadData];
+            });
+        }
     });
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 5; }
+#pragma mark - Table View Data Source
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return self.sectionTitles.count;
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 3;
     if (section == 1) return 2;
     if (section == 2) return 2;
+    if (section == 3) return 2;
     return 1;
 }
 
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section < self.sectionTitles.count) {
+        return self.sectionTitles[section];
+    }
+    return @"";
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *cellId = @"SettingCell";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
-        cell.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.13 alpha:1.0];
-        cell.layer.cornerRadius = 12;
-        cell.layer.masksToBounds = YES;
-        cell.textLabel.textColor = [UIColor whiteColor];
-        cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-        cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightRegular];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    }
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.imageView.image = nil;
-    cell.detailTextLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"SettingsCell" forIndexPath:indexPath];
+    cell.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+    cell.textLabel.textColor = [UIColor whiteColor];
+    cell.detailTextLabel.textColor = [UIColor lightGrayColor];
+    cell.textLabel.numberOfLines = 0;
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
-    JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
-    CapabilityManager *capMgr = [CapabilityManager sharedManager];
-    NSArray *caps = [capMgr allCapabilities];
-
-    if (indexPath.section == 0) {
-        if (indexPath.row == 0) { cell.textLabel.text = @"الإصدار"; cell.detailTextLabel.text = @"1.0.0"; cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
-        else if (indexPath.row == 1) { cell.textLabel.text = @"نظام iOS"; cell.detailTextLabel.text = env.osVersion; cell.imageView.image = [[UIImage systemImageNamed:@"iphone"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
-        else { cell.textLabel.text = @"الجهاز"; cell.detailTextLabel.text = env.deviceModel; cell.imageView.image = [[UIImage systemImageNamed:@"cpu"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
-    } else if (indexPath.section == 1) {
-        if (indexPath.row < caps.count) {
-            Capability *cap = caps[indexPath.row];
-            cell.textLabel.text = cap.name;
-            cell.detailTextLabel.text = cap.statusMessage;
-            cell.detailTextLabel.textColor = cap.isAvailable ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
-            cell.imageView.image = [[UIImage systemImageNamed:cap.isAvailable ? @"checkmark.shield.fill" : @"exclamationmark.shield.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
-        } else {
-            cell.textLabel.text = @"جاري الفحص...";
-            cell.detailTextLabel.text = @"";
-        }
-    } else if (indexPath.section == 2) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"بيئة الجيلبريك";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ (%@)", env.jailbreakType, env.isRootless ? @"Rootless" : @"Rootful"];
-            cell.imageView.image = [[UIImage systemImageNamed:@"lock.shield.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
-        } else {
-            cell.textLabel.text = @"محرك التثبيت";
-            NSArray *providers = [[InstallationEngine sharedEngine] availableProviders];
-            cell.detailTextLabel.text = providers.count > 0 ? @"جاهز ✓" : @"غير جاهز";
-            cell.detailTextLabel.textColor = providers.count > 0 ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
-            cell.imageView.image = [[UIImage systemImageNamed:@"gearshape.2.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
-        }
-    } else if (indexPath.section == 3) {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"Crash Reporter";
-            NSUInteger crashCount = [[CrashReporter sharedReporter] totalCrashCount];
-            cell.detailTextLabel.text = crashCount > 0 ? [NSString stringWithFormat:@"%lu كراش", (unsigned long)crashCount] : @"لا توجد كراشات";
-            cell.detailTextLabel.textColor = crashCount > 0 ? [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0];
-            cell.imageView.image = [[UIImage systemImageNamed:@"exclamationmark.triangle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
+    @try {
+        if (indexPath.section == 0) {
+            [self configureAppInfoCell:cell atRow:indexPath.row];
+        } else if (indexPath.section == 1) {
+            [self configureCapabilitiesCell:cell atRow:indexPath.row];
+        } else if (indexPath.section == 2) {
+            [self configureSystemCell:cell atRow:indexPath.row];
+        } else if (indexPath.section == 3) {
+            [self configureDiagnosticsCell:cell atRow:indexPath.row];
+        } else if (indexPath.section == 4) {
+            cell.textLabel.text = @"عن الأداة";
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-        } else {
-            cell.textLabel.text = @"تصدير التقرير";
-            cell.detailTextLabel.text = @"";
-            cell.imageView.image = [[UIImage systemImageNamed:@"square.and.arrow.up"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
         }
-    } else {
-        cell.textLabel.text = @"عن الأداة";
-        cell.detailTextLabel.text = @"@Zainqkvd";
-        cell.imageView.image = [[UIImage systemImageNamed:@"person.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    } @catch (NSException *e) {
+        cell.textLabel.text = @"خطأ";
+        cell.detailTextLabel.text = e.reason ?: @"Unknown error";
     }
+
     return cell;
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return 54; }
-
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    UIView *header = [[UIView alloc] init];
-    header.backgroundColor = [UIColor clearColor];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 6, 300, 22)];
-    NSArray *titles = @[@"معلومات الأداة", @"التبعيات", @"النظام", @"التشخيص", @"المطور"];
-    label.text = titles[section];
-    label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-    label.textColor = [UIColor colorWithWhite:0.38 alpha:1.0];
-    [header addSubview:label];
-    return header;
+- (void)configureAppInfoCell:(UITableViewCell *)cell atRow:(NSInteger)row {
+    if (row == 0) {
+        cell.textLabel.text = @"الإصدار";
+        cell.detailTextLabel.text = @"1.0.22";
+    } else if (row == 1) {
+        cell.textLabel.text = @"المحرك المفضل";
+        NSString *provider = @"غير معروف";
+        @try {
+            provider = [[InstallationEngine sharedEngine] currentProviderName] ?: @"غير معروف";
+        } @catch (NSException *e) {}
+        cell.detailTextLabel.text = provider;
+    } else if (row == 2) {
+        cell.textLabel.text = @"حالة التثبيت";
+        NSString *status = @"غير معروف";
+        @try {
+            status = [[CapabilityManager sharedManager] canInstallIPA] ? @"جاهز ✓" : @"غير جاهز ✗";
+        } @catch (NSException *e) {}
+        cell.detailTextLabel.text = status;
+    }
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 30; }
+- (void)configureCapabilitiesCell:(UITableViewCell *)cell atRow:(NSInteger)row {
+    if (row < self.capabilities.count) {
+        Capability *cap = self.capabilities[row];
+        cell.textLabel.text = cap.name ?: @"Unknown";
+        cell.detailTextLabel.text = cap.statusMessage ?: @"";
+        cell.detailTextLabel.textColor = cap.isAvailable ? [UIColor greenColor] : [UIColor redColor];
+    } else {
+        cell.textLabel.text = @"—";
+        cell.detailTextLabel.text = @"";
+    }
+}
+
+- (void)configureSystemCell:(UITableViewCell *)cell atRow:(NSInteger)row {
+    JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
+    if (row == 0) {
+        cell.textLabel.text = @"نوع الجيلبريك";
+        cell.detailTextLabel.text = env.jailbreakType ?: @"غير معروف";
+    } else if (row == 1) {
+        cell.textLabel.text = @"إصدار iOS";
+        cell.detailTextLabel.text = env.osVersion ?: @"غير معروف";
+    }
+}
+
+- (void)configureDiagnosticsCell:(UITableViewCell *)cell atRow:(NSInteger)row {
+    if (row == 0) {
+        cell.textLabel.text = @"📊 Crash Reporter";
+        cell.detailTextLabel.text = @"عرض سجلات الكراش";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (row == 1) {
+        cell.textLabel.text = @"📤 تصدير التقرير";
+        cell.detailTextLabel.text = @"مشاركة التقرير الكامل";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+}
+
+#pragma mark - Table View Delegate
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 3) {
-        if (indexPath.row == 0) {
-            CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleGrouped];
-            [self.navigationController pushViewController:vc animated:YES];
-        } else if (indexPath.row == 1) {
-            NSString *report = [[CrashReporter sharedReporter] generateFullReport];
-            UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[report] applicationActivities:nil];
-            [self presentViewController:activity animated:YES completion:nil];
+
+    @try {
+        if (indexPath.section == 3) {
+            if (indexPath.row == 0) {
+                CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleGrouped];
+                [self.navigationController pushViewController:vc animated:YES];
+            } else if (indexPath.row == 1) {
+                NSString *report = [[CrashReporter sharedReporter] generateFullReport];
+                UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[report] applicationActivities:nil];
+                [self presentViewController:activity animated:YES completion:nil];
+            }
+        } else if (indexPath.section == 4) {
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"IPA Installer Pro"
+                                                                             message:@"أداة احترافية لتثبيت تطبيقات IPA على الأجهزة المجربكة\n\nVersion: 1.0.22\nDeveloper: @Zainqkvd"
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
         }
-    } else if (indexPath.section == 4) {
-        NSString *info = @"IPA Installer Pro v1.0.0\n\nأداة احترافية لتثبيت تطبيقات IPA\nعلى أجهزة iOS Jailbreak.\n\n• متوافقة مع Dopamine 3.0\n• دعم Rootless Jailbreak\n• دعم iOS 15 - iOS 26\n• واجهة عربية احترافية\n\nالمطور: @Zainqkvd\nالريبو: A-ZAIN Repo";
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة" message:info preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
+    } @catch (NSException *e) {
+        NSLog(@"[Settings] didSelectRow error: %@", e.reason);
     }
 }
 
