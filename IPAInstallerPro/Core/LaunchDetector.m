@@ -23,7 +23,7 @@ static NSString * const kLaunchHistoryKey = @"IPAInstallerPro_LaunchHistory_v1";
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _queue = dispatch_queue_create(@"com.aosaid.launchdetector", DISPATCH_QUEUE_SERIAL);
+        _queue = dispatch_queue_create("com.aosaid.launchdetector", DISPATCH_QUEUE_SERIAL);
         _pendingLaunches = [NSMutableDictionary dictionary];
         [self loadHistory];
     }
