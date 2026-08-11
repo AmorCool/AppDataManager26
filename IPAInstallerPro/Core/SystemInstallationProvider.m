@@ -115,7 +115,9 @@
 
     // Extract just Info.plist
     const char *cmd = [unzipPath UTF8String];
-    const char *args[] = { cmd, "-q", "-o", [ipaPath UTF8String], @"Payload/*/Info.plist", @"-d", [tempDir UTF8String], NULL };
+    const char *payloadPattern = [@"Payload/*/Info.plist" UTF8String];
+    const char *dFlag = [@"-d" UTF8String];
+    const char *args[] = { cmd, "-q", "-o", [ipaPath UTF8String], payloadPattern, dFlag, [tempDir UTF8String], NULL };
     pid_t pid; int status;
     posix_spawn(&pid, cmd, NULL, NULL, (char **)args, NULL);
     waitpid(pid, &status, 0);
