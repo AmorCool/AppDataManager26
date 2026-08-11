@@ -1,6 +1,6 @@
 Package: com.aosaid.ipainstallerpro
 Name: IPA Installer Pro
-Version: 1.0.3
+Version: 1.0.4
 Architecture: iphoneos-arm64
 Description: Professional IPA Installer for iOS Jailbreak — Self-Contained Installation Stack
 Maintainer: ZAIN <@Zainqkvd>
