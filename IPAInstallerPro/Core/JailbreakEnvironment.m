@@ -1,5 +1,7 @@
 #import "JailbreakEnvironment.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
+#import <UIKit/UIKit.h>
 #import "Logger.h"
 #import "rootless.h"
 #include <sys/utsname.h>
