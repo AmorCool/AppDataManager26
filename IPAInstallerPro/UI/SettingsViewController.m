@@ -1,4 +1,5 @@
 #import "SettingsViewController.h"
+#import "CrashReporterViewController.h"
 #import "Core/JailbreakEnvironment.h"
 #import "Core/CapabilityManager.h"
 #import "Core/Logger.h"
@@ -63,7 +64,7 @@
     });
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 5; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 3;
     if (section == 1) return 2;
@@ -120,6 +121,22 @@
             cell.detailTextLabel.textColor = providers.count > 0 ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
             cell.imageView.image = [[UIImage systemImageNamed:@"gearshape.2.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
         }
+    } else if (indexPath.section == 3) {
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Crash Reporter";
+            NSUInteger crashCount = [[CrashReporter sharedReporter] totalCrashCount];
+            cell.detailTextLabel.text = crashCount > 0 ? [NSString stringWithFormat:@"%lu كراش", (unsigned long)crashCount] : @"لا توجد كراشات";
+            cell.detailTextLabel.textColor = crashCount > 0 ? [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0];
+            cell.imageView.image = [[UIImage systemImageNamed:@"exclamationmark.triangle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        } else {
+            cell.textLabel.text = @"تصدير التقرير";
+            cell.detailTextLabel.text = @"";
+            cell.imageView.image = [[UIImage systemImageNamed:@"square.and.arrow.up"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        }
     } else {
         cell.textLabel.text = @"عن الأداة";
         cell.detailTextLabel.text = @"@Zainqkvd";
@@ -149,6 +166,15 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 3) {
+        if (indexPath.row == 0) {
+            CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleGrouped];
+            [self.navigationController pushViewController:vc animated:YES];
+        } else if (indexPath.row == 1) {
+            NSString *report = [[CrashReporter sharedReporter] generateFullReport];
+            UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[report] applicationActivities:nil];
+            [self presentViewController:activity animated:YES completion:nil];
+        }
+    } else if (indexPath.section == 4) {
         NSString *info = @"IPA Installer Pro v1.0.0\n\nأداة احترافية لتثبيت تطبيقات IPA\nعلى أجهزة iOS Jailbreak.\n\n• متوافقة مع Dopamine 3.0\n• دعم Rootless Jailbreak\n• دعم iOS 15 - iOS 26\n• واجهة عربية احترافية\n\nالمطور: @Zainqkvd\nالريبو: A-ZAIN Repo";
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة" message:info preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
