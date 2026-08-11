@@ -142,10 +142,30 @@
             self.isValid = result.isReadyForInstall;
 
             if (result.isReadyForInstall) {
-                self.validationLabel.text = @"جاهز للتثبيت ✓";
-                self.validationLabel.textColor = [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0];
-                self.installButton.enabled = YES;
-                self.installButton.alpha = 1.0;
+                // Check for missing dependencies
+                NSArray<NSString *> *missingLibs = [[IPAValidator sharedValidator] checkDependenciesAtAppPath:self.ipaInfo.extractedAppPath];
+                if (missingLibs.count > 0) {
+                    NSString *libsList = [missingLibs componentsJoinedByString:@", "];
+                    self.validationLabel.text = [NSString stringWithFormat:@"⚠️ جاهز لكن ينقص: %@", libsList];
+                    self.validationLabel.textColor = [UIColor colorWithRed:1.0 green:0.6 blue:0.0 alpha:1.0];
+                    self.installButton.enabled = YES;
+                    self.installButton.alpha = 1.0;
+                    // Show alert about missing libraries
+                    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"مكتبات مفقودة"
+                                                                                 message:[NSString stringWithFormat:@"التطبيق يحتاج هذه المكتبات:\n%@\n\nقد لا يعمل التطبيق بدونها. هل تريد الاستمرار؟", libsList]
+                                                                          preferredStyle:UIAlertControllerStyleAlert];
+                    [alert addAction:[UIAlertAction actionWithTitle:@"تثبيت" style:UIAlertActionStyleDefault handler:nil]];
+                    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+                        self.installButton.enabled = NO;
+                        self.installButton.alpha = 0.5;
+                    }]];
+                    [self presentViewController:alert animated:YES completion:nil];
+                } else {
+                    self.validationLabel.text = @"جاهز للتثبيت ✓";
+                    self.validationLabel.textColor = [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0];
+                    self.installButton.enabled = YES;
+                    self.installButton.alpha = 1.0;
+                }
             } else {
                 self.validationLabel.text = result.statusMessage;
                 self.validationLabel.textColor = [UIColor colorWithRed:0.9 green:0.4 blue:0.3 alpha:1.0];
