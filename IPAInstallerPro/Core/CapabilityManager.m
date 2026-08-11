@@ -1,14 +1,10 @@
 #import "CapabilityManager.h"
-#import <objc/runtime.h>
 #import "Logger.h"
 #import "RootlessManager.h"
 
-@implementation Capability
-@end
-
 @interface CapabilityManager ()
-@property (nonatomic, strong) NSMutableArray *capabilities;
-@property (nonatomic, assign) BOOL isScanning;
+@property (nonatomic, strong) NSMutableDictionary *capabilities;
+@property (nonatomic, assign) BOOL hasScanned;
 @end
 
 @implementation CapabilityManager
@@ -16,195 +12,145 @@
 + (instancetype)sharedManager {
     static CapabilityManager *shared = nil;
     static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ shared = [[self alloc] init]; });
+    dispatch_once(&onceToken, ^{
+        shared = [[self alloc] init];
+    });
     return shared;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _capabilities = [NSMutableArray array];
-        _isScanning = NO;
-        // Don't scan immediately — let the caller decide when
+        _capabilities = [NSMutableDictionary dictionary];
+        _hasScanned = NO;
     }
     return self;
 }
 
 - (void)scanCapabilities {
-    if (self.isScanning) return;
-    self.isScanning = YES;
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        @try {
-            NSMutableArray *newCaps = [NSMutableArray array];
-
-            // AppSync Unified (kernel tweak — required for unsigned IPA installation)
-            Capability *appSync = [[Capability alloc] init];
-            appSync.name = @"AppSync Unified";
-            appSync.identifier = @"appsync";
-            appSync.isAvailable = [self checkAppSync];
-            appSync.statusMessage = appSync.isAvailable ? @"جاهز ✓" : @"غير متوفر";
-            appSync.path = @"/var/lib/dpkg/info/ai.akemi.appsyncunified.list";
-            [newCaps addObject:appSync];
-
-            // appinst (CLI backend — auto-provisioned by postinst if missing)
-            Capability *appInst = [[Capability alloc] init];
-            appInst.name = @"appinst Backend";
-            appInst.identifier = @"appinst";
-            appInst.isAvailable = [self checkAppInst];
-            appInst.statusMessage = appInst.isAvailable ? @"جاهز ✓" : @"جاري التوفير...";
-            appInst.path = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/appinst"];
-            [newCaps addObject:appInst];
-
-            // unzip (archive extraction)
-            Capability *unzip = [[Capability alloc] init];
-            unzip.name = @"Archive Extractor";
-            unzip.identifier = @"unzip";
-            unzip.isAvailable = [self checkUnzip];
-            unzip.statusMessage = unzip.isAvailable ? @"جاهز ✓" : @"غير متوفر";
-            unzip.path = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
-            [newCaps addObject:unzip];
-
-            // System installation (LSApplicationWorkspace)
-            Capability *sysInstall = [[Capability alloc] init];
-            sysInstall.name = @"System Installation";
-            sysInstall.identifier = @"system_install";
-            sysInstall.isAvailable = (objc_getClass("LSApplicationWorkspace") != nil);
-            sysInstall.statusMessage = sysInstall.isAvailable ? @"متاح ✓" : @"محدود";
-            [newCaps addObject:sysInstall];
-
-            // Direct installation (ldid + root access)
-            Capability *directInstall = [[Capability alloc] init];
-            directInstall.name = @"Direct Installation";
-            directInstall.identifier = @"direct_install";
-            directInstall.isAvailable = [self checkDirectInstall];
-            directInstall.statusMessage = directInstall.isAvailable ? @"جاهز ✓" : @"غير متوفر";
-            directInstall.path = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ldid"];
-            [newCaps addObject:directInstall];
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self.capabilities removeAllObjects];
-                [self.capabilities addObjectsFromArray:newCaps];
-                self.isScanning = NO;
-
-                NSUInteger readyCount = [[self.capabilities filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isAvailable == YES"]] count];
-                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Capabilities scanned: %lu ready", (unsigned long)readyCount]];
-            });
-        }
-        @catch (NSException *exception) {
-            [[Logger sharedLogger] error:[NSString stringWithFormat:@"Capability scan failed: %@", exception.reason]];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                self.isScanning = NO;
-            });
-        }
-    });
-}
-
-- (BOOL)checkAppSync {
     @try {
         RootlessManager *rl = [RootlessManager sharedManager];
-        return [rl fileExistsAtLogicalPath:@"/var/lib/dpkg/info/ai.akemi.appsyncunified.list"] ||
-               [rl fileExistsAtLogicalPath:@"/var/lib/dpkg/info/net.angelxwind.appsyncunified.list"];
-    }
-    @catch (NSException *exception) {
-        return NO;
-    }
-}
+        NSFileManager *fm = [NSFileManager defaultManager];
 
-- (BOOL)checkAppInst {
-    @try {
-        return [[RootlessManager sharedManager] fileExistsAtLogicalPath:@"/usr/bin/appinst"];
-    }
-    @catch (NSException *exception) {
-        return NO;
-    }
-}
-
-- (BOOL)checkUnzip {
-    @try {
-        return [[RootlessManager sharedManager] fileExistsAtLogicalPath:@"/usr/bin/unzip"];
-    }
-    @catch (NSException *exception) {
-        return NO;
-    }
-}
-
-- (BOOL)checkDirectInstall {
-    @try {
-        RootlessManager *rl = [RootlessManager sharedManager];
-        BOOL hasLdid = [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"];
-        BOOL hasUICache = [rl fileExistsAtLogicalPath:@"/usr/bin/uicache"];
-        // On Dopamine 3.0, we don't need root — ldid and uicache work with setuid
-        return hasLdid && hasUICache;
-    }
-    @catch (NSException *exception) {
-        return NO;
-    }
-}
-
-- (NSArray *)allCapabilities {
-    return [self.capabilities copy];
-}
-
-- (Capability *)capabilityForIdentifier:(NSString *)identifier {
-    for (Capability *cap in self.capabilities) {
-        if ([cap.identifier isEqualToString:identifier]) {
-            return cap;
+        // Check AppSync Unified (multiple possible package IDs)
+        BOOL appSync = NO;
+        NSArray *appSyncPaths = @[
+            @"/var/lib/dpkg/info/ai.akemi.appsyncunified.list",
+            @"/var/lib/dpkg/info/net.angelxwind.appsyncunified.list",
+            @"/var/lib/dpkg/info/com.angelxwind.appsyncunified.list"
+        ];
+        for (NSString *path in appSyncPaths) {
+            if ([rl fileExistsAtLogicalPath:path]) {
+                appSync = YES;
+                break;
+            }
         }
+        // Also check for the dynamic library (proves it's actually loaded)
+        NSArray *appSyncDylibPaths = @[
+            @"/usr/lib/TweakInject/AppSyncUnified.dylib",
+            @"/var/jb/usr/lib/TweakInject/AppSyncUnified.dylib",
+            @"/usr/lib/Cephei/AppSyncUnified.dylib",
+            @"/var/jb/usr/lib/Cephei/AppSyncUnified.dylib"
+        ];
+        for (NSString *path in appSyncDylibPaths) {
+            if ([rl fileExistsAtLogicalPath:path]) {
+                appSync = YES;
+                break;
+            }
+        }
+        self.capabilities[@"AppSync"] = @(appSync);
+
+        // Check appinst
+        NSString *appinstPath = [rl resolvePath:@"/usr/bin/appinst"];
+        self.capabilities[@"appinst"] = @([fm fileExistsAtPath:appinstPath]);
+
+        // Check ldid
+        NSString *ldidPath = [rl resolvePath:@"/usr/bin/ldid"];
+        self.capabilities[@"ldid"] = @([fm fileExistsAtPath:ldidPath]);
+
+        // Check uicache
+        NSString *uicachePath = [rl resolvePath:@"/usr/bin/uicache"];
+        self.capabilities[@"uicache"] = @([fm fileExistsAtPath:uicachePath]);
+
+        // Check unzip
+        NSString *unzipPath = [rl resolvePath:@"/usr/bin/unzip"];
+        self.capabilities[@"unzip"] = @([fm fileExistsAtPath:unzipPath]);
+
+        // Check root helper
+        NSString *helperPath = [rl resolvePath:@"/usr/bin/ipainstallerpro-helper"];
+        self.capabilities[@"root_helper"] = @([fm fileExistsAtPath:helperPath]);
+
+        // Check LSApplicationWorkspace
+        Class LSApplicationWorkspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+        self.capabilities[@"LSApplicationWorkspace"] = @(LSApplicationWorkspaceClass != nil);
+
+        self.hasScanned = YES;
+
+        [[Logger sharedLogger] info:[NSString stringWithFormat:@"Capabilities: AppSync=%@, appinst=%@, ldid=%@, uicache=%@, unzip=%@, root_helper=%@, LSAppWS=%@",
+            self.capabilities[@"AppSync"],
+            self.capabilities[@"appinst"],
+            self.capabilities[@"ldid"],
+            self.capabilities[@"uicache"],
+            self.capabilities[@"unzip"],
+            self.capabilities[@"root_helper"],
+            self.capabilities[@"LSApplicationWorkspace"]]];
     }
-    return nil;
+    @catch (NSException *exception) {
+        [[Logger sharedLogger] error:[NSString stringWithFormat:@"Capability scan failed: %@", exception.reason]];
+    }
 }
 
 - (BOOL)isAppSyncAvailable {
-    return [self capabilityForIdentifier:@"appsync"].isAvailable;
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"AppSync"] boolValue];
 }
 
 - (BOOL)isAppInstAvailable {
-    return [self capabilityForIdentifier:@"appinst"].isAvailable;
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"appinst"] boolValue];
+}
+
+- (BOOL)isLDIDAvailable {
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"ldid"] boolValue];
+}
+
+- (BOOL)isUICacheAvailable {
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"uicache"] boolValue];
 }
 
 - (BOOL)isUnzipAvailable {
-    return [self capabilityForIdentifier:@"unzip"].isAvailable;
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"unzip"] boolValue];
 }
 
-- (BOOL)isSystemInstallationAvailable {
-    return [self capabilityForIdentifier:@"system_install"].isAvailable;
+- (BOOL)isRootHelperAvailable {
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"root_helper"] boolValue];
 }
 
-- (BOOL)isDirectInstallationAvailable {
-    return [self capabilityForIdentifier:@"direct_install"].isAvailable;
+- (BOOL)isLSApplicationWorkspaceAvailable {
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities[@"LSApplicationWorkspace"] boolValue];
 }
 
-- (NSString *)installationReadinessStatus {
-    NSMutableArray *lines = [NSMutableArray array];
-    [lines addObject:@"═══ جاهزية التثبيت ═══"];
-    [lines addObject:@""];
-
-    for (Capability *cap in self.capabilities) {
-        NSString *status = cap.isAvailable ? @"✓" : @"✗";
-        [lines addObject:[NSString stringWithFormat:@"%@ %@: %@", status, cap.name, cap.statusMessage]];
-    }
-
-    [lines addObject:@""];
-
-    if (self.canInstallIPA) {
-        [lines addObject:@"✅ يمكن تثبيت IPA"];
-    } else {
-        [lines addObject:@"❌ لا يمكن تثبيت IPA"];
-        [lines addObject:@""];
-        [lines addObject:@"للتثبيت المباشر (بدون AppSync):"];
-        [lines addObject:@"• تأكد من تثبيت ldid"];
-        [lines addObject:@"• تأكد من تشغيل الأداة بصلاحيات root"];
-        [lines addObject:@""];
-        [lines addObject:@"للتثبيت عبر appinst:"];
-        [lines addObject:@"• تأكد من تثبيت appinst"];
-    }
-
-    return [lines componentsJoinedByString:@"\n"];
+- (NSDictionary *)allCapabilities {
+    if (!self.hasScanned) [self scanCapabilities];
+    return [self.capabilities copy];
 }
 
-- (BOOL)canInstallIPA {
-    return self.isAppInstAvailable || self.isSystemInstallationAvailable || self.isDirectInstallationAvailable;
+- (NSString *)capabilityStatusString {
+    if (!self.hasScanned) [self scanCapabilities];
+    NSMutableString *status = [NSMutableString string];
+    [status appendFormat:@"AppSync: %@\n", self.isAppSyncAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"appinst: %@\n", self.isAppInstAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"ldid: %@\n", self.isLDIDAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"uicache: %@\n", self.isUICacheAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"unzip: %@\n", self.isUnzipAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"Root Helper: %@\n", self.isRootHelperAvailable ? @"✅" : @"❌"];
+    [status appendFormat:@"LSApplicationWorkspace: %@", self.isLSApplicationWorkspaceAvailable ? @"✅" : @"❌"];
+    return status;
 }
 
 @end
