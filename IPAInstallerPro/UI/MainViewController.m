@@ -181,7 +181,6 @@
 
     __block NSInteger successCount = 0;
     __block NSInteger failCount = 0;
-    __block NSInteger totalProcessed = 0;
     NSInteger totalUrls = urls.count;
 
     for (NSURL *url in urls) {
@@ -212,7 +211,6 @@
                 failCount++;
                 [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to import %@: %@", fileName, copyError.localizedDescription]];
             }
-            totalProcessed++;
         }];
 
         [url stopAccessingSecurityScopedResource];
