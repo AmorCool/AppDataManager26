@@ -41,8 +41,18 @@ IPAInstallerPro_RESOURCE_DIRS = Resources
 
 include $(THEOS_MAKE_PATH)/application.mk
 
+# Root helper for privileged operations (setuid root)
+TOOL_NAME = ipainstallerpro-helper
+ipainstallerpro-helper_FILES = helper.c
+ipainstallerpro-helper_CFLAGS = 
+ipainstallerpro-helper_CODESIGN_FLAGS = -Sentitlements.plist
+ipainstallerpro-helper_INSTALL_PATH = /usr/bin
+
+include $(THEOS_MAKE_PATH)/tool.mk
+
 # Dopamine 3.0 / Rootless specific
 after-install::
+	install.exec "chmod 4755 /var/jb/usr/bin/ipainstallerpro-helper 2>/dev/null || chmod 4755 /usr/bin/ipainstallerpro-helper 2>/dev/null || true"
 	install.exec "uicache -p /var/jb/Applications/IPAInstallerPro.app || uicache -p /Applications/IPAInstallerPro.app || true"
 
 # Force xz compression
