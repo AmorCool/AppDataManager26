@@ -13,6 +13,7 @@
 @interface InstallationEngine ()
 @property (nonatomic, strong) NSMutableArray<id<InstallationProvider>> *providers;
 @property (nonatomic, strong) id<InstallationProvider> currentProvider;
+@property (nonatomic, strong) NSMutableString *installLog;
 @end
 
 @implementation InstallationEngine
@@ -28,14 +29,12 @@
     self = [super init];
     if (self) {
         _providers = [NSMutableArray array];
+        _installLog = [NSMutableString string];
+
+        // Order: AppInst (most reliable) → System → Direct (requires root)
         [_providers addObject:[[AppInstInstallationProvider alloc] init]];
         [_providers addObject:[[SystemInstallationProvider alloc] init]];
         [_providers addObject:[[DirectInstallationProvider alloc] init]];
-
-        // Sort by priority (highest first)
-        [_providers sortUsingComparator:^NSComparisonResult(id<InstallationProvider> a, id<InstallationProvider> b) {
-            return [@(b.priority) compare:@(a.priority)];
-        }];
     }
     return self;
 }
@@ -51,13 +50,25 @@
 }
 
 - (id<InstallationProvider>)bestProvider {
-    for (id<InstallationProvider> provider in self.providers) {
-        if ([provider isAvailable]) {
-            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@", provider.providerName]];
+    NSArray *available = [self availableProviders];
+    if (available.count == 0) return nil;
+
+    // Prefer AppInst, then System, then Direct
+    for (id<InstallationProvider> provider in available) {
+        if ([provider.providerName isEqualToString:@"appinst"]) {
+            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@ (priority: %ld)", provider.providerName, (long)provider.priority]];
             return provider;
         }
     }
-    return nil;
+    for (id<InstallationProvider> provider in available) {
+        if ([provider.providerName isEqualToString:@"System"]) {
+            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@ (priority: %ld)", provider.providerName, (long)provider.priority]];
+            return provider;
+        }
+    }
+    id<InstallationProvider> first = available.firstObject;
+    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@ (priority: %ld)", first.providerName, (long)first.priority]];
+    return first;
 }
 
 - (void)installIPA:(NSString *)ipaPath
@@ -72,58 +83,96 @@
         return;
     }
 
+    [self.installLog setString:@""];
+    [self log:@"=== بدء عملية التثبيت ==="];
+    [self log:[NSString stringWithFormat:@"IPA: %@", [ipaPath lastPathComponent]]];
+
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // Stage 1: Preparing
-        [self reportProgress:InstallationStagePreparing message:@"جاري تجهيز التطبيق..." progress:0.1 block:progressBlock];
-        [NSThread sleepForTimeInterval:0.3];
+        [self reportProgress:InstallationStagePreparing message:@"جاري تجهيز التطبيق..." progress:0.05 block:progressBlock];
+        [self log:@"[1/5] تجهيز..."];
+        [NSThread sleepForTimeInterval:0.2];
 
         // Stage 2: Validating
-        [self reportProgress:InstallationStageValidating message:@"جاري التحقق من الملف..." progress:0.2 block:progressBlock];
+        [self reportProgress:InstallationStageValidating message:@"جاري التحقق من الملف..." progress:0.15 block:progressBlock];
+        [self log:@"[2/5] التحقق من IPA..."];
 
         IPAValidationResult *validation = [[IPAValidator sharedValidator] validateIPAAtPath:ipaPath];
         if (!validation.isReadyForInstall) {
+            NSString *msg = validation.issues.count > 0 ? validation.issues[0] : validation.statusMessage;
+            [self log:[NSString stringWithFormat:@"❌ التحقق فشل: %@", msg]];
             dispatch_async(dispatch_get_main_queue(), ^{
-                NSString *msg = validation.issues.count > 0 ? validation.issues[0] : validation.statusMessage;
-                completion([InstallationResult failureResult:msg error:nil]);
+                InstallationResult *result = [InstallationResult failureResult:msg error:nil];
+                result.detailedOutput = [self.installLog copy];
+                completion(result);
             });
             return;
         }
+        [self log:@"✅ التحقق نجح"];
+        [self log:[NSString stringWithFormat:@"   Bundle ID: %@", validation.bundleID ?: @"غير معروف"]];
+        [self log:[NSString stringWithFormat:@"   الإصدار: %@", validation.version ?: @"غير معروف"]];
+        [self log:[NSString stringWithFormat:@"   المعمارية: %@", [validation.architectures componentsJoinedByString:@", "] ?: @"غير معروف"]];
 
         // Stage 3: Installing
-        [self reportProgress:InstallationStageInstalling message:@"جاري التثبيت..." progress:0.4 block:progressBlock];
+        [self reportProgress:InstallationStageInstalling message:@"جاري التثبيت..." progress:0.30 block:progressBlock];
+        [self log:@"[3/5] اختيار محرك التثبيت..."];
 
         id<InstallationProvider> provider = [self bestProvider];
         if (!provider) {
+            [self log:@"❌ لا يوجد محرك تثبيت متاح"];
+            [self log:@"   المتاحون:"];
+            for (id<InstallationProvider> p in self.providers) {
+                [self log:[NSString stringWithFormat:@"   - %@: %@", p.providerName, [p isAvailable] ? @"✅" : @"❌"]];
+            }
+            [self log:@"   الحل: تأكد من تثبيت appinst أو تشغيل الأداة بصلاحيات root"];
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion([InstallationResult failureResult:@"لا يوجد محرك تثبيت متاح. يرجى تثبيت appinst." error:nil]);
+                InstallationResult *result = [InstallationResult failureResult:@"لا يوجد محرك تثبيت متاح. يرجى تثبيت appinst أو تشغيل الأداة بصلاحيات root." error:nil];
+                result.detailedOutput = [self.installLog copy];
+                completion(result);
             });
             return;
         }
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self reportProgress:InstallationStageInstalling message:[NSString stringWithFormat:@"جاري التثبيت عبر %@...", provider.providerName] progress:0.5 block:progressBlock];
-        });
+        [self log:[NSString stringWithFormat:@"✅ محرك مختار: %@", provider.providerName]];
+        [self log:[NSString stringWithFormat:@"   الوصف: %@", provider.providerDescription]];
+        [self reportProgress:InstallationStageInstalling message:[NSString stringWithFormat:@"جاري التثبيت عبر %@...", provider.providerName] progress:0.40 block:progressBlock];
 
         [provider installIPA:ipaPath completion:^(InstallationResult *result) {
             if (result.success) {
-                // Stage 4: Registering
-                [self reportProgress:InstallationStageRegistering message:@"جاري تسجيل التطبيق..." progress:0.8 block:progressBlock];
+                [self log:@"[4/5] تسجيل التطبيق..."];
+                [self reportProgress:InstallationStageRegistering message:@"جاري تسجيل التطبيق..." progress:0.80 block:progressBlock];
 
-                // Run uicache
                 [self runUICache];
+                [self log:@"✅ uicache تم التنفيذ"];
 
-                [NSThread sleepForTimeInterval:0.5];
+                [NSThread sleepForTimeInterval:0.3];
 
+                [self log:@"[5/5] اكتمال!"];
                 [self reportProgress:InstallationStageCompleted message:@"تم التثبيت بنجاح ✓" progress:1.0 block:progressBlock];
             } else {
+                [self log:[NSString stringWithFormat:@"❌ فشل التثبيت: %@", result.message]];
+                if (result.detailedOutput && result.detailedOutput.length > 0) {
+                    [self log:@"--- تفاصيل ---"];
+                    [self log:result.detailedOutput];
+                }
                 [self reportProgress:InstallationStageFailed message:result.message progress:1.0 block:progressBlock];
             }
 
+            result.detailedOutput = [self.installLog copy];
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(result);
             });
         }];
     });
+}
+
+- (void)log:(NSString *)msg {
+    if (!msg) return;
+    NSDateFormatter *df = [[NSDateFormatter alloc] init];
+    df.dateFormat = @"HH:mm:ss";
+    NSString *time = [df stringFromDate:[NSDate date]];
+    [self.installLog appendFormat:@"[%@] %@\n", time, msg];
+    [[Logger sharedLogger] info:msg];
 }
 
 - (void)reportProgress:(InstallationStage)stage message:(NSString *)message progress:(float)progress block:(void (^)(InstallationStage, NSString *, float))block {
@@ -132,7 +181,6 @@
             block(stage, message, progress);
         });
     }
-    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Install stage %ld: %@", (long)stage, message]];
 }
 
 - (void)runUICache {
@@ -154,7 +202,6 @@
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
     if (!completion) return;
 
-    // Try system provider first for uninstall
     SystemInstallationProvider *sysProvider = [[SystemInstallationProvider alloc] init];
     if ([sysProvider isAvailable]) {
         [sysProvider uninstallAppWithBundleID:bundleID completion:completion];
