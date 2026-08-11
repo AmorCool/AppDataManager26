@@ -2,50 +2,10 @@
 #import "JailbreakEnvironment.h"
 #import <UIKit/UIKit.h>
 
-@implementation CrashLog
-
-- (void)encodeWithCoder:(NSCoder *)coder {
-    [coder encodeObject:self.bundleID forKey:@"bundleID"];
-    [coder encodeObject:self.appName forKey:@"appName"];
-    [coder encodeObject:self.timestamp forKey:@"timestamp"];
-    [coder encodeObject:self.crashType forKey:@"crashType"];
-    [coder encodeObject:self.crashReason forKey:@"crashReason"];
-    [coder encodeObject:self.signingMethod forKey:@"signingMethod"];
-    [coder encodeObject:self.entitlementsUsed forKey:@"entitlementsUsed"];
-    [coder encodeObject:self.teamID forKey:@"teamID"];
-    [coder encodeObject:self.executablePath forKey:@"executablePath"];
-    [coder encodeObject:self.detailedLog forKey:@"detailedLog"];
-    [coder encodeBool:self.wasFairPlayEncrypted forKey:@"wasFairPlayEncrypted"];
-    [coder encodeObject:self.iosVersion forKey:@"iosVersion"];
-    [coder encodeObject:self.jailbreakType forKey:@"jailbreakType"];
-}
-
-- (instancetype)initWithCoder:(NSCoder *)coder {
-    self = [super init];
-    if (self) {
-        self.bundleID = [coder decodeObjectForKey:@"bundleID"];
-        self.appName = [coder decodeObjectForKey:@"appName"];
-        self.timestamp = [coder decodeObjectForKey:@"timestamp"];
-        self.crashType = [coder decodeObjectForKey:@"crashType"];
-        self.crashReason = [coder decodeObjectForKey:@"crashReason"];
-        self.signingMethod = [coder decodeObjectForKey:@"signingMethod"];
-        self.entitlementsUsed = [coder decodeObjectForKey:@"entitlementsUsed"];
-        self.teamID = [coder decodeObjectForKey:@"teamID"];
-        self.executablePath = [coder decodeObjectForKey:@"executablePath"];
-        self.detailedLog = [coder decodeObjectForKey:@"detailedLog"];
-        self.wasFairPlayEncrypted = [coder decodeBoolForKey:@"wasFairPlayEncrypted"];
-        self.iosVersion = [coder decodeObjectForKey:@"iosVersion"];
-        self.jailbreakType = [coder decodeObjectForKey:@"jailbreakType"];
-    }
-    return self;
-}
-
-@end
-
-static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
+static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs_v2";
 
 @interface CrashReporter ()
-@property (nonatomic, strong) NSMutableArray<CrashLog *> *logs;
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *logs;
 @property (nonatomic, strong) NSDateFormatter *formatter;
 @property (nonatomic, strong) dispatch_queue_t queue;
 @end
@@ -71,27 +31,13 @@ static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
 }
 
 - (void)loadLogs {
-    NSData *data = [[NSUserDefaults standardUserDefaults] objectForKey:kCrashLogsKey];
-    if (data) {
-        @try {
-            NSArray *loaded = [NSKeyedUnarchiver unarchiveObjectWithData:data];
-            _logs = loaded ? [NSMutableArray arrayWithArray:loaded] : [NSMutableArray array];
-        } @catch (NSException *e) {
-            _logs = [NSMutableArray array];
-        }
-    } else {
-        _logs = [NSMutableArray array];
-    }
+    NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:kCrashLogsKey];
+    _logs = saved ? [saved mutableCopy] : [NSMutableArray array];
 }
 
 - (void)saveLogs {
-    @try {
-        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:self.logs];
-        [[NSUserDefaults standardUserDefaults] setObject:data forKey:kCrashLogsKey];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-    } @catch (NSException *e) {
-        NSLog(@"[CrashReporter] Failed to save logs: %@", e.reason);
-    }
+    [[NSUserDefaults standardUserDefaults] setObject:[self.logs copy] forKey:kCrashLogsKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 - (void)logCrash:(NSString *)bundleID
@@ -106,44 +52,45 @@ static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
      detailedLog:(NSString *)log {
 
     dispatch_async(self.queue, ^{
-        CrashLog *crash = [[CrashLog alloc] init];
-        crash.bundleID = bundleID ?: @"unknown";
-        crash.appName = appName ?: @"Unknown App";
-        crash.timestamp = [NSDate date];
-        crash.crashType = crashType ?: @"Unknown";
-        crash.crashReason = crashReason ?: @"Unknown";
-        crash.signingMethod = signingMethod ?: @"Unknown";
-        crash.entitlementsUsed = entitlements ?: @{};
-        crash.teamID = teamID ?: @"None";
-        crash.executablePath = exePath ?: @"Unknown";
-        crash.wasFairPlayEncrypted = encrypted;
-        crash.iosVersion = [[UIDevice currentDevice] systemVersion];
-        crash.jailbreakType = [JailbreakEnvironment sharedEnvironment].jailbreakType;
-        crash.detailedLog = log ?: @"";
+        NSDictionary *crash = @{
+            @"bundleID": bundleID ?: @"unknown",
+            @"appName": appName ?: @"Unknown",
+            @"timestamp": [[NSDate date] description],
+            @"crashType": crashType ?: @"Unknown",
+            @"crashReason": crashReason ?: @"Unknown",
+            @"signingMethod": signingMethod ?: @"Unknown",
+            @"entitlements": entitlements ?: @{},
+            @"teamID": teamID ?: @"None",
+            @"executablePath": exePath ?: @"Unknown",
+            @"wasEncrypted": @(encrypted),
+            @"iosVersion": [[UIDevice currentDevice] systemVersion] ?: @"Unknown",
+            @"jailbreakType": [JailbreakEnvironment sharedEnvironment].jailbreakType ?: @"Unknown",
+            @"detailedLog": log ?: @""
+        };
 
         [self.logs addObject:crash];
 
+        // Keep only last 100
         if (self.logs.count > 100) {
             [self.logs removeObjectsInRange:NSMakeRange(0, self.logs.count - 100)];
         }
 
         [self saveLogs];
-
-        NSLog(@"[CrashReporter] Logged: %@ | %@ | %@", bundleID, crashType, crashReason);
+        NSLog(@"[CrashReporter] Logged: %@ — %@", bundleID, crashReason);
     });
 }
 
-- (NSArray<CrashLog *> *)allCrashLogs {
-    __block NSArray<CrashLog *> *result;
+- (NSArray<NSDictionary *> *)allCrashLogs {
+    __block NSArray<NSDictionary *> *result;
     dispatch_sync(self.queue, ^{ result = [self.logs copy]; });
     return result;
 }
 
-- (NSArray<CrashLog *> *)crashLogsForBundleID:(NSString *)bundleID {
+- (NSArray<NSDictionary *> *)crashLogsForBundleID:(NSString *)bundleID {
     return [[self allCrashLogs] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"bundleID == %@", bundleID]];
 }
 
-- (CrashLog *)lastCrashForBundleID:(NSString *)bundleID {
+- (NSDictionary *)lastCrashForBundleID:(NSString *)bundleID {
     NSArray *logs = [self crashLogsForBundleID:bundleID];
     return logs.lastObject;
 }
@@ -176,9 +123,9 @@ static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
     [report appendString:@"=====================================\n\n"];
     [report appendFormat:@"iOS Version: %@\n", [[UIDevice currentDevice] systemVersion]];
     [report appendFormat:@"Jailbreak: %@\n", [JailbreakEnvironment sharedEnvironment].jailbreakType];
-    [report appendFormat:@"Total Crashes: %lu\n\n", (unsigned long)self.logs.count];
+    [report appendFormat:@"Total Logs: %lu\n\n", (unsigned long)self.logs.count];
 
-    for (CrashLog *log in [self allCrashLogs]) {
+    for (NSDictionary *log in [self allCrashLogs]) {
         [report appendString:[self formatCrashLog:log]];
         [report appendString:@"\n---\n\n"];
     }
@@ -187,35 +134,35 @@ static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
 
 - (NSString *)generateReportForBundleID:(NSString *)bundleID {
     NSArray *logs = [self crashLogsForBundleID:bundleID];
-    if (logs.count == 0) return @"No crashes recorded for this app.";
+    if (logs.count == 0) return @"No logs for this app.";
 
     NSMutableString *report = [NSMutableString string];
-    [report appendFormat:@"📊 Crash Report for %@\n", bundleID];
+    [report appendFormat:@"📊 Report for %@\n", bundleID];
     [report appendString:@"=====================================\n\n"];
-    [report appendFormat:@"Total Crashes: %lu\n\n", (unsigned long)logs.count];
+    [report appendFormat:@"Total: %lu\n\n", (unsigned long)logs.count];
 
-    for (CrashLog *log in logs) {
+    for (NSDictionary *log in logs) {
         [report appendString:[self formatCrashLog:log]];
         [report appendString:@"\n---\n\n"];
     }
     return report;
 }
 
-- (NSString *)formatCrashLog:(CrashLog *)log {
+- (NSString *)formatCrashLog:(NSDictionary *)log {
     NSMutableString *s = [NSMutableString string];
-    [s appendFormat:@"📱 App: %@ (%@)\n", log.appName, log.bundleID];
-    [s appendFormat:@"🕐 Time: %@\n", [self.formatter stringFromDate:log.timestamp]];
-    [s appendFormat:@"💥 Type: %@\n", log.crashType];
-    [s appendFormat:@"📋 Reason: %@\n", log.crashReason];
-    [s appendFormat:@"🔏 Signing: %@\n", log.signingMethod];
-    [s appendFormat:@"🏷️ Team ID: %@\n", log.teamID];
-    [s appendFormat:@"📁 Executable: %@\n", log.executablePath];
-    [s appendFormat:@"🔒 FairPlay Encrypted: %@\n", log.wasFairPlayEncrypted ? @"YES" : @"NO"];
-    [s appendFormat:@"📄 Entitlements Used: %lu keys\n", (unsigned long)log.entitlementsUsed.count];
-    for (NSString *key in log.entitlementsUsed.allKeys) {
-        [s appendFormat:@"   • %@ = %@\n", key, log.entitlementsUsed[key]];
+    [s appendFormat:@"📱 %@ (%@)\n", log[@"appName"], log[@"bundleID"]];
+    [s appendFormat:@"🕐 %@\n", log[@"timestamp"]];
+    [s appendFormat:@"💥 %@\n", log[@"crashType"]];
+    [s appendFormat:@"📋 %@\n", log[@"crashReason"]];
+    [s appendFormat:@"🔏 Signing: %@\n", log[@"signingMethod"]];
+    [s appendFormat:@"🏷️ Team ID: %@\n", log[@"teamID"]];
+    [s appendFormat:@"📁 %@\n", log[@"executablePath"]];
+    [s appendFormat:@"🔒 FairPlay: %@\n", [log[@"wasEncrypted"] boolValue] ? @"YES" : @"NO"];
+    [s appendFormat:@"📄 Entitlements: %lu keys\n", (unsigned long)[log[@"entitlements"] count]];
+    for (NSString *key in [log[@"entitlements"] allKeys]) {
+        [s appendFormat:@"   • %@ = %@\n", key, log[@"entitlements"][key]];
     }
-    [s appendFormat:@"\n📝 Detailed Log:\n%@", log.detailedLog];
+    [s appendFormat:@"\n📝 Log:\n%@", log[@"detailedLog"]];
     return s;
 }
 
