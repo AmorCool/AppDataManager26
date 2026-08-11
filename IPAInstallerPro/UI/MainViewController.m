@@ -4,7 +4,7 @@
 #import "Core/IPAExtractor.h"
 #import "Core/Logger.h"
 
-@interface MainViewController ()
+@interface MainViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSMutableArray *ipaFiles;
 @property (nonatomic, strong) UILabel *emptyLabel;
