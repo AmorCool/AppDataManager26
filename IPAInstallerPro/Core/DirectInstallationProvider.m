@@ -50,7 +50,7 @@
         NSFileManager *fm = [NSFileManager defaultManager];
         NSMutableString *log = [NSMutableString string];
 
-        auto logStep = ^(NSString *step, NSString *detail) {
+        void (^logStep)(NSString *, NSString *) = ^(NSString *step, NSString *detail) {
             NSString *entry = [NSString stringWithFormat:@"[DirectInstall] %@: %@", step, detail];
             [[Logger sharedLogger] info:entry];
             [log appendFormat:@"%@\n", entry];
