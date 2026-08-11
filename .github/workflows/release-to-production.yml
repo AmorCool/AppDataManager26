@@ -1,0 +1,94 @@
+name: Release to Production Repo
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 1.0.5)'
+        required: true
+        default: '1.0.0'
+      confirm:
+        description: 'Type YES to confirm production release'
+        required: true
+        default: 'NO'
+
+jobs:
+  release:
+    if: github.event.inputs.confirm == 'YES'
+    runs-on: macos-latest
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "YES" ]; then
+            echo "❌ Release cancelled. Type YES to confirm."
+            exit 1
+          fi
+          echo "✅ Confirmed. Proceeding with production release..."
+
+      - name: Checkout AppDataManager
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout repo (production)
+        uses: actions/checkout@v4
+        with:
+          repository: aosaid3224-ops/repo
+          token: ${{ secrets.PAT }}
+          path: repo
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+
+      - name: Setup dependencies
+        run: brew install dpkg ldid
+
+      - name: Fix permissions
+        run: |
+          chmod +x source/IPAInstallerPro/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/IPAInstallerPro/layout/DEBIAN/prerm 2>/dev/null || true
+
+      - name: Build IPA Installer Pro
+        run: |
+          cd source/IPAInstallerPro
+          make clean
+          make package
+
+      - name: Copy generate-repo.py to repo
+        run: |
+          mkdir -p repo/scripts
+          cp source/scripts/generate-repo.py repo/scripts/
+
+      - name: Deploy to production repo
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub CI"
+
+          mkdir -p repo/pool/main/iphoneos-arm64
+          cp source/IPAInstallerPro/packages/*.deb repo/pool/main/iphoneos-arm64/
+
+          cd repo
+          python3 scripts/generate-repo.py . --prod
+
+          echo "Origin: A-ZAIN Repo" > Release
+          echo "Label: A-ZAIN" >> Release
+          echo "Suite: stable" >> Release
+          echo "Version: 1.0" >> Release
+          echo "Codename: ios" >> Release
+          echo "Architectures: iphoneos-arm64" >> Release
+          echo "Components: main" >> Release
+          echo "Description: A-ZAIN Repo - Jailbreak tools and utilities" >> Release
+
+          git add -A
+          git commit -m "Release IPA Installer Pro v${{ github.event.inputs.version }}" || true
+          git push origin main
+
+      - name: Success notification
+        run: |
+          echo "🎉 IPA Installer Pro v${{ github.event.inputs.version }} released to production!"
+          echo "🔗 https://aosaid3224-ops.github.io/repo/"
