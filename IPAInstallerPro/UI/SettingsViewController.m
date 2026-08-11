@@ -1,10 +1,10 @@
 #import "SettingsViewController.h"
 #import "../Core/CrashReporter.h"
 #import "CrashReporterViewController.h"
-#import "Core/JailbreakEnvironment.h"
-#import "Core/CapabilityManager.h"
-#import "Core/Logger.h"
-#import "Core/InstallationEngine.h"
+#import "../Core/JailbreakEnvironment.h"
+#import "../Core/CapabilityManager.h"
+#import "../Core/Logger.h"
+#import "../Core/InstallationEngine.h"
 
 @interface SettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
@@ -154,7 +154,7 @@
     UIView *header = [[UIView alloc] init];
     header.backgroundColor = [UIColor clearColor];
     UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(20, 6, 300, 22)];
-    NSArray *titles = @[@"معلومات الأداة", @"التبعيات", @"النظام", @"المطور"];
+    NSArray *titles = @[@"معلومات الأداة", @"التبعيات", @"النظام", @"التشخيص", @"المطور"];
     label.text = titles[section];
     label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
     label.textColor = [UIColor colorWithWhite:0.38 alpha:1.0];
