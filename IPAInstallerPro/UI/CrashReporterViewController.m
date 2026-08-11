@@ -1,15 +1,10 @@
 #import "CrashReporterViewController.h"
 #import "CrashReporter.h"
-#import "Logger.h"
-
-@interface CrashReporterCell : UITableViewCell
-@end
-@implementation CrashReporterCell
-@end
+#import <objc/runtime.h>
 
 @interface CrashReporterViewController ()
-@property (nonatomic, strong) NSArray<CrashLog *> *crashLogs;
-@property (nonatomic, strong) NSDateFormatter *formatter;
+@property (nonatomic, strong) NSArray<NSDictionary *> *crashLogs;
+@property (nonatomic, strong) UISegmentedControl *segmentControl;
 @end
 
 @implementation CrashReporterViewController
@@ -19,27 +14,19 @@
     self.title = @"📊 Crash Reporter";
     self.view.backgroundColor = [UIColor blackColor];
 
-    self.formatter = [[NSDateFormatter alloc] init];
-    [self.formatter setDateFormat:@"yyyy-MM-dd HH:mm"];
+    // Segment control: All | By App
+    self.segmentControl = [[UISegmentedControl alloc] initWithItems:@[@"الكل", @"حسب التطبيق"]];
+    self.segmentControl.selectedSegmentIndex = 0;
+    [self.segmentControl addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
+    self.navigationItem.titleView = self.segmentControl;
 
-    self.tableView.backgroundColor = [UIColor blackColor];
-    self.tableView.separatorColor = [UIColor darkGrayColor];
-    self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 120;
+    // Refresh button
+    UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(loadData)];
+    self.navigationItem.rightBarButtonItem = refresh;
 
-    // Add clear button
-    UIBarButtonItem *clearBtn = [[UIBarButtonItem alloc] initWithTitle:@"مسح"
-                                                                  style:UIBarButtonItemStylePlain
-                                                                 target:self
-                                                                 action:@selector(clearAll:)];
-    self.navigationItem.rightBarButtonItem = clearBtn;
-
-    // Add export button
-    UIBarButtonItem *exportBtn = [[UIBarButtonItem alloc] initWithTitle:@"تصدير"
-                                                                   style:UIBarButtonItemStylePlain
-                                                                  target:self
-                                                                  action:@selector(exportReport:)];
-    self.navigationItem.leftBarButtonItem = exportBtn;
+    // Clear button
+    UIBarButtonItem *clear = [[UIBarButtonItem alloc] initWithTitle:@"مسح" style:UIBarButtonItemStylePlain target:self action:@selector(clearAll)];
+    self.navigationItem.leftBarButtonItem = clear;
 
     [self loadData];
 }
@@ -47,19 +34,24 @@
 - (void)loadData {
     self.crashLogs = [[CrashReporter sharedReporter] allCrashLogs];
     [self.tableView reloadData];
-
-    if (self.crashLogs.count == 0) {
-        UILabel *emptyLabel = [[UILabel alloc] initWithFrame:self.view.bounds];
-        emptyLabel.text = @"لا توجد كراشات مسجلة\n🎉 كل شي يشتغل!";
-        emptyLabel.textColor = [UIColor grayColor];
-        emptyLabel.textAlignment = NSTextAlignmentCenter;
-        emptyLabel.numberOfLines = 0;
-        emptyLabel.font = [UIFont systemFontOfSize:18];
-        self.tableView.backgroundView = emptyLabel;
-    } else {
-        self.tableView.backgroundView = nil;
-    }
+    self.title = [NSString stringWithFormat:@"📊 Crash Reporter (%lu)", (unsigned long)self.crashLogs.count];
 }
+
+- (void)segmentChanged:(UISegmentedControl *)sender {
+    [self loadData];
+}
+
+- (void)clearAll {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"تأكيد" message:@"هل تريد مسح جميع السجلات؟" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"مسح" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [[CrashReporter sharedReporter] clearAllLogs];
+        [self loadData];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - Table View
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     return 1;
@@ -77,75 +69,59 @@
         cell.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
         cell.textLabel.textColor = [UIColor whiteColor];
         cell.detailTextLabel.textColor = [UIColor lightGrayColor];
+        cell.textLabel.numberOfLines = 0;
         cell.detailTextLabel.numberOfLines = 0;
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
 
-    CrashLog *log = self.crashLogs[indexPath.row];
-    cell.textLabel.text = [NSString stringWithFormat:@"%@ (%@)", log.appName, log.bundleID];
-
-    NSString *timeStr = [self.formatter stringFromDate:log.timestamp];
-    NSString *detail = [NSString stringWithFormat:@"🕐 %@\n💥 %@\n📋 %@\n🔏 %@", 
-                        timeStr, log.crashType, log.crashReason, log.signingMethod];
-    cell.detailTextLabel.text = detail;
+    NSDictionary *log = self.crashLogs[indexPath.row];
+    NSString *appName = log[@"appName"];
+    NSString *bundleID = log[@"bundleID"];
+    NSString *crashType = log[@"crashType"];
+    NSString *crashReason = log[@"crashReason"];
+    NSString *timestamp = log[@"timestamp"];
+    NSString *signingMethod = log[@"signingMethod"];
 
     // Color code by crash type
-    if ([log.crashType containsString:@"SIGNING"]) {
-        cell.contentView.backgroundColor = [UIColor colorWithRed:0.3 green:0.1 blue:0.1 alpha:1.0];
-    } else if ([log.crashType containsString:@"SUCCESS"]) {
-        cell.contentView.backgroundColor = [UIColor colorWithRed:0.1 green:0.3 blue:0.1 alpha:1.0];
-    } else {
-        cell.contentView.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
-    }
+    UIColor *typeColor = [UIColor whiteColor];
+    if ([crashType containsString:@"SIGNING"]) typeColor = [UIColor orangeColor];
+    else if ([crashType containsString:@"INSTALL"]) typeColor = [UIColor cyanColor];
+    else if ([crashType containsString:@"CRASH"]) typeColor = [UIColor redColor];
+
+    cell.textLabel.text = [NSString stringWithFormat:@"%@ (%@)", appName, bundleID];
+    cell.textLabel.textColor = typeColor;
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ | %@ | 🔏 %@", timestamp, crashReason, signingMethod];
 
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    CrashLog *log = self.crashLogs[indexPath.row];
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:log.appName
-                                                                     message:[self formatDetail:log]
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"نسخ التقرير"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *action) {
-        NSString *report = [[CrashReporter sharedReporter] generateReportForBundleID:log.bundleID];
+    NSDictionary *log = self.crashLogs[indexPath.row];
+    NSString *report = [[CrashReporter sharedReporter] generateReportForBundleID:log[@"bundleID"]];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:log[@"appName"] message:report preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"نسخ" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [[UIPasteboard generalPasteboard] setString:report];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"إغلاق"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إغلاق" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-- (NSString *)formatDetail:(CrashLog *)log {
-    return [NSString stringWithFormat:@"Bundle ID: %@\nType: %@\nReason: %@\nSigning: %@\nTeam ID: %@\nPath: %@\nEntitlements: %lu keys\niOS: %@\nJailbreak: %@",
-            log.bundleID, log.crashType, log.crashReason, log.signingMethod,
-            log.teamID, log.executablePath, (unsigned long)log.entitlementsUsed.count,
-            log.iosVersion, log.jailbreakType];
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    return 70;
 }
 
-- (void)clearAll:(id)sender {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"مسح الكل"
-                                                                     message:@"هل أنت متأكد من مسح كل الكراشات؟"
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"مسح"
-                                              style:UIAlertActionStyleDestructive
-                                            handler:^(UIAlertAction *action) {
-        [[CrashReporter sharedReporter] clearAllLogs];
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+    return YES;
+}
+
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (editingStyle == UITableViewCellEditingStyleDelete) {
+        NSDictionary *log = self.crashLogs[indexPath.row];
+        [[CrashReporter sharedReporter] clearLogsForBundleID:log[@"bundleID"]];
         [self loadData];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)exportReport:(id)sender {
-    NSString *report = [[CrashReporter sharedReporter] generateFullReport];
-    UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[report] applicationActivities:nil];
-    [self presentViewController:activity animated:YES completion:nil];
+    }
 }
 
 @end
