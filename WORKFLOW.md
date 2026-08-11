@@ -1,6 +1,6 @@
 # دليل المطور — AppDataManager / IPA Installer Pro
 
-> **الإصدار:** 2.0
+> **الإصدار:** 2.1
 > **التاريخ:** 2026-08-11
 > **المؤلف:** ZAIN (@Zainqkvd)
 > **البيئة:** Dopamine 3.0 (Rootless) | iOS 15.0+ | arm64/arm64e
@@ -32,7 +32,8 @@ AppDataManager/
 │   └── validate-repo.py ← التحقق من سلامة الريبو
 │
 ├── .github/workflows/
-│   └── sync-to-repo.yml ← CI/CD تلقائي
+│   ├── sync-to-repo.yml ← CI/CD تلقائي → repo-dev
+│   └── release-to-production.yml ← CI/CD يدوي → repo
 │
 ├── Makefile ← بناء الأداتين معاً
 ├── build.sh ← سكربت البناء المحلي
@@ -43,34 +44,27 @@ AppDataManager/
 
 ## 🏛️ نظام الريبو المزدوج (Repo Architecture)
 
-| الريبو | الرابط | الغرض | الجمهور |
-|--------|--------|-------|---------|
-| **الريبو الرئيسي** | `https://aosaid3224-ops.github.io/repo/` | الإطلاق العام (Production) | **جميع المستخدمين** |
-| **ريبو التطوير** | `https://aosaid3224-ops.github.io/repo-dev/` | التطوير والاختبار (Dev) | **المطور فقط** |
+| الريبو | الرابط | الغرض | الجمهور | طريقة الرفع |
+|--------|--------|-------|---------|-------------|
+| **الريبو الرئيسي** | `https://aosaid3224-ops.github.io/repo/` | الإطلاق العام (Production) | **جميع المستخدمين** | **يدوي فقط** |
+| **ريبو التطوير** | `https://aosaid3224-ops.github.io/repo-dev/` | التطوير والاختبار (Dev) | **المطور فقط** | **تلقائي** |
 
 ### ⚠️ قاعدة ذهبية
 
-> **أثناء التطوير** → ارفع إلى `repo-dev`  
-> **عند اكتمال النسخة** → ارفع إلى `repo` الرئيسي  
+> **أثناء التطوير** → ارفع إلى `repo-dev` (تلقائي)  
+> **عند اكتمال النسخة** → ارفع إلى `repo` الرئيسي (يدوي)  
 > **لا ترفع أبداً** نسخ غير مكتملة إلى الريبو الرئيسي.
 
 ### 🔧 كيفية التبديل بين الريبوين
 
-#### أثناء التطوير (repo-dev)
-```python
-# 1. بناء IPA Installer Pro
-make clean && make package -C IPAInstallerPro/
-
-# 2. رفع .deb إلى repo-dev
-# الملفات تُرفع تلقائياً إلى:
-# https://github.com/aosaid3224-ops/repo-dev
+#### أثناء التطوير (repo-dev) — تلقائي
+```
+[Commit] → [GitHub Actions: sync-to-repo.yml] → [repo-dev] → [Sileo]
 ```
 
-#### عند الإطلاق (repo)
-```python
-# 1. تأكد من أن الإصدار نهائي ومستقر
-# 2. ارفع .deb إلى repo الرئيسي
-# 3. حدث Packages و Release في repo الرئيسي
+#### عند الإطلاق (repo) — يدوي
+```
+[GitHub Actions: release-to-production.yml] → [YES] → [repo] → [Sileo]
 ```
 
 ### 📱 في Sileo
@@ -86,40 +80,68 @@ make clean && make package -C IPAInstallerPro/
 
 ---
 
-## ⚙️ مبدأ العمل (CI/CD Pipeline)
+## ⚙️ CI/CD Pipeline
 
-```
-[تعديل الكود] → [Commit] → [GitHub Actions] → [.deb] → [Repo] → [Sileo]
-```
+### 1. البناء التلقائي → repo-dev (التطوير)
 
-### 1. GitHub Actions Workflow (`sync-to-repo.yml`)
+**Workflow:** `sync-to-repo.yml`
 
 ```yaml
-name: Build & Sync to Repo
-on:
-  workflow_dispatch: ← يدوي فقط
-jobs:
-  build-and-sync:
-    runs-on: macos-latest
-    steps:
-      - Checkout
-      - Setup Theos
-      - Build AppDataManager
-      - Build IPAInstallerPro
-      - Copy .deb → repo/pool/ (للريبو الرئيسي)
-      - Copy .deb → repo-dev/pool/ (للريبو التطويري)
-      - Run generate-repo.py
-      - Push إلى repo + repo-dev
+Trigger: workflow_dispatch (يدوي من GitHub Actions)
+Target:  aosaid3224-ops/repo-dev
+Result:  IPA Installer Pro يظهر فقط في repo-dev
 ```
 
-### 2. المزامنة التلقائية
+**الخطوات:**
+1. Checkout AppDataManager + repo-dev
+2. Setup Theos + dependencies
+3. Build IPA Installer Pro
+4. Copy .deb → repo-dev/pool/
+5. Run `generate-repo.py . --dev`
+6. Push to repo-dev
 
-عندما ينجح البناء:
-1. ينسخ الـ `.deb` الجديد إلى `repo/pool/main/iphoneos-arm64/` (للإطلاق)
-2. ينسخ الـ `.deb` الجديد إلى `repo-dev/pool/main/iphoneos-arm64/` (للتطوير)
-3. يشغل `generate-repo.py` لتحديث `Packages` و `Release` في كلا الريبوين
-4. **GitHub Pages** ينشر التغييرات خلال 30-60 ثانية
-5. **Sileo** يكتشف الترقية فور **Refresh**
+**كيفية التشغيل:**
+```
+GitHub → Actions → "Build IPA Installer Pro and Sync to Dev Repo" → Run workflow
+```
+
+### 2. الإطلاق اليدوي → repo (الإنتاج)
+
+**Workflow:** `release-to-production.yml`
+
+```yaml
+Trigger: workflow_dispatch + confirmation YES
+Target:  aosaid3224-ops/repo
+Result:  IPA Installer Pro يظهر في الريبو الرئيسي
+```
+
+**الخطوات:**
+1. يطلب إدخال: `version` + `confirm: YES`
+2. Checkout AppDataManager + repo
+3. Build IPA Installer Pro
+4. Copy .deb → repo/pool/
+5. Run `generate-repo.py . --prod`
+6. Push to repo
+
+**كيفية التشغيل:**
+```
+GitHub → Actions → "Release to Production Repo" → Run workflow
+→ أدخل الإصدار (مثلاً: 1.0.5)
+→ اكتب YES في حقل التأكيد
+→ Run
+```
+
+### 3. generate-repo.py — التوليد الذكي
+
+```bash
+# للتطوير (repo-dev)
+python3 scripts/generate-repo.py . --dev
+# ينشئ Packages + Release مع بيانات "A-ZAIN Dev Repo"
+
+# للإنتاج (repo)
+python3 scripts/generate-repo.py . --prod
+# ينشئ Packages + Release مع بيانات "A-ZAIN Repo"
+```
 
 ---
 
@@ -132,7 +154,7 @@ jobs:
 https://github.com/aosaid3224-ops/AppDataManager/actions
 ```
 
-اضغط على الـ Run الفاشل → **"Build IPA Installer Pro"** → ابحث عن `error:`
+اضغط على الـ Run الفاشل → **"Build IPA Installer Pro and Sync to Dev Repo"** → ابحث عن `error:`
 
 ### الخطوة 2: التعديل عبر GitHub API (Python)
 
@@ -164,10 +186,10 @@ requests.put(
 )
 ```
 
-### الخطوة 3: تشغيل البناء
+### الخطوة 3: تشغيل البناء التلقائي (repo-dev)
 
 ```python
-# تشغيل Workflow يدوياً
+# تشغيل Workflow التلقائي (repo-dev)
 requests.post(
     f"https://api.github.com/repos/{REPO}/actions/workflows/sync-to-repo.yml/dispatches",
     headers=HEADERS,
@@ -193,7 +215,7 @@ print(run['conclusion'])  # "success" أو "failure"
 
 ## 📦 كيفية رفع إصدار جديد (Version Bump)
 
-### أثناء التطوير (repo-dev)
+### أثناء التطوير (repo-dev) — تلقائي
 
 ```python
 # 1. تعديل control
@@ -203,27 +225,23 @@ update_file(
     "Bump IPA Installer Pro dev version to 1.0.5"
 )
 
-# 2. رفع إلى repo-dev
-# يدوياً أو عبر CI/CD
-```
-
-### عند الإطلاق (repo)
-
-```python
-# 1. تأكد من الاستقرار
-# 2. تعديل control
-update_file(
-    "IPAInstallerPro/control",
-    new_control_content,
-    "Release IPA Installer Pro v1.0.5"
-)
-
-# 3. شغل Workflow للريبو الرئيسي
+# 2. شغل Workflow التلقائي (repo-dev)
 requests.post(
     f"https://api.github.com/repos/{REPO}/actions/workflows/sync-to-repo.yml/dispatches",
     headers=HEADERS,
     json={"ref": "main"}
 )
+```
+
+### عند الإطلاق (repo) — يدوي
+
+```python
+# 1. تأكد من الاستقرار والاختبار في repo-dev
+# 2. اذهب إلى GitHub Actions → "Release to Production Repo"
+# 3. اضغط "Run workflow"
+# 4. أدخل الإصدار (مثلاً: 1.0.5)
+# 5. اكتب YES في حقل التأكيد
+# 6. اضغط Run
 ```
 
 ### النتيجة في Sileo
