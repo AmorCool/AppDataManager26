@@ -1,10 +1,8 @@
 #import "DirectInstallationProvider.h"
 #import "Logger.h"
 #import "RootlessManager.h"
-#import <objc/runtime.h>
-#import <objc/message.h>
-#include <spawn.h>
-#include <sys/wait.h>
+#import <spawn.h>
+#import <sys/wait.h>
 #include <copyfile.h>
 #include <errno.h>
 #include <unistd.h>
@@ -13,6 +11,10 @@
 @property (nonatomic, strong) NSString *appsPath;
 @property (nonatomic, strong) NSString *jbPrefix;
 @property (nonatomic, strong) NSString *helperPath;
+@property (nonatomic, strong) NSString *cpPath;
+@property (nonatomic, strong) NSString *rmPath;
+@property (nonatomic, strong) NSString *chmodPath;
+@property (nonatomic, strong) NSString *chownPath;
 @end
 
 @implementation DirectInstallationProvider
@@ -24,6 +26,23 @@
         _appsPath = resolvedApps;
         _jbPrefix = [resolvedApps hasPrefix:@"/var/jb"] ? @"/var/jb" : @"";
         _helperPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/ipainstallerpro_helper"];
+
+        // Find correct binary paths for Rootless
+        NSFileManager *fm = [NSFileManager defaultManager];
+        _cpPath = @"/var/jb/bin/cp";
+        if (![fm fileExistsAtPath:_cpPath]) _cpPath = @"/usr/bin/cp";
+        if (![fm fileExistsAtPath:_cpPath]) _cpPath = @"/bin/cp";
+
+        _rmPath = @"/var/jb/bin/rm";
+        if (![fm fileExistsAtPath:_rmPath]) _rmPath = @"/usr/bin/rm";
+        if (![fm fileExistsAtPath:_rmPath]) _rmPath = @"/bin/rm";
+
+        _chmodPath = @"/var/jb/bin/chmod";
+        if (![fm fileExistsAtPath:_chmodPath]) _chmodPath = @"/usr/bin/chmod";
+        if (![fm fileExistsAtPath:_chmodPath]) _chmodPath = @"/bin/chmod";
+
+        _chownPath = @"/var/jb/usr/sbin/chown";
+        if (![fm fileExistsAtPath:_chownPath]) _chownPath = @"/usr/sbin/chown";
     }
     return self;
 }
@@ -38,8 +57,6 @@
         BOOL hasLdid = [rl fileExistsAtLogicalPath:@"/usr/bin/ldid"];
         BOOL hasUICache = [rl fileExistsAtLogicalPath:@"/usr/bin/uicache"];
         BOOL hasUnzip = [rl fileExistsAtLogicalPath:@"/usr/bin/unzip"];
-        // Direct install works if we have ldid + uicache + unzip
-        // Helper is preferred but not strictly required (fallback to copyfile)
         return hasLdid && hasUICache && hasUnzip;
     }
     @catch (NSException *exception) {
@@ -128,9 +145,9 @@
         if ([fm fileExistsAtPath:destAppPath]) {
             logStep(@"CLEAN", @"Removing existing app...");
             if (hasHelper) {
-                [self runCommandAsRoot:@"/bin/rm" args:@[@"-rf", destAppPath]];
+                [self runCommandAsRoot:self.rmPath args:@[@"-rf", destAppPath]];
             } else {
-                [self runCommand:@"/bin/rm" args:@[@"-rf", destAppPath]];
+                [self runCommand:self.rmPath args:@[@"-rf", destAppPath]];
             }
         }
 
@@ -139,19 +156,39 @@
         BOOL copySuccess = NO;
 
         if (hasHelper) {
-            // Use helper for root cp -R
-            copySuccess = [self runCommandAsRoot:@"/bin/cp" args:@[@"-R", sourceAppPath, destAppPath]];
-        } else {
-            // Fallback: try copyfile() C API
+            // Try helper first
+            copySuccess = [self runCommandAsRoot:self.cpPath args:@[@"-R", sourceAppPath, destAppPath]];
+            if (!copySuccess) {
+                // Fallback: use tar via helper
+                logStep(@"FALLBACK", @"cp failed, trying tar...");
+                NSString *tarPath = @"/var/jb/bin/tar";
+                if (![fm fileExistsAtPath:tarPath]) tarPath = @"/usr/bin/tar";
+                if ([fm fileExistsAtPath:tarPath]) {
+                    NSString *parentDir = [destAppPath stringByDeletingLastPathComponent];
+                    copySuccess = [self runCommandAsRoot:tarPath args:@[@"-cf", @"-", @"-C", [sourceAppPath stringByDeletingLastPathComponent], appBundleName, @"|", tarPath, @"-xf", @"-", @"-C", parentDir]];
+                }
+            }
+        }
+
+        // If helper failed or not available, try direct copyfile with setuid fallback
+        if (!copySuccess) {
+            logStep(@"FALLBACK", @"Trying copyfile() API...");
             if (copyfile([sourceAppPath UTF8String], [destAppPath UTF8String], NULL, COPYFILE_ALL | COPYFILE_RECURSIVE) == 0) {
                 copySuccess = YES;
+                logStep(@"COPY", @"copyfile() succeeded");
             } else {
-                // Last resort: try NSFileManager
-                NSError *copyErr = nil;
-                copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&copyErr];
-                if (!copySuccess) {
-                    logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager copy failed: %@", copyErr.localizedDescription]);
-                }
+                logStep(@"FALLBACK", [NSString stringWithFormat:@"copyfile() failed: %s", strerror(errno)]);
+            }
+        }
+
+        // Last resort: NSFileManager
+        if (!copySuccess) {
+            NSError *copyErr = nil;
+            copySuccess = [fm copyItemAtPath:sourceAppPath toPath:destAppPath error:&copyErr];
+            if (copySuccess) {
+                logStep(@"COPY", @"NSFileManager copy succeeded");
+            } else {
+                logStep(@"FALLBACK", [NSString stringWithFormat:@"NSFileManager failed: %@", copyErr.localizedDescription]);
             }
         }
 
@@ -159,7 +196,7 @@
             [fm removeItemAtPath:tempDir error:nil];
             logStep(@"ERROR", @"Failed to copy app to destination");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:@"فشل نسخ التطبيق إلى مجلد التثبيت — تأكد من تشغيل الأداة بصلاحيات root أو تثبيت Root Helper" error:nil];
+                InstallationResult *result = [InstallationResult failureResult:@"فشل نسخ التطبيق — تأكد من تشغيل الأداة بصلاحيات root أو تثبيت Root Helper" error:nil];
                 result.detailedOutput = log;
                 completion(result);
             });
@@ -187,17 +224,17 @@
         // 7. Set permissions
         logStep(@"PERM", @"Setting permissions...");
         if (hasHelper) {
-            [self runCommandAsRoot:@"/bin/chmod" args:@[@"-R", @"755", destAppPath]];
+            [self runCommandAsRoot:self.chmodPath args:@[@"-R", @"755", destAppPath]];
             if (destExePath) {
-                [self runCommandAsRoot:@"/bin/chmod" args:@[@"+x", destExePath]];
+                [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
             }
-            [self runCommandAsRoot:@"/usr/sbin/chown" args:@[@"-R", @"root:wheel", destAppPath]];
+            [self runCommandAsRoot:self.chownPath args:@[@"-R", @"root:wheel", destAppPath]];
         } else {
-            [self runCommand:@"/bin/chmod" args:@[@"-R", @"755", destAppPath]];
+            [self runCommand:self.chmodPath args:@[@"-R", @"755", destAppPath]];
             if (destExePath) {
-                [self runCommand:@"/bin/chmod" args:@[@"+x", destExePath]];
+                [self runCommand:self.chmodPath args:@[@"+x", destExePath]];
             }
-            [self runCommand:@"/usr/sbin/chown" args:@[@"-R", @"root:wheel", destAppPath]];
+            [self runCommand:self.chownPath args:@[@"-R", @"root:wheel", destAppPath]];
         }
         logStep(@"PERM", @"Ownership set to root:wheel");
 
@@ -313,9 +350,9 @@
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
         if ([info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
             if ([self hasRootHelper]) {
-                [self runCommandAsRoot:@"/bin/rm" args:@[@"-rf", appPath]];
+                [self runCommandAsRoot:self.rmPath args:@[@"-rf", appPath]];
             } else {
-                [self runCommand:@"/bin/rm" args:@[@"-rf", appPath]];
+                [self runCommand:self.rmPath args:@[@"-rf", appPath]];
             }
             NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
             if (![fm fileExistsAtPath:uicachePath]) uicachePath = @"/usr/bin/uicache";
