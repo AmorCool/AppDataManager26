@@ -4,6 +4,7 @@
 #import "Logger.h"
 #import "JailbreakEnvironment.h"
 #import "RootlessManager.h"
+#import "RootlessManager.h"
 
 @implementation IPAValidationResult
 @end
