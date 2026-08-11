@@ -3,6 +3,8 @@
 #import "JailbreakEnvironment.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <spawn.h>
+#import <sys/wait.h>
 
 @interface SystemInstallationProvider ()
 @property (nonatomic, strong) id lsApplicationWorkspace;
@@ -108,7 +110,6 @@
     });
 }
 
-// FIX: Implement uninstall via LSApplicationWorkspace
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
     if (!self.lsApplicationWorkspace) {
         if (completion) completion(NO, @"LSApplicationWorkspace غير متاح");
@@ -119,7 +120,6 @@
         NSError *error = nil;
         SEL uninstallSel = NSSelectorFromString(@"uninstallApplication:withOptions:");
 
-        // Try modern API first
         if ([self.lsApplicationWorkspace respondsToSelector:uninstallSel]) {
             typedef void (*UninstallMethod)(id, SEL, NSString *, NSDictionary *);
             UninstallMethod method = (UninstallMethod)objc_msgSend;
@@ -131,7 +131,6 @@
             return;
         }
 
-        // Fallback: try uninstallApplication:withOptions:usingBlock:
         SEL uninstallBlockSel = NSSelectorFromString(@"uninstallApplication:withOptions:usingBlock:");
         if ([self.lsApplicationWorkspace respondsToSelector:uninstallBlockSel]) {
             typedef void (*UninstallBlockMethod)(id, SEL, NSString *, NSDictionary *, id);
@@ -144,7 +143,7 @@
             return;
         }
 
-        // Last resort: remove from filesystem + uicache
+        // Filesystem fallback
         NSFileManager *fm = [NSFileManager defaultManager];
         NSArray *apps = [fm contentsOfDirectoryAtPath:self.appsPath error:nil];
         for (NSString *app in apps) {
