@@ -57,14 +57,15 @@
     NSArray *available = [self availableProviders];
     if (available.count == 0) return nil;
 
+    // FIX: Prefer System provider if available (more reliable on iOS 15+)
+    for (id<InstallationProvider> provider in available) {
+        if ([provider.providerName isEqualToString:@"System"]) return provider;
+    }
     for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"Direct Install"]) return provider;
     }
     for (id<InstallationProvider> provider in available) {
         if ([provider.providerName isEqualToString:@"appinst"]) return provider;
-    }
-    for (id<InstallationProvider> provider in available) {
-        if ([provider.providerName isEqualToString:@"System"]) return provider;
     }
     return available.firstObject;
 }
@@ -72,6 +73,13 @@
 - (void)installIPA:(NSString *)ipaPath
      progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
         completion:(void (^)(InstallationResult *result))completion {
+
+    // FIX: Check AppSync before installation (warn if missing)
+    CapabilityManager *capMgr = [CapabilityManager sharedManager];
+    [capMgr scanCapabilities];
+    if (!capMgr.canInstallIPA) {
+        [[Logger sharedLogger] warn:@"AppSync not detected — installed apps may crash on iOS 15+"];
+    }
 
     id<InstallationProvider> provider = [self bestProvider];
     if (!provider) {
