@@ -213,18 +213,30 @@
         if (destExePath && [fm fileExistsAtPath:destExePath]) {
             if (hasEntitlements) {
                 if (hasHelper) {
-                    [self runCommandAsRoot:self.ldidPath args:@[@"-S", entitlementsPath, destExePath]];
+                    NSString *sFlag = [NSString stringWithFormat:@"-S%@", entitlementsPath];
+                    [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
                 } else {
-                    [self runCommand:self.ldidPath args:@[@"-S", entitlementsPath, destExePath]];
+                    NSString *sFlag = [NSString stringWithFormat:@"-S%@", entitlementsPath];
+                    [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
                 }
                 logStep(@"SIGN", [NSString stringWithFormat:@"Signed with extracted entitlements: %@", exeName]);
             } else {
+                // Create default entitlements for jailbreak (encrypted binaries need this)
+                NSString *defaultEntitlementsPath = [tempDir stringByAppendingPathComponent:@"default_entitlements.plist"];
+                NSDictionary *defaultEntitlements = @{
+                    @"get-task-allow": @YES,
+                    @"platform-application": @YES,
+                    @"com.apple.private.security.container-required": @NO,
+                    @"com.apple.private.security.no-container": @YES
+                };
+                [defaultEntitlements writeToFile:defaultEntitlementsPath atomically:YES];
+                NSString *sFlag = [NSString stringWithFormat:@"-S%@", defaultEntitlementsPath];
                 if (hasHelper) {
-                    [self runCommandAsRoot:self.ldidPath args:@[@"-S", destExePath]];
+                    [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
                 } else {
-                    [self runCommand:self.ldidPath args:@[@"-S", destExePath]];
+                    [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
                 }
-                logStep(@"SIGN", [NSString stringWithFormat:@"Signed with default entitlements: %@", exeName]);
+                logStep(@"SIGN", [NSString stringWithFormat:@"Signed with default jailbreak entitlements: %@", exeName]);
             }
             // Make sure it\'s executable
             if (hasHelper) [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
