@@ -211,33 +211,39 @@
         // 7. Sign executable WITH extracted entitlements (CRITICAL FIX)
         logStep(@"SIGN", @"Signing executable...");
         if (destExePath && [fm fileExistsAtPath:destExePath]) {
+            // CRITICAL FIX: Create CLEAN jailbreak entitlements
+            // Extracted entitlements contain Apple's Team ID which causes crash on iOS 15+
+            NSString *cleanEntitlementsPath = [tempDir stringByAppendingPathComponent:@"clean_entitlements.plist"];
+            NSMutableDictionary *cleanEntitlements = [NSMutableDictionary dictionary];
+
+            // Start with extracted entitlements if available
             if (hasEntitlements) {
-                if (hasHelper) {
-                    NSString *sFlag = [NSString stringWithFormat:@"-S%@", entitlementsPath];
-                    [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
-                } else {
-                    NSString *sFlag = [NSString stringWithFormat:@"-S%@", entitlementsPath];
-                    [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
-                }
-                logStep(@"SIGN", [NSString stringWithFormat:@"Signed with extracted entitlements: %@", exeName]);
-            } else {
-                // Create default entitlements for jailbreak (encrypted binaries need this)
-                NSString *defaultEntitlementsPath = [tempDir stringByAppendingPathComponent:@"default_entitlements.plist"];
-                NSDictionary *defaultEntitlements = @{
-                    @"get-task-allow": @YES,
-                    @"platform-application": @YES,
-                    @"com.apple.private.security.container-required": @NO,
-                    @"com.apple.private.security.no-container": @YES
-                };
-                [defaultEntitlements writeToFile:defaultEntitlementsPath atomically:YES];
-                NSString *sFlag = [NSString stringWithFormat:@"-S%@", defaultEntitlementsPath];
-                if (hasHelper) {
-                    [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
-                } else {
-                    [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
-                }
-                logStep(@"SIGN", [NSString stringWithFormat:@"Signed with default jailbreak entitlements: %@", exeName]);
+                NSDictionary *extracted = [NSDictionary dictionaryWithContentsOfFile:entitlementsPath];
+                if (extracted) [cleanEntitlements addEntriesFromDictionary:extracted];
             }
+
+            // REMOVE Apple-specific keys that cause crash on jailbreak
+            [cleanEntitlements removeObjectForKey:@"application-identifier"];
+            [cleanEntitlements removeObjectForKey:@"com.apple.developer.team-identifier"];
+            [cleanEntitlements removeObjectForKey:@"team-identifier"];
+            [cleanEntitlements removeObjectForKey:@"keychain-access-groups"];
+            [cleanEntitlements removeObjectForKey:@"aps-environment"];
+
+            // ADD required jailbreak entitlements
+            cleanEntitlements[@"get-task-allow"] = @YES;
+            cleanEntitlements[@"platform-application"] = @YES;
+            cleanEntitlements[@"com.apple.private.security.container-required"] = @NO;
+            cleanEntitlements[@"com.apple.private.security.no-container"] = @YES;
+
+            [cleanEntitlements writeToFile:cleanEntitlementsPath atomically:YES];
+
+            NSString *sFlag = [NSString stringWithFormat:@"-S%@", cleanEntitlementsPath];
+            if (hasHelper) {
+                [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
+            } else {
+                [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
+            }
+            logStep(@"SIGN", [NSString stringWithFormat:@"Signed with clean jailbreak entitlements (%lu keys): %@", (unsigned long)cleanEntitlements.count, exeName]);
             // Make sure it\'s executable
             if (hasHelper) [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
             else [self runCommand:self.chmodPath args:@[@"+x", destExePath]];
