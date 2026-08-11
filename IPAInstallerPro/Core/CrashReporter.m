@@ -3,6 +3,43 @@
 #import <UIKit/UIKit.h>
 
 @implementation CrashLog
+
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeObject:self.bundleID forKey:@"bundleID"];
+    [coder encodeObject:self.appName forKey:@"appName"];
+    [coder encodeObject:self.timestamp forKey:@"timestamp"];
+    [coder encodeObject:self.crashType forKey:@"crashType"];
+    [coder encodeObject:self.crashReason forKey:@"crashReason"];
+    [coder encodeObject:self.signingMethod forKey:@"signingMethod"];
+    [coder encodeObject:self.entitlementsUsed forKey:@"entitlementsUsed"];
+    [coder encodeObject:self.teamID forKey:@"teamID"];
+    [coder encodeObject:self.executablePath forKey:@"executablePath"];
+    [coder encodeObject:self.detailedLog forKey:@"detailedLog"];
+    [coder encodeBool:self.wasFairPlayEncrypted forKey:@"wasFairPlayEncrypted"];
+    [coder encodeObject:self.iosVersion forKey:@"iosVersion"];
+    [coder encodeObject:self.jailbreakType forKey:@"jailbreakType"];
+}
+
+- (instancetype)initWithCoder:(NSCoder *)coder {
+    self = [super init];
+    if (self) {
+        self.bundleID = [coder decodeObjectForKey:@"bundleID"];
+        self.appName = [coder decodeObjectForKey:@"appName"];
+        self.timestamp = [coder decodeObjectForKey:@"timestamp"];
+        self.crashType = [coder decodeObjectForKey:@"crashType"];
+        self.crashReason = [coder decodeObjectForKey:@"crashReason"];
+        self.signingMethod = [coder decodeObjectForKey:@"signingMethod"];
+        self.entitlementsUsed = [coder decodeObjectForKey:@"entitlementsUsed"];
+        self.teamID = [coder decodeObjectForKey:@"teamID"];
+        self.executablePath = [coder decodeObjectForKey:@"executablePath"];
+        self.detailedLog = [coder decodeObjectForKey:@"detailedLog"];
+        self.wasFairPlayEncrypted = [coder decodeBoolForKey:@"wasFairPlayEncrypted"];
+        self.iosVersion = [coder decodeObjectForKey:@"iosVersion"];
+        self.jailbreakType = [coder decodeObjectForKey:@"jailbreakType"];
+    }
+    return self;
+}
+
 @end
 
 static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
@@ -36,16 +73,25 @@ static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
 - (void)loadLogs {
     NSData *data = [[NSUserDefaults standardUserDefaults] objectForKey:kCrashLogsKey];
     if (data) {
-        _logs = [NSKeyedUnarchiver unarchiveObjectWithData:data] ?: [NSMutableArray array];
+        @try {
+            NSArray *loaded = [NSKeyedUnarchiver unarchiveObjectWithData:data];
+            _logs = loaded ? [NSMutableArray arrayWithArray:loaded] : [NSMutableArray array];
+        } @catch (NSException *e) {
+            _logs = [NSMutableArray array];
+        }
     } else {
         _logs = [NSMutableArray array];
     }
 }
 
 - (void)saveLogs {
-    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:self.logs];
-    [[NSUserDefaults standardUserDefaults] setObject:data forKey:kCrashLogsKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+    @try {
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:self.logs];
+        [[NSUserDefaults standardUserDefaults] setObject:data forKey:kCrashLogsKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    } @catch (NSException *e) {
+        NSLog(@"[CrashReporter] Failed to save logs: %@", e.reason);
+    }
 }
 
 - (void)logCrash:(NSString *)bundleID
@@ -77,14 +123,13 @@ static NSString * const kCrashLogsKey = @"IPAInstallerPro_CrashLogs";
 
         [self.logs addObject:crash];
 
-        // Keep only last 100 crashes
         if (self.logs.count > 100) {
             [self.logs removeObjectsInRange:NSMakeRange(0, self.logs.count - 100)];
         }
 
         [self saveLogs];
 
-        NSLog(@"[CrashReporter] Crash logged for %@: %@ - %@", bundleID, crashType, crashReason);
+        NSLog(@"[CrashReporter] Logged: %@ | %@ | %@", bundleID, crashType, crashReason);
     });
 }
 
