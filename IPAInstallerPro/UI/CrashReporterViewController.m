@@ -1,5 +1,5 @@
 #import "CrashReporterViewController.h"
-#import "CrashReporter.h"
+#import "../Core/CrashReporter.h"
 #import <objc/runtime.h>
 
 @interface CrashReporterViewController ()
