@@ -32,7 +32,8 @@ IPAInstallerPro_FILES = \
  UI/InstallationProgressViewController.m \
  UI/InstalledAppsViewController.m \
  UI/AppDetailsViewController.m \
- UI/SettingsViewController.m
+ UI/SettingsViewController.m \
+ UI/CrashReporterViewController.m
 
 IPAInstallerPro_FRAMEWORKS = UIKit CoreGraphics
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
