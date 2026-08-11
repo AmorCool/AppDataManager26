@@ -6,6 +6,7 @@
 #include <copyfile.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
 
 @interface DirectInstallationProvider ()
@@ -158,8 +159,33 @@
         BOOL hasEntitlements = NO;
         if (sourceExePath && [fm fileExistsAtPath:sourceExePath]) {
             logStep(@"ENTITLEMENTS", @"Extracting from original executable...");
-            NSString *extractCmd = [NSString stringWithFormat:@"%@ -e \"%@\" > \"%@\" 2>/dev/null", self.ldidPath, sourceExePath, entitlementsPath];
-            int extractStatus = system([extractCmd UTF8String]);
+            // Use posix_spawn with stdout redirect to file
+            int extractStatus = -1;
+            {
+                int out_fd = open([entitlementsPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (out_fd >= 0) {
+                    pid_t extractPid;
+                    char *extractArgv[] = {
+                        (char *)[self.ldidPath UTF8String],
+                        (char *)"-e",
+                        (char *)[sourceExePath UTF8String],
+                        NULL
+                    };
+                    posix_spawn_file_actions_t actions;
+                    posix_spawn_file_actions_init(&actions);
+                    posix_spawn_file_actions_adddup2(&actions, out_fd, STDOUT_FILENO);
+                    posix_spawn_file_actions_addclose(&actions, out_fd);
+                    extern char **environ;
+                    int spawnStatus = posix_spawn(&extractPid, [self.ldidPath UTF8String], &actions, NULL, extractArgv, environ);
+                    posix_spawn_file_actions_destroy(&actions);
+                    close(out_fd);
+                    if (spawnStatus == 0) {
+                        int waitStatus;
+                        waitpid(extractPid, &waitStatus, 0);
+                        extractStatus = WIFEXITED(waitStatus) ? WEXITSTATUS(waitStatus) : -1;
+                    }
+                }
+            }
             if (extractStatus == 0) {
                 NSDictionary *entitlements = [NSDictionary dictionaryWithContentsOfFile:entitlementsPath];
                 if (entitlements && entitlements.count > 0) {
