@@ -1,6 +1,8 @@
 #import "SystemInstallationProvider.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #import "Logger.h"
 #import "RootlessManager.h"
 
