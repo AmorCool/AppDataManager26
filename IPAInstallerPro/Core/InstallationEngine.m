@@ -6,6 +6,7 @@
 #import "VerificationEngine.h"
 #import "RootlessManager.h"
 #import "IPAValidator.h"
+#import "IPAExtractor.h"
 #import "AppInstInstallationProvider.h"
 #import "SystemInstallationProvider.h"
 #import "DirectInstallationProvider.h"
@@ -30,8 +31,6 @@
     if (self) {
         _providers = [NSMutableArray array];
         _installLog = [NSMutableString string];
-
-        // Order: AppInst (most reliable) → System → Direct (requires root)
         [_providers addObject:[[AppInstInstallationProvider alloc] init]];
         [_providers addObject:[[SystemInstallationProvider alloc] init]];
         [_providers addObject:[[DirectInstallationProvider alloc] init]];
@@ -42,9 +41,7 @@
 - (NSArray<id<InstallationProvider>> *)availableProviders {
     NSMutableArray *available = [NSMutableArray array];
     for (id<InstallationProvider> provider in self.providers) {
-        if ([provider isAvailable]) {
-            [available addObject:provider];
-        }
+        if ([provider isAvailable]) [available addObject:provider];
     }
     return available;
 }
@@ -52,23 +49,13 @@
 - (id<InstallationProvider>)bestProvider {
     NSArray *available = [self availableProviders];
     if (available.count == 0) return nil;
-
-    // Prefer AppInst, then System, then Direct
     for (id<InstallationProvider> provider in available) {
-        if ([provider.providerName isEqualToString:@"appinst"]) {
-            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@ (priority: %ld)", provider.providerName, (long)provider.priority]];
-            return provider;
-        }
+        if ([provider.providerName isEqualToString:@"appinst"]) return provider;
     }
     for (id<InstallationProvider> provider in available) {
-        if ([provider.providerName isEqualToString:@"System"]) {
-            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@ (priority: %ld)", provider.providerName, (long)provider.priority]];
-            return provider;
-        }
+        if ([provider.providerName isEqualToString:@"System"]) return provider;
     }
-    id<InstallationProvider> first = available.firstObject;
-    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Selected provider: %@ (priority: %ld)", first.providerName, (long)first.priority]];
-    return first;
+    return available.firstObject;
 }
 
 - (void)installIPA:(NSString *)ipaPath
@@ -88,12 +75,10 @@
     [self log:[NSString stringWithFormat:@"IPA: %@", [ipaPath lastPathComponent]]];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Stage 1: Preparing
         [self reportProgress:InstallationStagePreparing message:@"جاري تجهيز التطبيق..." progress:0.05 block:progressBlock];
         [self log:@"[1/5] تجهيز..."];
         [NSThread sleepForTimeInterval:0.2];
 
-        // Stage 2: Validating
         [self reportProgress:InstallationStageValidating message:@"جاري التحقق من الملف..." progress:0.15 block:progressBlock];
         [self log:@"[2/5] التحقق من IPA..."];
 
@@ -109,11 +94,15 @@
             return;
         }
         [self log:@"✅ التحقق نجح"];
-        [self log:[NSString stringWithFormat:@"   Bundle ID: %@", validation.bundleID ?: @"غير معروف"]];
-        [self log:[NSString stringWithFormat:@"   الإصدار: %@", validation.version ?: @"غير معروف"]];
-        [self log:[NSString stringWithFormat:@"   المعمارية: %@", [validation.architectures componentsJoinedByString:@", "] ?: @"غير معروف"]];
 
-        // Stage 3: Installing
+        // Get info from IPAExtractor for bundleID/version
+        IPAExtractedInfo *info = [[IPAExtractor sharedExtractor] extractInfoFromIPA:ipaPath];
+        if (info) {
+            [self log:[NSString stringWithFormat:@"   Bundle ID: %@", info.bundleID ?: @"غير معروف"]];
+            [self log:[NSString stringWithFormat:@"   الإصدار: %@", info.version ?: @"غير معروف"]];
+            [self log:[NSString stringWithFormat:@"   الاسم: %@", info.displayName ?: info.name ?: @"غير معروف"]];
+        }
+
         [self reportProgress:InstallationStageInstalling message:@"جاري التثبيت..." progress:0.30 block:progressBlock];
         [self log:@"[3/5] اختيار محرك التثبيت..."];
 
@@ -141,12 +130,9 @@
             if (result.success) {
                 [self log:@"[4/5] تسجيل التطبيق..."];
                 [self reportProgress:InstallationStageRegistering message:@"جاري تسجيل التطبيق..." progress:0.80 block:progressBlock];
-
                 [self runUICache];
                 [self log:@"✅ uicache تم التنفيذ"];
-
                 [NSThread sleepForTimeInterval:0.3];
-
                 [self log:@"[5/5] اكتمال!"];
                 [self reportProgress:InstallationStageCompleted message:@"تم التثبيت بنجاح ✓" progress:1.0 block:progressBlock];
             } else {
@@ -186,13 +172,10 @@
 - (void)runUICache {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *uicachePath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:uicachePath]) {
-            uicachePath = @"/usr/bin/uicache";
-        }
+        if (![[NSFileManager defaultManager] fileExistsAtPath:uicachePath]) uicachePath = @"/usr/bin/uicache";
         const char *path = [uicachePath UTF8String];
         const char *args[] = { path, "-a", NULL };
-        pid_t pid;
-        int status;
+        pid_t pid; int status;
         posix_spawn(&pid, path, NULL, NULL, (char **)args, NULL);
         waitpid(pid, &status, 0);
         [[Logger sharedLogger] info:@"uicache executed"];
@@ -201,13 +184,11 @@
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
     if (!completion) return;
-
     SystemInstallationProvider *sysProvider = [[SystemInstallationProvider alloc] init];
     if ([sysProvider isAvailable]) {
         [sysProvider uninstallAppWithBundleID:bundleID completion:completion];
         return;
     }
-
     completion(NO, @"لا توجد طريقة متاحة لحذف التطبيق");
 }
 
