@@ -1,4 +1,5 @@
 #import "DirectInstallationProvider.h"
+#import "CrashReporter.h"
 #import "Logger.h"
 #import "RootlessManager.h"
 #import <spawn.h>
@@ -208,48 +209,72 @@
             }
         }
 
-        // 7. Sign executable WITH extracted entitlements (CRITICAL FIX)
+        // 7. Sign executable — Dopamine 3.0 BLANK SIGNATURE METHOD
+        // CRITICAL: iOS 15+ kills apps with Apple Team ID in entitlements
+        // Solution: ldid -S (BLANK) — most compatible for jailbreak
         logStep(@"SIGN", @"Signing executable...");
         if (destExePath && [fm fileExistsAtPath:destExePath]) {
-            // CRITICAL FIX: Create CLEAN jailbreak entitlements
-            // Extracted entitlements contain Apple's Team ID which causes crash on iOS 15+
-            NSString *cleanEntitlementsPath = [tempDir stringByAppendingPathComponent:@"clean_entitlements.plist"];
-            NSMutableDictionary *cleanEntitlements = [NSMutableDictionary dictionary];
 
-            // Start with extracted entitlements if available
-            if (hasEntitlements) {
-                NSDictionary *extracted = [NSDictionary dictionaryWithContentsOfFile:entitlementsPath];
-                if (extracted) [cleanEntitlements addEntriesFromDictionary:extracted];
-            }
-
-            // REMOVE Apple-specific keys that cause crash on jailbreak
-            [cleanEntitlements removeObjectForKey:@"application-identifier"];
-            [cleanEntitlements removeObjectForKey:@"com.apple.developer.team-identifier"];
-            [cleanEntitlements removeObjectForKey:@"team-identifier"];
-            [cleanEntitlements removeObjectForKey:@"keychain-access-groups"];
-            [cleanEntitlements removeObjectForKey:@"aps-environment"];
-
-            // ADD required jailbreak entitlements
-            cleanEntitlements[@"get-task-allow"] = @YES;
-            cleanEntitlements[@"platform-application"] = @YES;
-            cleanEntitlements[@"com.apple.private.security.container-required"] = @NO;
-            cleanEntitlements[@"com.apple.private.security.no-container"] = @YES;
-
-            [cleanEntitlements writeToFile:cleanEntitlementsPath atomically:YES];
-
-            NSString *sFlag = [NSString stringWithFormat:@"-S%@", cleanEntitlementsPath];
+            // METHOD 1: BLANK signature (ldid -S with no entitlements file)
+            // This is the standard Dopamine 3.0 approach
+            logStep(@"SIGN", @"Attempting blank signature (ldid -S)...");
+            BOOL signSuccess = NO;
             if (hasHelper) {
-                [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
+                signSuccess = [self runCommandAsRoot:self.ldidPath args:@[@"-S", destExePath]];
             } else {
-                [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
+                signSuccess = [self runCommand:self.ldidPath args:@[@"-S", destExePath]];
             }
-            logStep(@"SIGN", [NSString stringWithFormat:@"Signed with clean jailbreak entitlements (%lu keys): %@", (unsigned long)cleanEntitlements.count, exeName]);
-            // Make sure it\'s executable
-            if (hasHelper) [self runCommandAsRoot:self.chmodPath args:@[@"+x", destExePath]];
-            else [self runCommand:self.chmodPath args:@[@"+x", destExePath]];
+
+            NSString *signingMethod = @"ldid -S (blank)";
+
+            if (!signSuccess) {
+                // METHOD 2: Minimal entitlements fallback
+                logStep(@"SIGN", @"Blank signature returned non-zero, trying minimal entitlements..."];
+                NSString *minimalPath = [tempDir stringByAppendingPathComponent:@"minimal.plist"];
+                NSDictionary *minimal = @{
+                    @"get-task-allow": @YES,
+                    @"platform-application": @YES
+                };
+                [minimal writeToFile:minimalPath atomically:YES];
+                NSString *sFlag = [NSString stringWithFormat:@"-S%@", minimalPath];
+                if (hasHelper) {
+                    signSuccess = [self runCommandAsRoot:self.ldidPath args:@[sFlag, destExePath]];
+                } else {
+                    signSuccess = [self runCommand:self.ldidPath args:@[sFlag, destExePath]];
+                }
+                signingMethod = signSuccess ? @"ldid -S minimal" : @"ldid failed";
+                if (signSuccess) {
+                    logStep(@"SIGN", [NSString stringWithFormat:@"✅ Minimal entitlements succeeded: %@", exeName]);
+                } else {
+                    logStep(@"SIGN", [NSString stringWithFormat:@"⚠️ All signing methods failed for: %@", exeName]);
+                }
+            } else {
+                logStep(@"SIGN", [NSString stringWithFormat:@"✅ Blank signature succeeded: %@", exeName]);
+            }
+
+            // CRITICAL: chmod +x (must be executable)
+            if (hasHelper) {
+                [self runCommandAsRoot:self.chmodPath args:@[@"755", destExePath]];
+            } else {
+                [self runCommand:self.chmodPath args:@[@"755", destExePath]];
+            }
+            logStep(@"SIGN", [NSString stringWithFormat:@"chmod 755 applied: %@", exeName]);
+
+            // Log for crash analysis
+            NSString *installedBundleID = [self bundleIDFromApp:destAppPath];
+            [[CrashReporter sharedReporter] logCrash:installedBundleID
+                                             appName:appBundleName
+                                          crashType:@"INSTALL_SIGNING"
+                                         crashReason:signSuccess ? @"Signing completed" : @"Signing failed"
+                                       signingMethod:signingMethod
+                                      entitlements:@{}
+                                            teamID:@"Removed"
+                                    executablePath:destExePath
+                                      wasEncrypted:NO
+                                       detailedLog:log];
         }
 
-        // 8. Sign ALL frameworks and dylibs recursively (without entitlements — they don\'t need them)
+// 8. Sign ALL frameworks and dylibs recursively (without entitlements — they don\'t need them)
         logStep(@"SIGN", @"Signing frameworks and dylibs...");
         [self signAllBinariesAtPath:destAppPath hasHelper:hasHelper log:logStep];
 
