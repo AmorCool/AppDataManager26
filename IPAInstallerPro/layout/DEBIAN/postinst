@@ -4,9 +4,9 @@ set -e
 echo "=== IPA Installer Pro Post-Install ==="
 
 # Find the helper binary (Rootless or legacy)
-HELPER="/var/jb/usr/bin/ipainstallerpro-helper"
+HELPER="/var/jb/usr/bin/ipainstallerpro_helper"
 if [ ! -f "$HELPER" ]; then
-    HELPER="/usr/bin/ipainstallerpro-helper"
+    HELPER="/usr/bin/ipainstallerpro_helper"
 fi
 
 if [ -f "$HELPER" ]; then
