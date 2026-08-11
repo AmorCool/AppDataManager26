@@ -99,6 +99,8 @@
         result[@"termination_reason"] = termination[@"reason"] ?: @"Unavailable";
         result[@"termination_namespace"] = termination[@"namespace"] ?: @"Unavailable";
         result[@"termination_code"] = termination[@"code"] ?: @"Unavailable";
+        result[@"termination_indicator"] = termination[@"indicator"] ?: @"Unavailable";
+        result[@"termination_details"] = termination[@"details"] ?: @"Unavailable";
     }
     if (json[@"jetsam"]) {
         result[@"jetsam_event"] = @YES;
@@ -150,13 +152,23 @@
     NSString *excType = result[@"exception_type"];
     NSString *termReason = result[@"termination_reason"];
     NSString *termNS = result[@"termination_namespace"];
+    NSString *termIndicator = result[@"termination_indicator"];
     NSString *eventType = @"UNKNOWN_EXIT";
-    if ([result[@"jetsam_event"] boolValue]) {
+
+    // DYLD errors = Launch Failure (missing libraries, bad Mach-O, etc.)
+    if (termNS && [termNS isEqualToString:@"DYLD"]) {
+        eventType = @"LAUNCH_FAILURE";
+    } else if ([result[@"jetsam_event"] boolValue]) {
         eventType = @"JETSAM";
     } else if (excType && ![excType isEqualToString:@"Unavailable"]) {
         if ([excType containsString:@"EXC_BAD_ACCESS"]) eventType = @"SIGNAL";
         else if ([excType containsString:@"EXC_CRASH"]) {
-            eventType = [termReason containsString:@"watchdog"] ? @"WATCHDOG" : @"CRASH";
+            // Check if DYLD related even if namespace isn't DYLD
+            if (termIndicator && [termIndicator containsString:@"Library"]) {
+                eventType = @"LAUNCH_FAILURE";
+            } else {
+                eventType = [termReason containsString:@"watchdog"] ? @"WATCHDOG" : @"CRASH";
+            }
         } else if ([excType containsString:@"EXC_BREAKPOINT"] || [excType containsString:@"EXC_GUARD"]) {
             eventType = @"CRASH";
         } else {
@@ -167,6 +179,7 @@
         else if ([termReason containsString:@"watchdog"]) eventType = @"WATCHDOG";
         else if ([termNS containsString:@"SPRINGBOARD"]) eventType = @"FORCED_TERMINATION";
         else if ([termNS containsString:@"JETSAM"]) eventType = @"JETSAM";
+        else if ([termReason containsString:@"Library not loaded"]) eventType = @"LAUNCH_FAILURE";
         else eventType = @"CRASH";
     }
     result[@"event_type"] = eventType;
@@ -175,6 +188,11 @@
     else if ([eventType isEqualToString:@"SIGNAL"]) result[@"event_description"] = @"Signal-based crash";
     else if ([eventType isEqualToString:@"EXCEPTION"]) result[@"event_description"] = @"Objective-C/Swift exception";
     else if ([eventType isEqualToString:@"FORCED_TERMINATION"]) result[@"event_description"] = @"Forced termination";
+    else if ([eventType isEqualToString:@"LAUNCH_FAILURE"]) {
+        NSString *details = @"";
+        if (termIndicator) details = [NSString stringWithFormat:@" (%@)", termIndicator];
+        result[@"event_description"] = [NSString stringWithFormat:@"Launch failure%@: %@", details, termReason ?: @"Unknown"];
+    }
     else if ([eventType isEqualToString:@"CRASH"]) result[@"event_description"] = @"Application crash";
     else result[@"event_description"] = @"Unknown termination";
 }
