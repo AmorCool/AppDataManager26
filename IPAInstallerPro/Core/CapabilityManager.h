@@ -12,13 +12,17 @@
 @interface CapabilityManager : NSObject
 + (instancetype)sharedManager;
 - (void)scanCapabilities;
-- (NSArray<Capability *> *)allCapabilities;
+- (NSArray *)allCapabilities;
 - (Capability *)capabilityForIdentifier:(NSString *)identifier;
 - (BOOL)isAppSyncAvailable;
 - (BOOL)isAppInstAvailable;
 - (BOOL)isUnzipAvailable;
+- (BOOL)isLDIDAvailable;
+- (BOOL)isUICacheAvailable;
+- (BOOL)isRootHelperAvailable;
 - (BOOL)isSystemInstallationAvailable;
 - (BOOL)isDirectInstallationAvailable;
 - (NSString *)installationReadinessStatus;
+- (NSString *)capabilityStatusString;
 - (BOOL)canInstallIPA;
 @end
