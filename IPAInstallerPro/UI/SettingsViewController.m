@@ -6,6 +6,7 @@
 
 @interface SettingsViewController ()
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
 @end
 
 @implementation SettingsViewController
@@ -16,6 +17,8 @@
     self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
     [self setupNavigationBar];
     [self setupTableView];
+    [self setupLoadingIndicator];
+    [self loadCapabilities];
 }
 
 - (void)setupNavigationBar {
@@ -32,6 +35,32 @@
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 40, 0);
     [self.view addSubview:self.tableView];
+}
+
+- (void)setupLoadingIndicator {
+    self.loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    self.loadingIndicator.color = [UIColor colorWithWhite:0.5 alpha:1.0];
+    self.loadingIndicator.center = CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2 - 40);
+    self.loadingIndicator.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+    self.loadingIndicator.hidden = YES;
+    [self.view addSubview:self.loadingIndicator];
+}
+
+- (void)loadCapabilities {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.loadingIndicator.hidden = NO;
+        [self.loadingIndicator startAnimating];
+    });
+
+    // Scan capabilities in background, then reload table
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [[CapabilityManager sharedManager] scanCapabilities];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.loadingIndicator stopAnimating];
+            self.loadingIndicator.hidden = YES;
+            [self.tableView reloadData];
+        });
+    });
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
@@ -62,18 +91,23 @@
 
     JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
     CapabilityManager *capMgr = [CapabilityManager sharedManager];
+    NSArray *caps = [capMgr allCapabilities];
 
     if (indexPath.section == 0) {
         if (indexPath.row == 0) { cell.textLabel.text = @"الإصدار"; cell.detailTextLabel.text = @"1.0.0"; cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
         else if (indexPath.row == 1) { cell.textLabel.text = @"نظام iOS"; cell.detailTextLabel.text = env.osVersion; cell.imageView.image = [[UIImage systemImageNamed:@"iphone"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
         else { cell.textLabel.text = @"الجهاز"; cell.detailTextLabel.text = env.deviceModel; cell.imageView.image = [[UIImage systemImageNamed:@"cpu"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]]; }
     } else if (indexPath.section == 1) {
-        NSArray *caps = [capMgr allCapabilities];
-        Capability *cap = caps[indexPath.row];
-        cell.textLabel.text = cap.name;
-        cell.detailTextLabel.text = cap.statusMessage;
-        cell.detailTextLabel.textColor = cap.isAvailable ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
-        cell.imageView.image = [[UIImage systemImageNamed:cap.isAvailable ? @"checkmark.shield.fill" : @"exclamationmark.shield.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
+        if (indexPath.row < caps.count) {
+            Capability *cap = caps[indexPath.row];
+            cell.textLabel.text = cap.name;
+            cell.detailTextLabel.text = cap.statusMessage;
+            cell.detailTextLabel.textColor = cap.isAvailable ? [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+            cell.imageView.image = [[UIImage systemImageNamed:cap.isAvailable ? @"checkmark.shield.fill" : @"exclamationmark.shield.fill"] imageWithTintColor:[UIColor colorWithWhite:0.5 alpha:1.0]];
+        } else {
+            cell.textLabel.text = @"جاري الفحص...";
+            cell.detailTextLabel.text = @"";
+        }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"بيئة الجيلبريك";
