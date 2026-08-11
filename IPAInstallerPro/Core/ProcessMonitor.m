@@ -1,7 +1,29 @@
 #import "ProcessMonitor.h"
 #import "Logger.h"
 #import <sys/sysctl.h>
-#import <libproc.h>
+
+// Forward declarations for libproc functions (not available in public SDK)
+extern int proc_pidinfo(int pid, int flavor, uint64_t arg, void *buffer, int buffersize) __attribute__((weak_import));
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize) __attribute__((weak_import));
+
+#define PROC_PIDT_SHORTBSDINFO 13
+#define PROC_PIDPATHINFO_MAXSIZE (4 * 1024)
+
+struct proc_bsdshortinfo {
+    uint32_t pbsi_pid;
+    uint32_t pbsi_ppid;
+    uint32_t pbsi_pgid;
+    uint32_t pbsi_status;
+    uint32_t pbsi_comm[16];
+    uint32_t pbsi_flags;
+    uint32_t pbsi_uid;
+    uint32_t pbsi_gid;
+    uint32_t pbsi_ruid;
+    uint32_t pbsi_rgid;
+    uint32_t pbsi_svuid;
+    uint32_t pbsi_svgid;
+    uint32_t pbsi_rfu;
+};
 
 @interface ProcessMonitor ()
 @property (nonatomic, strong) NSTimer *monitorTimer;
@@ -88,9 +110,10 @@
 }
 
 - (NSDictionary *)processInfoForPID:(int)pid {
+    if (!proc_pidinfo) return nil;
     struct proc_bsdshortinfo info;
     if (proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, sizeof(info)) <= 0) return nil;
-    NSMutableDictionary *dict = [@{ @"pid": @(pid), @"name": [NSString stringWithUTF8String:info.pbsi_comm] ?: @"unknown", @"ppid": @(info.pbsi_ppid), @"uid": @(info.pbsi_uid) } mutableCopy];
+    NSMutableDictionary *dict = [@{ @"pid": @(pid), @"name": [NSString stringWithUTF8String:(const char *)info.pbsi_comm] ?: @"unknown", @"ppid": @(info.pbsi_ppid), @"uid": @(info.pbsi_uid) } mutableCopy];
     NSString *bundleID = [self bundleIDForPID:pid];
     if (bundleID) dict[@"bundleID"] = bundleID;
     NSString *exePath = [self executablePathForPID:pid];
@@ -99,6 +122,13 @@
 }
 
 - (BOOL)isProcessRunning:(int)pid {
+    if (!proc_pidinfo) {
+        // Fallback: check via sysctl
+        int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+        struct kinfo_proc info;
+        size_t size = sizeof(info);
+        return sysctl(mib, 4, &info, &size, NULL, 0) == 0;
+    }
     struct proc_bsdshortinfo info;
     return proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, sizeof(info)) > 0;
 }
@@ -113,6 +143,7 @@
 }
 
 - (NSString *)bundleIDForPID:(int)pid {
+    if (!proc_pidpath) return nil;
     char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
     if (proc_pidpath(pid, pathbuf, sizeof(pathbuf)) <= 0) return nil;
     NSString *exePath = [NSString stringWithUTF8String:pathbuf];
@@ -131,12 +162,14 @@
 }
 
 - (NSString *)processNameForPID:(int)pid {
+    if (!proc_pidinfo) return nil;
     struct proc_bsdshortinfo info;
     if (proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, sizeof(info)) <= 0) return nil;
-    return [NSString stringWithUTF8String:info.pbsi_comm];
+    return [NSString stringWithUTF8String:(const char *)info.pbsi_comm];
 }
 
 - (NSString *)executablePathForPID:(int)pid {
+    if (!proc_pidpath) return nil;
     char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
     if (proc_pidpath(pid, pathbuf, sizeof(pathbuf)) <= 0) return nil;
     return [NSString stringWithUTF8String:pathbuf];
