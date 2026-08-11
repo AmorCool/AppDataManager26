@@ -112,7 +112,6 @@
 - (void)loadIPAFiles {
     [self.ipaFiles removeAllObjects];
 
-    // FIXED: Added IPAInstaller directory to search paths!
     NSArray *directories = @[
         @"/var/mobile/Documents/IPAInstaller",
         @"/var/mobile/Documents",
@@ -123,7 +122,6 @@
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *dir in directories) {
         if (![fm fileExistsAtPath:dir]) {
-            // Create IPAInstaller dir if missing
             if ([dir isEqualToString:@"/var/mobile/Documents/IPAInstaller"]) {
                 [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
             }
@@ -150,8 +148,6 @@
 }
 
 - (void)addIPATapped:(id)sender {
-    // Use iOS native Files app (UIDocumentPickerViewController)
-    // Support multiple document types for maximum compatibility
     NSArray *docTypes = @[
         @"com.apple.itunes.ipa",
         @"public.data",
@@ -174,12 +170,10 @@
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *destDir = @"/var/mobile/Documents/IPAInstaller";
 
-    // Ensure destination directory exists
     if (![fm fileExistsAtPath:destDir]) {
         NSError *dirError = nil;
         [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:&dirError];
         if (dirError) {
-            [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to create IPAInstaller dir: %@", dirError.localizedDescription]];
             [self showToast:@"فشل إنشاء مجلد التخزين" isError:YES];
             return;
         }
@@ -187,6 +181,8 @@
 
     __block NSInteger successCount = 0;
     __block NSInteger failCount = 0;
+    __block NSInteger totalProcessed = 0;
+    NSInteger totalUrls = urls.count;
 
     for (NSURL *url in urls) {
         [url startAccessingSecurityScopedResource];
@@ -195,48 +191,33 @@
         if (!fileName || fileName.length == 0) {
             fileName = @"imported.ipa";
         }
-        // Ensure .ipa extension
         if (![fileName.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
             fileName = [fileName stringByAppendingPathExtension:@"ipa"];
         }
 
         NSString *destPath = [destDir stringByAppendingPathComponent:fileName];
-
-        // Remove existing
         if ([fm fileExistsAtPath:destPath]) {
             [fm removeItemAtPath:destPath error:nil];
         }
 
-        // Simple copy using NSData (most reliable for jailbreak apps)
-        NSError *readError = nil;
-        NSData *fileData = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&readError];
-
-        if (fileData && fileData.length > 0) {
-            BOOL written = [fileData writeToFile:destPath options:NSDataWritingAtomic error:nil];
-            if (written) {
-                successCount++;
-                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Copied %@ (%lu bytes)", fileName, (unsigned long)fileData.length]];
-            } else {
-                failCount++;
-                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to write %@", fileName]];
-            }
-        } else {
-            // Fallback: try direct file copy
+        // Use NSFileCoordinator for proper security-scoped resource access
+        NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+        [coordinator coordinateReadingItemAtURL:url options:NSFileCoordinatorReadingForUploading error:nil byAccessor:^(NSURL *newURL) {
             NSError *copyError = nil;
-            BOOL copied = [fm copyItemAtPath:url.path toPath:destPath error:&copyError];
+            BOOL copied = [fm copyItemAtPath:newURL.path toPath:destPath error:&copyError];
             if (copied) {
                 successCount++;
-                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Copied %@ via file manager", fileName]];
+                [[Logger sharedLogger] info:[NSString stringWithFormat:@"Imported %@ to %@", fileName, destPath]];
             } else {
                 failCount++;
-                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to copy %@: %@", fileName, copyError.localizedDescription]];
+                [[Logger sharedLogger] error:[NSString stringWithFormat:@"Failed to import %@: %@", fileName, copyError.localizedDescription]];
             }
-        }
+            totalProcessed++;
+        }];
 
         [url stopAccessingSecurityScopedResource];
     }
 
-    // Reload and show feedback
     [self loadIPAFiles];
 
     if (successCount > 0 && failCount == 0) {
@@ -249,7 +230,6 @@
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
-    // User cancelled
 }
 
 #pragma mark - UITableViewDataSource
@@ -276,9 +256,12 @@
     }
 
     IPAExtractedInfo *info = self.ipaFiles[indexPath.row];
-    cell.textLabel.text = info.displayName ?: info.name;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@  •  %@",
-                                  info.version, info.bundleID, info.formattedSize];
+    cell.textLabel.text = info.displayName ?: info.name ?: [info.filePath lastPathComponent];
+
+    NSString *versionStr = info.version ?: @"غير معروف";
+    NSString *bundleStr = info.bundleID ?: @"غير معروف";
+    NSString *sizeStr = info.formattedSize ?: @"غير معروف";
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@  •  %@  •  %@", versionStr, bundleStr, sizeStr];
 
     UIImage *icon = info.icon;
     if (icon) {
