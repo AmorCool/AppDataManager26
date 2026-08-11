@@ -1,101 +1,91 @@
 #import "AppInstInstallationProvider.h"
 #import "Logger.h"
 #import "RootlessManager.h"
-#import "JailbreakEnvironment.h"
+#import <objc/runtime.h>
 #include <spawn.h>
-#include <unistd.h>
 #include <sys/wait.h>
+
+@interface AppInstInstallationProvider ()
+@property (nonatomic, strong) NSString *appInstPath;
+@end
 
 @implementation AppInstInstallationProvider
 
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        NSString *resolvedPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/appinst"];
+        _appInstPath = resolvedPath;
+    }
+    return self;
+}
+
 - (NSString *)providerName { return @"appinst"; }
-- (NSString *)providerDescription { return @"أداة سطر أوامر لتثبيت IPA"; }
+- (NSString *)providerDescription { return @"تثبيت عبر appinst CLI"; }
 - (NSInteger)priority { return 100; }
 
 - (BOOL)isAvailable {
-    return [[RootlessManager sharedManager] fileExistsAtLogicalPath:@"/usr/bin/appinst"];
+    return [[NSFileManager defaultManager] fileExistsAtPath:self.appInstPath];
 }
 
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
     if (!completion) return;
 
-    [[Logger sharedLogger] info:[NSString stringWithFormat:@"AppInst: Installing %@", ipaPath]];
-
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *appinstPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/appinst"];
+        NSMutableString *log = [NSMutableString string];
+        void (^logStep)(NSString *, NSString *) = ^(NSString *step, NSString *detail) {
+            NSString *entry = [NSString stringWithFormat:@"[AppInst] %@: %@", step, detail];
+            [[Logger sharedLogger] info:entry];
+            [log appendFormat:@"%@\n", entry];
+        };
 
-        // Use posix_spawn instead of NSTask for better compatibility
-        const char *path = appinstPath.UTF8String;
-        const char *args[] = { path, "-i", ipaPath.UTF8String, NULL };
+        logStep(@"START", [NSString stringWithFormat:@"Installing %@ via appinst", [ipaPath lastPathComponent]]);
+        logStep(@"PATH", self.appInstPath);
+
+        const char *cmd = [self.appInstPath UTF8String];
+        const char *args[] = { cmd, "-i", [ipaPath UTF8String], NULL };
+
+        logStep(@"EXEC", [NSString stringWithFormat:@"%@ -i %@", self.appInstPath, ipaPath]);
 
         pid_t pid;
-        int status;
+        int status = posix_spawn(&pid, cmd, NULL, NULL, (char **)args, NULL);
 
-        posix_spawn_file_actions_t action;
-        posix_spawn_file_actions_init(&action);
-
-        // Create pipe for output
-        int pipefd[2];
-        pipe(pipefd);
-        posix_spawn_file_actions_adddup2(&action, pipefd[1], STDOUT_FILENO);
-        posix_spawn_file_actions_adddup2(&action, pipefd[1], STDERR_FILENO);
-        posix_spawn_file_actions_addclose(&action, pipefd[0]);
-
-        int ret = posix_spawn(&pid, path, &action, NULL, (char **)args, NULL);
-        posix_spawn_file_actions_destroy(&action);
-        close(pipefd[1]);
-
-        if (ret != 0) {
-            close(pipefd[0]);
+        if (status != 0) {
+            NSString *errMsg = [NSString stringWithFormat:@"posix_spawn failed: %d", status];
+            logStep(@"ERROR", errMsg);
             dispatch_async(dispatch_get_main_queue(), ^{
-                completion([InstallationResult failureResult:@"فشل في تشغيل محرك التثبيت"
-                                                      error:[NSError errorWithDomain:@"IPAInstallerPro"
-                                                                                code:ret
-                                                                            userInfo:@{NSLocalizedDescriptionKey: @"posix_spawn failed"}]]);
+                InstallationResult *result = [InstallationResult failureResult:errMsg error:nil];
+                result.detailedOutput = log;
+                completion(result);
             });
             return;
         }
 
-        // Read output
-        NSMutableData *outputData = [NSMutableData data];
-        char buffer[1024];
-        ssize_t n;
-        while ((n = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
-            [outputData appendBytes:buffer length:n];
+        int waitStatus;
+        waitpid(pid, &waitStatus, 0);
+        BOOL success = WIFEXITED(waitStatus) && WEXITSTATUS(waitStatus) == 0;
+
+        if (success) {
+            logStep(@"SUCCESS", @"appinst completed successfully");
+            dispatch_async(dispatch_get_main_queue(), ^{
+                InstallationResult *result = [InstallationResult successResult:@"تم التثبيت عبر appinst"];
+                result.detailedOutput = log;
+                completion(result);
+            });
+        } else {
+            NSString *errMsg = [NSString stringWithFormat:@"appinst exited with code %d", WEXITSTATUS(waitStatus)];
+            logStep(@"ERROR", errMsg);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                InstallationResult *result = [InstallationResult failureResult:errMsg error:nil];
+                result.detailedOutput = log;
+                completion(result);
+            });
         }
-        close(pipefd[0]);
-
-        waitpid(pid, &status, 0);
-
-        NSString *output = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding] ?: @"";
-        BOOL success = (WIFEXITED(status) && WEXITSTATUS(status) == 0);
-
-        [[Logger sharedLogger] info:[NSString stringWithFormat:@"AppInst exit status: %d, output length: %lu", 
-            WEXITSTATUS(status), (unsigned long)output.length]];
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (success) {
-                InstallationResult *result = [InstallationResult successResult:@"تم التثبيت بنجاح"];
-                result.detailedOutput = output;
-                completion(result);
-            } else {
-                NSString *errorMsg = output.length > 0 ? output : @"فشل التثبيت دون رسائل خطأ";
-                InstallationResult *result = [InstallationResult failureResult:@"فشل في تثبيت التطبيق"
-                                                                         error:[NSError errorWithDomain:@"IPAInstallerPro"
-                                                                                                   code:WEXITSTATUS(status)
-                                                                                               userInfo:@{NSLocalizedDescriptionKey: errorMsg}]];
-                result.detailedOutput = output;
-                completion(result);
-            }
-        });
     });
 }
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
-    if (!completion) return;
-    // appinst doesn't support uninstall directly, use system method
-    [[Logger sharedLogger] warning:@"AppInst provider does not support uninstall"];
-    completion(NO, @"محرك appinst لا يدعم الحذف المباشر");
+    if (completion) completion(NO, @"appinst لا يدعم إلغاء التثبيت");
 }
 
 @end
