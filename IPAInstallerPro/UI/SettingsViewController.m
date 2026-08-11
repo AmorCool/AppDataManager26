@@ -1,11 +1,9 @@
 #import "SettingsViewController.h"
 #import "../Core/JailbreakEnvironment.h"
 #import "../Core/CapabilityManager.h"
-#import "../Core/Logger.h"
 #import "../Core/InstallationEngine.h"
 #import "../Core/CrashReporter.h"
 #import "CrashReporterViewController.h"
-#import <UIKit/UIKit.h>
 #import <sys/utsname.h>
 
 @interface SettingsViewController ()
@@ -15,11 +13,6 @@
 @property (nonatomic, strong) CapabilityManager *capMgr;
 @property (nonatomic, strong) InstallationEngine *engine;
 @property (nonatomic, strong) CrashReporter *reporter;
-@property (nonatomic, strong) NSString *appVersion;
-@property (nonatomic, strong) NSString *bestProvider;
-@property (nonatomic, assign) BOOL canInstall;
-@property (nonatomic, assign) NSUInteger crashCount;
-@property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
 @end
 
 @implementation SettingsViewController
@@ -29,141 +22,67 @@
     self.title = @"الإعدادات";
     self.view.backgroundColor = [UIColor blackColor];
 
-    // Initialize all data sources
     self.env = [JailbreakEnvironment sharedEnvironment];
     self.capMgr = [CapabilityManager sharedManager];
     self.engine = [InstallationEngine sharedEngine];
     self.reporter = [CrashReporter sharedReporter];
 
-    // Read real app version from Info.plist
-    self.appVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"1.0.23";
-
-    // Scan capabilities
-    [self.capMgr scanCapabilities];
-    self.capabilities = [self.capMgr allCapabilities] ?: @[];
-
-    // Read real provider
-    self.bestProvider = [self.engine currentProviderName] ?: @"غير معروف";
-
-    // Read real install status
-    self.canInstall = [self.capMgr canInstallIPA];
-
-    // Read real crash count
-    self.crashCount = [self.reporter totalCrashCount];
-
     self.sectionTitles = @[@"معلومات الأداة", @"التبعيات", @"النظام", @"التشخيص", @"المطور"];
 
-    [self setupTableView];
-    [self setupLoadingIndicator];
-}
+    // Scan capabilities in background then reload
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [self.capMgr scanCapabilities];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.capabilities = [self.capMgr allCapabilities];
+            [self.tableView reloadData];
+        });
+    });
 
-- (void)setupTableView {
     self.tableView.backgroundColor = [UIColor blackColor];
     self.tableView.separatorColor = [UIColor darkGrayColor];
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"SettingsCell"];
 }
 
-- (void)setupLoadingIndicator {
-    self.loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.loadingIndicator.color = [UIColor whiteColor];
-    self.loadingIndicator.hidesWhenStopped = YES;
-    self.loadingIndicator.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.loadingIndicator];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.loadingIndicator.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [self.loadingIndicator.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]
-    ]];
-}
-
-#pragma mark - Real Data Methods
-
-- (NSString *)realInstallStatus {
-    if (!self.canInstall) return @"غير جاهز ✗";
-
-    NSMutableArray *ready = [NSMutableArray array];
-    if ([self.capMgr isLDIDAvailable]) [ready addObject:@"ldid"];
-    if ([self.capMgr isUICacheAvailable]) [ready addObject:@"uicache"];
-    if ([self.capMgr isUnzipAvailable]) [ready addObject:@"unzip"];
-    if ([self.capMgr isAppSyncAvailable]) [ready addObject:@"AppSync"];
-    if ([self.capMgr isRootHelperAvailable]) [ready addObject:@"Helper"];
-
-    if (ready.count == 0) return @"جاهز ✓";
-    return [NSString stringWithFormat:@"جاهز (%@) ✓", [ready componentsJoinedByString:@", "]];
-}
-
-- (NSString *)realJailbreakType {
-    NSString *type = self.env.jailbreakType ?: @"غير معروف";
-    if (self.env.isRootless) {
-        return [NSString stringWithFormat:@"%@ (Rootless)", type];
-    }
-    return type;
-}
-
-- (NSString *)realDeviceInfo {
-    struct utsname systemInfo;
-    uname(&systemInfo);
-    NSString *machine = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
-    NSString *model = self.env.deviceModel ?: machine ?: @"غير معروف";
-    return model;
-}
-
-- (NSString *)realProviderStatus {
-    NSArray *providers = [self.engine availableProviders];
-    if (providers.count == 0) return @"لا يوجد محرك";
-
-    NSMutableArray *names = [NSMutableArray array];
-    for (id<InstallationProvider> p in providers) {
-        [names addObject:[p providerName] ?: @"Unknown"];
-    }
-    return [NSString stringWithFormat:@"%@ (%lu متاح)", self.bestProvider, (unsigned long)providers.count];
-}
-
-#pragma mark - Table View Data Source
+#pragma mark - Data Source
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return self.sectionTitles.count;
+    return 5;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    switch (section) {
-        case 0: return 3;  // App Info
-        case 1: return 5;  // Dependencies (AppSync, appinst, ldid, uicache, unzip)
-        case 2: return 3;  // System (jailbreak, iOS, device)
-        case 3: return 2;  // Diagnostics
-        case 4: return 1;  // Developer
-        default: return 0;
-    }
+    if (section == 0) return 3;
+    if (section == 1) return 5;
+    if (section == 2) return 3;
+    if (section == 3) return 2;
+    if (section == 4) return 1;
+    return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section < self.sectionTitles.count) {
-        return self.sectionTitles[section];
-    }
+    if (section < self.sectionTitles.count) return self.sectionTitles[section];
     return @"";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"SettingsCell" forIndexPath:indexPath];
+    static NSString *cellId = @"SettingsCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellId];
+    }
+
     cell.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
     cell.textLabel.textColor = [UIColor whiteColor];
     cell.detailTextLabel.textColor = [UIColor lightGrayColor];
-    cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.numberOfLines = 0;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.textLabel.text = @"";
+    cell.detailTextLabel.text = @"";
 
-    @try {
-        switch (indexPath.section) {
-            case 0: [self configureAppInfoCell:cell atRow:indexPath.row]; break;
-            case 1: [self configureDependencyCell:cell atRow:indexPath.row]; break;
-            case 2: [self configureSystemCell:cell atRow:indexPath.row]; break;
-            case 3: [self configureDiagnosticsCell:cell atRow:indexPath.row]; break;
-            case 4: [self configureDeveloperCell:cell atRow:indexPath.row]; break;
-        }
-    } @catch (NSException *e) {
-        cell.textLabel.text = @"خطأ";
-        cell.detailTextLabel.text = e.reason ?: @"Unknown";
-        cell.detailTextLabel.textColor = [UIColor redColor];
+    switch (indexPath.section) {
+        case 0: [self configureAppInfo:cell row:indexPath.row]; break;
+        case 1: [self configureDeps:cell row:indexPath.row]; break;
+        case 2: [self configureSystem:cell row:indexPath.row]; break;
+        case 3: [self configureDiag:cell row:indexPath.row]; break;
+        case 4: [self configureDev:cell row:indexPath.row]; break;
     }
 
     return cell;
@@ -171,115 +90,134 @@
 
 #pragma mark - Cell Configurations
 
-- (void)configureAppInfoCell:(UITableViewCell *)cell atRow:(NSInteger)row {
+- (void)configureAppInfo:(UITableViewCell *)cell row:(NSInteger)row {
     switch (row) {
         case 0:
             cell.textLabel.text = @"الإصدار";
-            cell.detailTextLabel.text = self.appVersion;
+            cell.detailTextLabel.text = @"1.0.24";
             break;
-        case 1:
+        case 1: {
             cell.textLabel.text = @"المحرك المفضل";
-            cell.detailTextLabel.text = [self realProviderStatus];
+            NSString *name = @"غير معروف";
+            @try { name = [self.engine currentProviderName]; } @catch (NSException *e) {}
+            if (!name || name.length == 0) name = @"غير معروف";
+            cell.detailTextLabel.text = name;
             break;
-        case 2:
+        }
+        case 2: {
             cell.textLabel.text = @"حالة التثبيت";
-            cell.detailTextLabel.text = [self realInstallStatus];
-            cell.detailTextLabel.textColor = self.canInstall ? [UIColor greenColor] : [UIColor redColor];
+            BOOL ready = NO;
+            @try { ready = [self.capMgr canInstallIPA]; } @catch (NSException *e) {}
+            cell.detailTextLabel.text = ready ? @"جاهز ✓" : @"غير جاهز ✗";
+            cell.detailTextLabel.textColor = ready ? [UIColor greenColor] : [UIColor redColor];
             break;
+        }
     }
 }
 
-- (void)configureDependencyCell:(UITableViewCell *)cell atRow:(NSInteger)row {
-    NSArray *deps = @[
-        @{@"name": @"AppSync Unified", @"check": @"isAppSyncAvailable"},
-        @{@"name": @"appinst", @"check": @"isAppInstAvailable"},
-        @{@"name": @"ldid", @"check": @"isLDIDAvailable"},
-        @{@"name": @"uicache", @"check": @"isUICacheAvailable"},
-        @{@"name": @"unzip", @"check": @"isUnzipAvailable"}
-    ];
+- (void)configureDeps:(UITableViewCell *)cell row:(NSInteger)row {
+    NSArray *names = @[@"AppSync Unified", @"appinst", @"ldid", @"uicache", @"unzip"];
+    NSArray *checks = @[@"isAppSyncAvailable", @"isAppInstAvailable", @"isLDIDAvailable", @"isUICacheAvailable", @"isUnzipAvailable"];
 
-    if (row < deps.count) {
-        NSDictionary *dep = deps[row];
-        NSString *name = dep[@"name"];
-        NSString *check = dep[@"check"];
+    if (row < names.count) {
+        cell.textLabel.text = names[row];
+        BOOL avail = NO;
+        NSString *check = checks[row];
+        @try {
+            if ([check isEqualToString:@"isAppSyncAvailable"]) avail = [self.capMgr isAppSyncAvailable];
+            else if ([check isEqualToString:@"isAppInstAvailable"]) avail = [self.capMgr isAppInstAvailable];
+            else if ([check isEqualToString:@"isLDIDAvailable"]) avail = [self.capMgr isLDIDAvailable];
+            else if ([check isEqualToString:@"isUICacheAvailable"]) avail = [self.capMgr isUICacheAvailable];
+            else if ([check isEqualToString:@"isUnzipAvailable"]) avail = [self.capMgr isUnzipAvailable];
+        } @catch (NSException *e) {}
 
-        BOOL available = NO;
-        if ([check isEqualToString:@"isAppSyncAvailable"]) available = [self.capMgr isAppSyncAvailable];
-        else if ([check isEqualToString:@"isAppInstAvailable"]) available = [self.capMgr isAppInstAvailable];
-        else if ([check isEqualToString:@"isLDIDAvailable"]) available = [self.capMgr isLDIDAvailable];
-        else if ([check isEqualToString:@"isUICacheAvailable"]) available = [self.capMgr isUICacheAvailable];
-        else if ([check isEqualToString:@"isUnzipAvailable"]) available = [self.capMgr isUnzipAvailable];
-
-        cell.textLabel.text = name;
-        cell.detailTextLabel.text = available ? @"متوفر ✓" : @"غير متوفر ✗";
-        cell.detailTextLabel.textColor = available ? [UIColor greenColor] : [UIColor redColor];
+        cell.detailTextLabel.text = avail ? @"✓" : @"✗";
+        cell.detailTextLabel.textColor = avail ? [UIColor greenColor] : [UIColor redColor];
     }
 }
 
-- (void)configureSystemCell:(UITableViewCell *)cell atRow:(NSInteger)row {
+- (void)configureSystem:(UITableViewCell *)cell row:(NSInteger)row {
     switch (row) {
-        case 0:
-            cell.textLabel.text = @"نوع الجيلبريك";
-            cell.detailTextLabel.text = [self realJailbreakType];
+        case 0: {
+            cell.textLabel.text = @"الجيلبريك";
+            NSString *jb = @"غير معروف";
+            @try {
+                jb = self.env.jailbreakType;
+                if (self.env.isRootless) jb = [jb stringByAppendingString:@" (Rootless)"];
+            } @catch (NSException *e) {}
+            if (!jb || jb.length == 0) jb = @"غير معروف";
+            cell.detailTextLabel.text = jb;
             break;
-        case 1:
-            cell.textLabel.text = @"إصدار iOS";
-            cell.detailTextLabel.text = self.env.osVersion ?: @"غير معروف";
+        }
+        case 1: {
+            cell.textLabel.text = @"iOS";
+            NSString *ver = @"غير معروف";
+            @try { ver = self.env.osVersion; } @catch (NSException *e) {}
+            if (!ver || ver.length == 0) ver = [[UIDevice currentDevice] systemVersion];
+            cell.detailTextLabel.text = ver;
             break;
-        case 2:
+        }
+        case 2: {
             cell.textLabel.text = @"الجهاز";
-            cell.detailTextLabel.text = [self realDeviceInfo];
+            NSString *model = @"غير معروف";
+            @try { model = self.env.deviceModel; } @catch (NSException *e) {}
+            if (!model || model.length == 0) {
+                struct utsname u;
+                uname(&u);
+                model = [NSString stringWithCString:u.machine encoding:NSUTF8StringEncoding];
+            }
+            cell.detailTextLabel.text = model;
             break;
+        }
     }
 }
 
-- (void)configureDiagnosticsCell:(UITableViewCell *)cell atRow:(NSInteger)row {
-    switch (row) {
-        case 0:
-            cell.textLabel.text = @"📊 Crash Reporter";
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu سجل", (unsigned long)self.crashCount];
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-            break;
-        case 1:
-            cell.textLabel.text = @"📤 تصدير التقرير";
-            cell.detailTextLabel.text = @"مشاركة التقرير الكامل";
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-            break;
+- (void)configureDiag:(UITableViewCell *)cell row:(NSInteger)row {
+    if (row == 0) {
+        cell.textLabel.text = @"📊 Crash Reporter";
+        NSUInteger count = 0;
+        @try { count = [self.reporter totalCrashCount]; } @catch (NSException *e) {}
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)count];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    } else if (row == 1) {
+        cell.textLabel.text = @"📤 تصدير التقرير";
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     }
 }
 
-- (void)configureDeveloperCell:(UITableViewCell *)cell atRow:(NSInteger)row {
-    cell.textLabel.text = @"عن IPA Installer Pro";
-    cell.detailTextLabel.text = @"@Zainqkvd | Dopamine 3.0 Ready";
+- (void)configureDev:(UITableViewCell *)cell row:(NSInteger)row {
+    cell.textLabel.text = @"عن الأداة";
+    cell.detailTextLabel.text = @"@Zainqkvd";
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 }
 
-#pragma mark - Table View Delegate
+#pragma mark - Delegate
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    @try {
-        if (indexPath.section == 3) {
-            if (indexPath.row == 0) {
-                CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleGrouped];
-                [self.navigationController pushViewController:vc animated:YES];
-            } else if (indexPath.row == 1) {
-                NSString *report = [self.reporter generateFullReport];
-                UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[report] applicationActivities:nil];
-                [self presentViewController:activity animated:YES completion:nil];
-            }
-        } else if (indexPath.section == 4) {
-            NSString *msg = [NSString stringWithFormat:@"IPA Installer Pro\n\nVersion: %@\nDopamine 3.0 Compatible\n\nDeveloper: @Zainqkvd\n\nFeatures:\n• Direct Install (ldid + uicache)\n• System Install (LSApplicationWorkspace)\n• Crash Reporter\n• Real-time Diagnostics", self.appVersion];
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"عن الأداة" message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:alert animated:YES completion:nil];
+    if (indexPath.section == 3 && indexPath.row == 0) {
+        @try {
+            CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleGrouped];
+            [self.navigationController pushViewController:vc animated:YES];
+        } @catch (NSException *e) {
+            NSLog(@"[Settings] CrashReporter error: %@", e.reason);
         }
-    } @catch (NSException *e) {
-        NSLog(@"[Settings] didSelectRow error: %@", e.reason);
+    } else if (indexPath.section == 3 && indexPath.row == 1) {
+        @try {
+            NSString *report = [self.reporter generateFullReport];
+            UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[report] applicationActivities:nil];
+            [self presentViewController:activity animated:YES completion:nil];
+        } @catch (NSException *e) {}
+    } else if (indexPath.section == 4) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"IPA Installer Pro"
+                                                                     message:@"Version 1.0.24\nDopamine 3.0 Compatible\n\n@Zainqkvd"
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
     }
 }
 
