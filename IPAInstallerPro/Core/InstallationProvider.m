@@ -3,18 +3,23 @@
 @implementation InstallationResult
 
 + (InstallationResult *)successResult:(NSString *)msg {
-    InstallationResult *r = [[InstallationResult alloc] init];
-    r.success = YES;
-    r.message = msg;
-    return r;
+    InstallationResult *result = [[InstallationResult alloc] init];
+    result.success = YES;
+    result.message = msg ?: @"Success";
+    result.detailedOutput = msg ?: @"Success";
+    result.bundleID = nil;
+    result.error = nil;
+    return result;
 }
 
 + (InstallationResult *)failureResult:(NSString *)msg error:(NSError *)error {
-    InstallationResult *r = [[InstallationResult alloc] init];
-    r.success = NO;
-    r.message = msg;
-    r.error = error;
-    return r;
+    InstallationResult *result = [[InstallationResult alloc] init];
+    result.success = NO;
+    result.message = msg ?: @"Unknown error";
+    result.detailedOutput = msg ?: @"Unknown error";
+    result.bundleID = nil;
+    result.error = error;
+    return result;
 }
 
 @end
