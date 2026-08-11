@@ -29,10 +29,7 @@
 - (NSInteger)priority { return 10; }
 
 - (BOOL)isAvailable {
-    // LSApplicationWorkspace installApplication requires AppSync Unified on iOS 15+ Rootless
-    // Without AppSync, it will fail with "Operation not permitted" for unsigned IPAs
     if (self.lsApplicationWorkspace == nil) return NO;
-
     CapabilityManager *capMgr = [CapabilityManager sharedManager];
     if (!capMgr.isAppSyncAvailable) {
         [[Logger sharedLogger] info:@"SystemInstallationProvider: AppSync not available, disabling System provider"];
@@ -43,7 +40,6 @@
 
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
     if (!completion) return;
-
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSMutableString *log = [NSMutableString string];
         void (^logStep)(NSString *) = ^(NSString *msg) {
@@ -51,9 +47,7 @@
             [[Logger sharedLogger] info:entry];
             [log appendFormat:@"%@\n", entry];
         };
-
         logStep([NSString stringWithFormat:@"START: Installing %@", [ipaPath lastPathComponent]]);
-
         if (!self.lsApplicationWorkspace) {
             logStep(@"ERROR: LSApplicationWorkspace not available");
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -63,18 +57,14 @@
             });
             return;
         }
-
         NSString *bundleID = [self extractBundleIDFromIPA:ipaPath];
         logStep([NSString stringWithFormat:@"BUNDLE_ID: %@", bundleID ?: @"unknown"]);
-
         NSURL *ipaURL = [NSURL fileURLWithPath:ipaPath];
         NSMutableDictionary *options = [NSMutableDictionary dictionary];
         if (bundleID) options[@"CFBundleIdentifier"] = bundleID;
         options[@"SkipUninstall"] = @YES;
         logStep([NSString stringWithFormat:@"OPTIONS: BundleID=%@, SkipUninstall=YES", bundleID ?: @"nil"]);
-
         logStep(@"INSTALL: Calling LSApplicationWorkspace...");
-
         @try {
             SEL installSelector = NSSelectorFromString(@"installApplication:withOptions:error:");
             NSMethodSignature *sig = [self.lsApplicationWorkspace methodSignatureForSelector:installSelector];
@@ -87,7 +77,6 @@
                 });
                 return;
             }
-
             NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
             [invocation setTarget:self.lsApplicationWorkspace];
             [invocation setSelector:installSelector];
@@ -96,10 +85,8 @@
             NSError *installError = nil;
             [invocation setArgument:&installError atIndex:4];
             [invocation invoke];
-
             BOOL success = NO;
             [invocation getReturnValue:&success];
-
             if (success && !installError) {
                 logStep(@"SUCCESS: App installed via System");
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -134,17 +121,14 @@
     @try {
         NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
         [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
-
         NSString *unzipPath = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
         if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPath]) unzipPath = @"/usr/bin/unzip";
-
         const char *cmd = [unzipPath UTF8String];
-        const char *args[] = {[cmd], "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL};
+        char *args[] = {(char*)cmd, (char*)"-q", (char*)"-o", (char*)[ipaPath UTF8String], (char*)"-d", (char*)[tempDir UTF8String], NULL};
         pid_t pid;
-        posix_spawn(&pid, cmd, NULL, NULL, (char **)args, NULL);
+        posix_spawn(&pid, cmd, NULL, NULL, args, NULL);
         int status;
         waitpid(pid, &status, 0);
-
         NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
         NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:payloadPath error:nil];
         NSString *bundleID = nil;
