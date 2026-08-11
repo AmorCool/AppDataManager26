@@ -1,4 +1,4 @@
-name: Build IPA Installer Pro and Sync to Repo
+name: Build IPA Installer Pro and Sync to Dev Repo
 
 permissions:
   contents: write
@@ -15,12 +15,12 @@ jobs:
         with:
           path: source
 
-      - name: Checkout repo
+      - name: Checkout repo-dev
         uses: actions/checkout@v4
         with:
-          repository: aosaid3224-ops/repo
+          repository: aosaid3224-ops/repo-dev
           token: ${{ secrets.PAT }}
-          path: repo
+          path: repo-dev
 
       - name: Setup Theos
         run: |
@@ -41,31 +41,31 @@ jobs:
           make clean
           make package
 
-      - name: Copy generate-repo.py to repo
+      - name: Copy generate-repo.py to repo-dev
         run: |
-          mkdir -p repo/scripts
-          cp source/scripts/generate-repo.py repo/scripts/
+          mkdir -p repo-dev/scripts
+          cp source/scripts/generate-repo.py repo-dev/scripts/
 
-      - name: Deploy to repo
+      - name: Deploy to repo-dev
         run: |
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub CI"
 
-          mkdir -p repo/pool/main/iphoneos-arm64
-          cp source/IPAInstallerPro/packages/*.deb repo/pool/main/iphoneos-arm64/
+          mkdir -p repo-dev/pool/main/iphoneos-arm64
+          cp source/IPAInstallerPro/packages/*.deb repo-dev/pool/main/iphoneos-arm64/
 
-          cd repo
-          python3 scripts/generate-repo.py .
+          cd repo-dev
+          python3 scripts/generate-repo.py . --dev
 
-          echo "Origin: A-ZAIN Repo" > Release
-          echo "Label: A-ZAIN" >> Release
+          echo "Origin: A-ZAIN Dev Repo" > Release
+          echo "Label: A-ZAIN Development" >> Release
           echo "Suite: stable" >> Release
           echo "Version: 1.0" >> Release
-          echo "Codename: ios" >> Release
+          echo "Codename: ios-dev" >> Release
           echo "Architectures: iphoneos-arm64" >> Release
           echo "Components: main" >> Release
-          echo "Description: A-ZAIN Repo - Jailbreak tools and utilities" >> Release
+          echo "Description: A-ZAIN Development Repo - Private testing channel" >> Release
 
           git add -A
-          git commit -m "Add IPA Installer Pro" || true
+          git commit -m "Add IPA Installer Pro (dev build)" || true
           git push origin main
