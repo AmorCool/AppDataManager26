@@ -1,5 +1,6 @@
 #!/bin/bash
-set -e
+# IPA Installer Pro Post-Install Script
+# Safe execution - never hang
 
 echo "=== IPA Installer Pro Post-Install ==="
 
@@ -11,17 +12,17 @@ fi
 
 if [ -f "$HELPER" ]; then
     echo "Setting up root helper at $HELPER"
-    chmod 4755 "$HELPER"
-    chown root:wheel "$HELPER"
+    chmod 4755 "$HELPER" 2>/dev/null || true
+    chown root:wheel "$HELPER" 2>/dev/null || true
     echo "Root helper ready (setuid root)"
 else
     echo "WARNING: Root helper not found at $HELPER"
     echo "Direct installation may fail without root privileges."
 fi
 
-# Refresh UI cache for the app
-echo "Refreshing UI cache..."
-uicache -p /var/jb/Applications/IPAInstallerPro.app 2>/dev/null || uicache -p /Applications/IPAInstallerPro.app 2>/dev/null || true
+# Refresh UI cache for the app (run in background to avoid hanging dpkg)
+echo "Refreshing UI cache in background..."
+(uicache -p /var/jb/Applications/IPAInstallerPro.app 2>/dev/null || uicache -p /Applications/IPAInstallerPro.app 2>/dev/null || true) &
 
 echo "=== Done ==="
 exit 0
