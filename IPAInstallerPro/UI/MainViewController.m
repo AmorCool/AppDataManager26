@@ -1,4 +1,5 @@
 #import "MainViewController.h"
+#import "CrashReporterViewController.h"
 #import "IPAFileBrowserViewController.h"
 #import "IPAInstallViewController.h"
 #import "Core/IPAExtractor.h"
