@@ -174,10 +174,10 @@
 
 - (void)configureDiag:(UITableViewCell *)cell row:(NSInteger)row {
     if (row == 0) {
-        cell.textLabel.text = @"📊 Crash Reporter";
+        cell.textLabel.text = @"📊 Diagnostic Center";
         NSUInteger count = 0;
         @try { count = [self.reporter totalCrashCount]; } @catch (NSException *e) {}
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)count];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu crash%@", (unsigned long)count, count == 1 ? @"" : @"es"];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     } else if (row == 1) {
