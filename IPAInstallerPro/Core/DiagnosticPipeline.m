@@ -97,13 +97,13 @@
 
     // STEP 1: DISCOVERY
     CrashDiscoveryResult *discoveryResult = [self.discovery discoverCrashLogsForBundleIDs:bundleIDs sinceDate:self.lastPipelineRun];
-    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Discovery: %lu new logs, %lu total managed", (unsigned long)discoveryResult.newPaths.count, (unsigned long)discoveryResult.allPaths.count]];
+    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Discovery: %lu new logs, %lu total managed", (unsigned long)discoveryResult.freshPaths.count, (unsigned long)discoveryResult.allPaths.count]];
 
     // STEP 2-5: PARSE → CLASSIFY → DEDUP → CORRELATE
     NSMutableArray<CrashIncident *> *incidents = [NSMutableArray array];
     NSMutableArray<CrashCorrelation *> *correlations = [NSMutableArray array];
 
-    for (NSString *path in discoveryResult.newPaths) {
+    for (NSString *path in discoveryResult.freshPaths) {
         // Parse
         NSDictionary *parsed = [self.parser parseCrashLogAtPath:path];
         if (!parsed) {
@@ -151,7 +151,7 @@
     summary[@"total_incidents"] = @(incidents.count);
     summary[@"total_duplicates_suppressed"] = @(self.totalDuplicatesSuppressed);
     summary[@"total_processed"] = @(self.totalIncidentsProcessed);
-    summary[@"new_logs_found"] = @(discoveryResult.newPaths.count);
+    summary[@"new_logs_found"] = @(discoveryResult.freshPaths.count);
     summary[@"managed_apps"] = @(bundleIDs.count);
 
     // Severity breakdown
