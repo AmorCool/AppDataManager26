@@ -7,6 +7,8 @@
 
 @implementation CrashIncident
 
+@synthesize fingerprint = _fingerprint;
+
 + (instancetype)incidentWithBundleID:(NSString *)bundleID
                          processName:(NSString *)processName
                            timestamp:(NSDate *)timestamp {
