@@ -8,6 +8,7 @@
 #import "InstallationLogger.h"
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import "DiagnosticEngine.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import <copyfile.h>
