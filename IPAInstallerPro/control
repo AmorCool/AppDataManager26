@@ -1,10 +1,12 @@
-Package: com.aosaid.ipainstallerpro
+Package: com.appdatamanager.ipainstallerpro
 Name: IPA Installer Pro
-Version: 1.0.32
+Version: 1.1.0
 Architecture: iphoneos-arm64
-Description: Professional IPA Installer for iOS Jailbreak — Self-Contained Installation Stack
-Maintainer: ZAIN <@Zainqkvd>
-Author: ZAIN <@Zainqkvd>
+Description: Advanced IPA installation tool with live logging and zero-gap verification. Supports direct install, system install, and appinst methods with deep file verification.
+Maintainer: AppDataManager Team <support@appdatamanager.com>
+Author: AppDataManager Team
 Section: Utilities
-Depends: firmware (>= 15.0), unzip
-Pre-Depends: dpkg (>= 1.14.25)
+Depends: firmware (>= 15.0), ldid, uicache, unzip
+Conflicts: com.appdatamanager.ipainstallerpro (<< 1.1.0)
+Replaces: com.appdatamanager.ipainstallerpro (<< 1.1.0)
+Tag: role::hacker
