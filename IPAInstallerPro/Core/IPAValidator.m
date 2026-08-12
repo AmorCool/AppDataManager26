@@ -39,6 +39,29 @@ extern char **environ;
     return self;
 }
 
+#pragma mark - Shell helper (replaces system())
+
+- (BOOL)runShell:(NSString *)command {
+    pid_t pid;
+    const char *sh = "/bin/sh";
+    char *argv[] = {(char*)sh, "-c", (char*)[command UTF8String], NULL};
+    int st = posix_spawn(&pid, sh, NULL, NULL, argv, environ);
+    if (st != 0) return NO;
+    int ws;
+    waitpid(pid, &ws, 0);
+    return (WIFEXITED(ws) && WEXITSTATUS(ws) == 0);
+}
+
+- (void)runShellAsync:(NSString *)command {
+    pid_t pid;
+    const char *sh = "/bin/sh";
+    char *argv[] = {(char*)sh, "-c", (char*)[command UTF8String], NULL};
+    posix_spawn(&pid, sh, NULL, NULL, argv, environ);
+    waitpid(pid, NULL, 0);
+}
+
+#pragma mark - Main Validation
+
 - (IPAValidationResult *)validateIPAAtPath:(NSString *)ipaPath {
     NSMutableArray *issues = [NSMutableArray array];
     NSMutableArray *missing = [NSMutableArray array];
@@ -74,7 +97,7 @@ extern char **environ;
     [fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
 
     NSString *cmd = [NSString stringWithFormat:@"\"%@\" -o \"%@\" -d \"%@\" 2>/dev/null", self.unzipPath, ipaPath, tmp];
-    if (system([cmd UTF8String]) != 0) {
+    if (![self runShell:cmd]) {
         [issues addObject:@"Unzip failed"];
         [fm removeItemAtPath:tmp error:nil];
         return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
@@ -239,14 +262,14 @@ extern char **environ;
 - (BOOL)isSigned:(NSString *)path {
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return YES;
     NSString *cmd = [NSString stringWithFormat:@"\"%@\" -e \"%@\" >/dev/null 2>&1", self.ldidPath, path];
-    return (system([cmd UTF8String]) == 0);
+    return [self runShell:cmd];
 }
 
 - (NSDictionary *)extractEnts:(NSString *)path {
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return nil;
     NSString *tp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"ents.plist"];
     NSString *cmd = [NSString stringWithFormat:@"\"%@\" -e \"%@\" > \"%@\" 2>/dev/null", self.ldidPath, path, tp];
-    system([cmd UTF8String]);
+    [self runShellAsync:cmd];
     NSData *d = [NSData dataWithContentsOfFile:tp];
     [[NSFileManager defaultManager] removeItemAtPath:tp error:nil];
     if (d.length > 10) {
