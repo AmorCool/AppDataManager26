@@ -18,6 +18,9 @@ extern char **environ;
 @property (nonatomic, strong) NSString *unzipPath;
 @end
 
+@implementation IPAValidationResult
+@end
+
 @implementation IPAValidator
 
 + (instancetype)sharedValidator {
