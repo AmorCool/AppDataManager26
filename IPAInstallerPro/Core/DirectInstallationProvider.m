@@ -7,6 +7,7 @@
 #import "RootlessManager.h"
 #import "InstallationLogger.h"
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #import <spawn.h>
 #import <sys/wait.h>
 #import <copyfile.h>
