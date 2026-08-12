@@ -117,7 +117,7 @@
 - (CrashDiscoveryResult *)discoverCrashLogsForBundleIDs:(NSArray<NSString *> *)bundleIDs
                                             sinceDate:(NSDate *)sinceDate {
     CrashDiscoveryResult *result = [[CrashDiscoveryResult alloc] init];
-    NSMutableArray *newPaths = [NSMutableArray array];
+    NSMutableArray *freshPaths = [NSMutableArray array];
     NSMutableArray *allManagedPaths = [NSMutableArray array];
     NSFileManager *fm = [NSFileManager defaultManager];
 
@@ -129,16 +129,16 @@
                 NSDictionary *attrs = [fm attributesOfItemAtPath:path error:&error];
                 NSDate *modDate = attrs[NSFileModificationDate];
                 if (modDate && [modDate compare:sinceDate] == NSOrderedDescending) {
-                    [newPaths addObject:path];
+                    [freshPaths addObject:path];
                 }
             } else {
-                [newPaths addObject:path];
+                [freshPaths addObject:path];
             }
         }
     }
 
     result.allPaths = allManagedPaths;
-    result.newPaths = newPaths;
+    result.freshPaths = freshPaths;
     result.scanTime = [NSDate date];
     return result;
 }
