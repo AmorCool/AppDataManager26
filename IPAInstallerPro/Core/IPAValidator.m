@@ -8,6 +8,8 @@
 #import <Foundation/Foundation.h>
 #import <spawn.h>
 #import <sys/wait.h>
+#import <unistd.h>
+#import <fcntl.h>
 
 extern char **environ;
 
@@ -16,6 +18,7 @@ extern char **environ;
 @property (nonatomic, strong) NSString *otoolPath;
 @property (nonatomic, strong) NSString *lipoPath;
 @property (nonatomic, strong) NSString *unzipPath;
+@property (nonatomic, strong) NSString *devNullPath;
 @end
 
 @implementation IPAValidationResult
@@ -34,33 +37,127 @@ extern char **environ;
     self = [super init];
     if (self) {
         RootlessManager *rm = [RootlessManager sharedManager];
-        self.ldidPath = [rm resolvePath:@"/usr/bin/ldid"];
+        self.ldidPath  = [rm resolvePath:@"/usr/bin/ldid"];
         self.otoolPath = [rm resolvePath:@"/usr/bin/otool"];
-        self.lipoPath = [rm resolvePath:@"/usr/bin/lipo"];
+        self.lipoPath  = [rm resolvePath:@"/usr/bin/lipo"];
         self.unzipPath = [rm resolvePath:@"/usr/bin/unzip"];
+        self.devNullPath = [rm resolvePath:@"/dev/null"];
     }
     return self;
 }
 
-#pragma mark - Shell helper (replaces system())
+#pragma mark - Direct posix_spawn (NO /bin/sh wrapper)
 
-- (BOOL)runShell:(NSString *)command {
+- (BOOL)runCmd:(NSString *)cmd args:(NSArray<NSString *> *)args {
+    return [self runCmd:cmd args:args stdin:nil stdout:nil stderrToDevNull:YES];
+}
+
+- (BOOL)runCmd:(NSString *)cmd args:(NSArray<NSString *> *)args stdin:(NSString *)inPath stdout:(NSString *)outPath stderrToDevNull:(BOOL)errNull {
+    if (!cmd || cmd.length == 0) return NO;
+
     pid_t pid;
-    const char *sh = "/bin/sh";
-    char *argv[] = {(char*)sh, "-c", (char*)[command UTF8String], NULL};
-    int st = posix_spawn(&pid, sh, NULL, NULL, argv, environ);
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+
+    // Redirect stderr to /dev/null if requested
+    if (errNull && self.devNullPath) {
+        int fd = open([self.devNullPath UTF8String], O_WRONLY);
+        if (fd >= 0) {
+            posix_spawn_file_actions_adddup2(&actions, fd, STDERR_FILENO);
+            posix_spawn_file_actions_addclose(&actions, fd);
+        }
+    }
+
+    // Redirect stdout to file if requested
+    if (outPath) {
+        int fd = open([outPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            posix_spawn_file_actions_adddup2(&actions, fd, STDOUT_FILENO);
+            posix_spawn_file_actions_addclose(&actions, fd);
+        }
+    }
+
+    // Redirect stdin from file if requested
+    if (inPath) {
+        int fd = open([inPath UTF8String], O_RDONLY);
+        if (fd >= 0) {
+            posix_spawn_file_actions_adddup2(&actions, fd, STDIN_FILENO);
+            posix_spawn_file_actions_addclose(&actions, fd);
+        }
+    }
+
+    // Build argv
+    const char *path = [cmd UTF8String];
+    int argc = (int)args.count + 2;
+    char **argv = malloc(argc * sizeof(char *));
+    argv[0] = (char *)path;
+    for (NSUInteger i = 0; i < args.count; i++) {
+        argv[i + 1] = (char *)[args[i] UTF8String];
+    }
+    argv[args.count + 1] = NULL;
+
+    int st = posix_spawn(&pid, path, &actions, NULL, argv, environ);
+    free(argv);
+    posix_spawn_file_actions_destroy(&actions);
+
     if (st != 0) return NO;
+
     int ws;
     waitpid(pid, &ws, 0);
     return (WIFEXITED(ws) && WEXITSTATUS(ws) == 0);
 }
 
-- (void)runShellAsync:(NSString *)command {
+- (NSString *)runCmdOutput:(NSString *)cmd args:(NSArray<NSString *> *)args {
+    if (!cmd || cmd.length == 0) return nil;
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return nil;
+
     pid_t pid;
-    const char *sh = "/bin/sh";
-    char *argv[] = {(char*)sh, "-c", (char*)[command UTF8String], NULL};
-    posix_spawn(&pid, sh, NULL, NULL, argv, environ);
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+
+    // Redirect stderr to /dev/null
+    if (self.devNullPath) {
+        int fd = open([self.devNullPath UTF8String], O_WRONLY);
+        if (fd >= 0) {
+            posix_spawn_file_actions_adddup2(&actions, fd, STDERR_FILENO);
+            posix_spawn_file_actions_addclose(&actions, fd);
+        }
+    }
+
+    const char *path = [cmd UTF8String];
+    int argc = (int)args.count + 2;
+    char **argv = malloc(argc * sizeof(char *));
+    argv[0] = (char *)path;
+    for (NSUInteger i = 0; i < args.count; i++) {
+        argv[i + 1] = (char *)[args[i] UTF8String];
+    }
+    argv[args.count + 1] = NULL;
+
+    int st = posix_spawn(&pid, path, &actions, NULL, argv, environ);
+    free(argv);
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[1]);
+
+    if (st != 0) {
+        close(pipefd[0]);
+        return nil;
+    }
+
+    NSMutableString *output = [NSMutableString string];
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+        buf[n] = '\0';
+        [output appendString:[NSString stringWithUTF8String:buf]];
+    }
+    close(pipefd[0]);
     waitpid(pid, NULL, 0);
+    return output;
 }
 
 #pragma mark - Main Validation
@@ -79,6 +176,7 @@ extern char **environ;
         return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
     }
 
+    // Check ZIP magic number
     NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:ipaPath];
     if (!fh) {
         [issues addObject:@"Cannot open IPA"];
@@ -96,11 +194,11 @@ extern char **environ;
         return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
     }
 
+    // Extract IPA using unzip directly (NO /bin/sh)
     NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
     [fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
 
-    NSString *cmd = [NSString stringWithFormat:@"\"%@\" -o \"%@\" -d \"%@\" 2>/dev/null", self.unzipPath, ipaPath, tmp];
-    if (![self runShell:cmd]) {
+    if (![self runCmd:self.unzipPath args:@[@"-o", ipaPath, @"-d", tmp]]) {
         [issues addObject:@"Unzip failed"];
         [fm removeItemAtPath:tmp error:nil];
         return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
@@ -249,35 +347,30 @@ extern char **environ;
 - (NSArray *)archsFor:(NSString *)path {
     NSMutableArray *a = [NSMutableArray array];
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.lipoPath]) return a;
-    NSString *cmd = [NSString stringWithFormat:@"\"%@\" -info \"%@\" 2>/dev/null", self.lipoPath, path];
-    FILE *fp = popen([cmd UTF8String], "r");
-    if (!fp) return a;
-    char buf[1024]; NSMutableString *out = [NSMutableString string];
-    while (fgets(buf, sizeof(buf), fp)) [out appendString:[NSString stringWithUTF8String:buf]];
-    pclose(fp);
-    if ([out containsString:@"arm64e"]) [a addObject:@"arm64e"];
-    if ([out containsString:@"arm64"] && ![out containsString:@"arm64e"]) [a addObject:@"arm64"];
-    if ([out containsString:@"armv7s"]) [a addObject:@"armv7s"];
-    if ([out containsString:@"armv7"]) [a addObject:@"armv7"];
+    NSString *output = [self runCmdOutput:self.lipoPath args:@[@"-info", path]];
+    if (!output) return a;
+    if ([output containsString:@"arm64e"]) [a addObject:@"arm64e"];
+    if ([output containsString:@"arm64"] && ![output containsString:@"arm64e"]) [a addObject:@"arm64"];
+    if ([output containsString:@"armv7s"]) [a addObject:@"armv7s"];
+    if ([output containsString:@"armv7"]) [a addObject:@"armv7"];
     return a;
 }
 
 - (BOOL)isSigned:(NSString *)path {
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return YES;
-    NSString *cmd = [NSString stringWithFormat:@"\"%@\" -e \"%@\" >/dev/null 2>&1", self.ldidPath, path];
-    return [self runShell:cmd];
+    return [self runCmd:self.ldidPath args:@[@"-e", path] stderrToDevNull:YES];
 }
 
 - (NSDictionary *)extractEnts:(NSString *)path {
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return nil;
     NSString *tp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"ents.plist"];
-    NSString *cmd = [NSString stringWithFormat:@"\"%@\" -e \"%@\" > \"%@\" 2>/dev/null", self.ldidPath, path, tp];
-    [self runShellAsync:cmd];
-    NSData *d = [NSData dataWithContentsOfFile:tp];
-    [[NSFileManager defaultManager] removeItemAtPath:tp error:nil];
-    if (d.length > 10) {
-        id obj = [NSPropertyListSerialization propertyListWithData:d options:0 format:NULL error:nil];
-        if ([obj isKindOfClass:[NSDictionary class]]) return obj;
+    if ([self runCmd:self.ldidPath args:@[@"-e", path] stdin:nil stdout:tp stderrToDevNull:YES]) {
+        NSData *d = [NSData dataWithContentsOfFile:tp];
+        [[NSFileManager defaultManager] removeItemAtPath:tp error:nil];
+        if (d.length > 10) {
+            id obj = [NSPropertyListSerialization propertyListWithData:d options:0 format:NULL error:nil];
+            if ([obj isKindOfClass:[NSDictionary class]]) return obj;
+        }
     }
     return nil;
 }
@@ -291,19 +384,18 @@ extern char **environ;
     if (!en) return d;
     NSString *ep = [appPath stringByAppendingPathComponent:en];
     if (![fm fileExistsAtPath:ep] || ![fm fileExistsAtPath:self.otoolPath]) return d;
-    NSString *cmd = [NSString stringWithFormat:@"\"%@\" -L \"%@\" 2>/dev/null", self.otoolPath, ep];
-    FILE *fp = popen([cmd UTF8String], "r");
-    if (!fp) return d;
-    char buf[1024];
-    while (fgets(buf, sizeof(buf), fp)) {
-        NSString *line = [NSString stringWithUTF8String:buf];
+
+    NSString *output = [self runCmdOutput:self.otoolPath args:@[@"-L", ep]];
+    if (!output) return d;
+
+    NSArray *lines = [output componentsSeparatedByString:@"\n"];
+    for (NSString *line in lines) {
         NSString *t = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if ([t hasPrefix:@"\t"]) {
             NSRange r = [t rangeOfString:@" ("];
             if (r.location != NSNotFound) [d addObject:[t substringWithRange:NSMakeRange(1, r.location - 1)]];
         }
     }
-    pclose(fp);
     return d;
 }
 
