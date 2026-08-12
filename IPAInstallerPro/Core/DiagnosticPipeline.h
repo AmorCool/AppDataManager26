@@ -8,7 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import "CrashIncident.h"
-#import "CrashCorrelation.h"
+#import "CrashCorrelator.h"
 
 @interface DiagnosticReport : NSObject
 @property (nonatomic, strong) NSDate *generatedAt;
