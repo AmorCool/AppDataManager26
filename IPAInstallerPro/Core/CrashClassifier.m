@@ -380,7 +380,7 @@
 - (NSNumber *)extractErrnoFromDetails:(NSString *)details {
     if (!details || details.length == 0) return nil;
     // Pattern: "errno=13" or "errno=2" or "with errno=13"
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"errno[=:]\s*(\d+)" options:0 error:nil];
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"errno[=:]\\s*(\\d+)" options:0 error:nil];
     NSTextCheckingResult *match = [regex firstMatchInString:details options:0 range:NSMakeRange(0, details.length)];
     if (match && match.numberOfRanges > 1) {
         NSString *numStr = [details substringWithRange:[match rangeAtIndex:1]];
