@@ -4,7 +4,6 @@
 //
 
 #import "OperationLog.h"
-#import <UIKit/UIKit.h>
 
 // ============================================================
 // OperationRecord
@@ -12,60 +11,49 @@
 
 @interface OperationRecord ()
 @property (nonatomic, strong, readwrite) NSString *recordID;
-@property (nonatomic, strong, readwrite) NSString *operationID;
+@property (nonatomic, strong, readwrite) NSString *transactionID;
 @property (nonatomic, strong, readwrite) NSDate *timestamp;
 @property (nonatomic, assign, readwrite) OperationPhase phase;
 @property (nonatomic, strong, readwrite) NSString *operation;
 @property (nonatomic, strong, readwrite) NSString *target;
-@property (nonatomic, assign, readwrite) OperationResult result;
+@property (nonatomic, strong, readwrite) NSString *input;
 @property (nonatomic, assign, readwrite) int exitCode;
 @property (nonatomic, strong, readwrite) NSString *rawOutput;
 @property (nonatomic, strong, readwrite) NSString *rawError;
+@property (nonatomic, strong, readwrite) NSString *verification;
+@property (nonatomic, assign, readwrite) BOOL verified;
+@property (nonatomic, assign, readwrite) OperationResult result;
 @property (nonatomic, assign, readwrite) NSTimeInterval duration;
 @property (nonatomic, strong, readwrite) NSDictionary *context;
 @end
 
 @implementation OperationRecord
 
-- (instancetype)initWithOperationID:(NSString *)opID
-                              phase:(OperationPhase)phase
-                          operation:(NSString *)operation
-                             target:(NSString *)target
-                             result:(OperationResult)result
-                           exitCode:(int)exitCode
-                          rawOutput:(NSString *)rawOutput
-                           rawError:(NSString *)rawError
-                           duration:(NSTimeInterval)duration
-                            context:(NSDictionary *)context {
+- (instancetype)init {
     self = [super init];
     if (self) {
         _recordID = [[NSUUID UUID] UUIDString];
-        _operationID = opID ?: @"unknown";
         _timestamp = [NSDate date];
-        _phase = phase;
-        _operation = operation ?: @"unknown";
-        _target = target ?: @"";
-        _result = result;
-        _exitCode = exitCode;
-        _rawOutput = rawOutput ?: @"";
-        _rawError = rawError ?: @"";
-        _duration = duration;
-        _context = context ?: @{};
+        _phase = OperationPhaseUnknown;
+        _operation = @"unknown";
+        _target = @"";
+        _input = @"";
+        _exitCode = -1;
+        _rawOutput = @"";
+        _rawError = @"";
+        _verification = @"";
+        _verified = NO;
+        _result = OperationResultPending;
+        _duration = 0;
+        _context = @{};
     }
     return self;
-}
-
-- (NSString *)formattedTimestamp {
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"HH:mm:ss.SSS";
-    return [fmt stringFromDate:self.timestamp];
 }
 
 - (NSString *)phaseName {
     switch (self.phase) {
         case OperationPhaseStart: return @"START";
         case OperationPhaseIPAOpen: return @"IPA_OPEN";
-        case OperationPhaseIPAValidate: return @"IPA_VALIDATE";
         case OperationPhaseIPAExtract: return @"IPA_EXTRACT";
         case OperationPhaseAppIdentify: return @"APP_IDENTIFY";
         case OperationPhaseFileCopy: return @"FILE_COPY";
@@ -75,7 +63,6 @@
         case OperationPhasePermission: return @"PERMISSION";
         case OperationPhaseUICache: return @"UICACHE";
         case OperationPhaseVerify: return @"VERIFY";
-        case OperationPhaseLaunch: return @"LAUNCH";
         case OperationPhaseCleanup: return @"CLEANUP";
         case OperationPhaseComplete: return @"COMPLETE";
         default: return @"UNKNOWN";
@@ -105,26 +92,34 @@
 }
 
 - (NSString *)logLine {
-    return [NSString stringWithFormat:@"[%@] [%@] %@ %@ | %@ | exit=%d | %.3fs",
-            [self formattedTimestamp],
-            [self phaseName],
-            [self resultSymbol],
-            self.operation,
-            self.target,
-            self.exitCode,
-            self.duration];
+    if (self.result == OperationResultPending) {
+        return [NSString stringWithFormat:@"[%@] [%@] ⏳ START | %@ | %@",
+                [self timestampString], [self phaseName], self.operation, self.target];
+    }
+    return [NSString stringWithFormat:@"[%@] [%@] %@ %@ | exit=%d | verified=%@ | dur=%.3fs | %@",
+            [self timestampString], [self phaseName], [self resultSymbol], self.operation,
+            self.exitCode, self.verified ? @"YES" : @"NO", self.duration, self.target];
+}
+
+- (NSString *)timestampString {
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.dateFormat = @"HH:mm:ss.SSS";
+    return [fmt stringFromDate:self.timestamp];
 }
 
 - (NSString *)detailDump {
     NSMutableString *s = [NSMutableString string];
     [s appendFormat:@"Record: %@\n", self.recordID];
-    [s appendFormat:@"Transaction: %@\n", self.operationID];
-    [s appendFormat:@"Time: %@\n", [self formattedTimestamp]];
+    [s appendFormat:@"Transaction: %@\n", self.transactionID];
+    [s appendFormat:@"Time: %@\n", [self timestampString]];
     [s appendFormat:@"Phase: %@\n", [self phaseName]];
     [s appendFormat:@"Operation: %@\n", self.operation];
     [s appendFormat:@"Target: %@\n", self.target];
-    [s appendFormat:@"Result: %@\n", [self resultName]];
+    [s appendFormat:@"Input: %@\n", self.input];
     [s appendFormat:@"Exit Code: %d\n", self.exitCode];
+    [s appendFormat:@"Verification: %@\n", self.verification];
+    [s appendFormat:@"Verified: %@\n", self.verified ? @"YES" : @"NO"];
+    [s appendFormat:@"Result: %@\n", [self resultName]];
     [s appendFormat:@"Duration: %.3f seconds\n", self.duration];
     if (self.rawOutput.length > 0) [s appendFormat:@"Raw Output:\n%@\n", self.rawOutput];
     if (self.rawError.length > 0) [s appendFormat:@"Raw Error:\n%@\n", self.rawError];
@@ -135,13 +130,16 @@
 - (NSDictionary *)dictionaryRepresentation {
     return @{
         @"recordID": self.recordID,
-        @"operationID": self.operationID,
-        @"timestamp": [self formattedTimestamp],
+        @"transactionID": self.transactionID,
+        @"timestamp": [self timestampString],
         @"phase": [self phaseName],
         @"operation": self.operation,
         @"target": self.target,
-        @"result": [self resultName],
+        @"input": self.input,
         @"exitCode": @(self.exitCode),
+        @"verification": self.verification,
+        @"verified": @(self.verified),
+        @"result": [self resultName],
         @"duration": @(self.duration),
         @"rawOutput": self.rawOutput,
         @"rawError": self.rawError,
@@ -155,11 +153,12 @@
 // OperationLog
 // ============================================================
 
-static NSString * const kOperationLogStorageKey = @"IPAInstallerPro_OperationLog_v2";
+static NSString * const kOperationLogStorageKey = @"IPAInstallerPro_OperationLog_v3";
 
 @interface OperationLog ()
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<OperationRecord *> *> *transactions;
 @property (nonatomic, strong) NSMutableArray<NSString *> *transactionOrder;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, OperationRecord *> *pendingRecords;
 @property (nonatomic, strong) dispatch_queue_t queue;
 @property (nonatomic, strong, readwrite) NSString *activeTransactionID;
 @end
@@ -179,380 +178,323 @@ static NSString * const kOperationLogStorageKey = @"IPAInstallerPro_OperationLog
         _queue = dispatch_queue_create("com.aosaid.operationlog", DISPATCH_QUEUE_SERIAL);
         _transactions = [NSMutableDictionary dictionary];
         _transactionOrder = [NSMutableArray array];
-        [self loadLogs];
+        _pendingRecords = [NSMutableDictionary dictionary];
     }
     return self;
 }
 
-#pragma mark - Transaction Management
+#pragma mark - Transaction Lifecycle
 
 - (NSString *)beginTransactionForIPA:(NSString *)ipaPath {
-    NSString *opID = [NSString stringWithFormat:@"op_%@_%@",
-                      [[ipaPath lastPathComponent] stringByDeletingPathExtension] ?: @"unknown",
-                      @((NSUInteger)([[NSDate date] timeIntervalSince1970] * 1000))];
+    NSString *txnID = [NSString stringWithFormat:@"txn_%@_%@",
+                       [[ipaPath lastPathComponent] stringByDeletingPathExtension] ?: @"unknown",
+                       @((NSUInteger)([[NSDate date] timeIntervalSince1970] * 1000))];
 
     dispatch_async(self.queue, ^{
-        self.transactions[opID] = [NSMutableArray array];
-        [self.transactionOrder addObject:opID];
-        self.activeTransactionID = opID;
+        self.transactions[txnID] = [NSMutableArray array];
+        [self.transactionOrder addObject:txnID];
+        self.activeTransactionID = txnID;
     });
 
-    // Log transaction start
-    [self logOperation:@"BEGIN"
-                 phase:OperationPhaseStart
-                target:ipaPath
-                result:OperationResultSuccess
-              exitCode:0
-             rawOutput:@""
-              rawError:@""
-              duration:0
-               context:@{@"device": [UIDevice currentDevice].name,
-                        @"systemVersion": [UIDevice currentDevice].systemVersion}
-         operationID:opID];
-
-    NSLog(@"[OperationLog] Transaction started: %@", opID);
-    return opID;
-}
-
-- (void)endTransaction:(NSString *)operationID {
-    [self logOperation:@"END"
-                 phase:OperationPhaseComplete
-                target:@""
-                result:OperationResultSuccess
-              exitCode:0
-             rawOutput:@""
-              rawError:@""
-              duration:0
-               context:@{}
-         operationID:operationID];
+    // Log transaction start as a completed record (no verification needed)
+    OperationRecord *rec = [[OperationRecord alloc] init];
+    rec.transactionID = txnID;
+    rec.phase = OperationPhaseStart;
+    rec.operation = @"BEGIN_TRANSACTION";
+    rec.target = ipaPath;
+    rec.input = ipaPath;
+    rec.exitCode = 0;
+    rec.verification = @"Transaction initialized";
+    rec.verified = YES;
+    rec.result = OperationResultSuccess;
+    rec.duration = 0;
 
     dispatch_async(self.queue, ^{
-        if ([self.activeTransactionID isEqualToString:operationID]) {
-            self.activeTransactionID = nil;
+        if (!self.transactions[txnID]) self.transactions[txnID] = [NSMutableArray array];
+        [self.transactions[txnID] addObject:rec];
+    });
+
+    NSLog(@"[OperationLog] ▶️  TRANSACTION STARTED: %@", txnID);
+    return txnID;
+}
+
+- (void)endTransaction:(NSString *)transactionID finalResult:(OperationResult)result {
+    OperationRecord *rec = [[OperationRecord alloc] init];
+    rec.transactionID = transactionID;
+    rec.phase = OperationPhaseComplete;
+    rec.operation = @"END_TRANSACTION";
+    rec.target = @"";
+    rec.exitCode = (result == OperationResultSuccess) ? 0 : 1;
+    rec.verification = [NSString stringWithFormat:@"Final result: %@", [self resultName:result]];
+    rec.verified = (result == OperationResultSuccess);
+    rec.result = result;
+    rec.duration = 0;
+
+    dispatch_async(self.queue, ^{
+        if (!self.transactions[transactionID]) self.transactions[transactionID] = [NSMutableArray array];
+        [self.transactions[transactionID] addObject:rec];
+        if ([self.activeTransactionID isEqualToString:transactionID]) self.activeTransactionID = nil;
+    });
+
+    NSString *icon = (result == OperationResultSuccess) ? @"✅" : @"❌";
+    NSLog(@"[OperationLog] %@ TRANSACTION ENDED: %@ | Result: %@", icon, transactionID, [self resultName:result]);
+}
+
+#pragma mark - Phase Lifecycle
+
+- (NSString *)beginPhase:(OperationPhase)phase
+               operation:(NSString *)operation
+                  target:(NSString *)target
+                   input:(NSString *)input
+           transactionID:(NSString *)transactionID {
+
+    OperationRecord *rec = [[OperationRecord alloc] init];
+    rec.transactionID = transactionID;
+    rec.phase = phase;
+    rec.operation = operation;
+    rec.target = target ?: @"";
+    rec.input = input ?: @"";
+    rec.result = OperationResultPending;
+
+    dispatch_async(self.queue, ^{
+        if (!self.transactions[transactionID]) self.transactions[transactionID] = [NSMutableArray array];
+        [self.transactions[transactionID] addObject:rec];
+        self.pendingRecords[rec.recordID] = rec;
+    });
+
+    NSLog(@"[OperationLog] ⏳ [%@] START | %@ | %@", [rec phaseName], operation, target);
+    return rec.recordID;
+}
+
+- (void)endPhase:(NSString *)recordID
+        exitCode:(int)exitCode
+       rawOutput:(NSString *)rawOutput
+        rawError:(NSString *)rawError
+    verification:(NSString *)verification
+        verified:(BOOL)verified
+        duration:(NSTimeInterval)duration
+         context:(NSDictionary *)context {
+
+    dispatch_async(self.queue, ^{
+        OperationRecord *rec = self.pendingRecords[recordID];
+        if (!rec) {
+            NSLog(@"[OperationLog] ⚠️ Cannot end phase: record %@ not found", recordID);
+            return;
         }
-        [self saveLogs];
-    });
 
-    NSLog(@"[OperationLog] Transaction ended: %@", operationID);
-}
+        rec.exitCode = exitCode;
+        rec.rawOutput = rawOutput ?: @"";
+        rec.rawError = rawError ?: @"";
+        rec.verification = verification ?: @"";
+        rec.verified = verified;
+        rec.duration = duration;
+        rec.context = context ?: @{};
 
-#pragma mark - Core Logging
-
-- (void)logOperation:(NSString *)operation
-             phase:(OperationPhase)phase
-            target:(NSString *)target
-            result:(OperationResult)result
-          exitCode:(int)exitCode
-          rawOutput:(NSString *)rawOutput
-           rawError:(NSString *)rawError
-          duration:(NSTimeInterval)duration
-           context:(NSDictionary *)context
-     operationID:(NSString *)operationID {
-
-    OperationRecord *record = [[OperationRecord alloc] initWithOperationID:operationID
-                                                                       phase:phase
-                                                                   operation:operation
-                                                                      target:target
-                                                                      result:result
-                                                                    exitCode:exitCode
-                                                                   rawOutput:rawOutput
-                                                                    rawError:rawError
-                                                                    duration:duration
-                                                                     context:context];
-
-    dispatch_async(self.queue, ^{
-        if (!self.transactions[operationID]) {
-            self.transactions[operationID] = [NSMutableArray array];
+        // Determine final result: verified is the gatekeeper
+        if (rec.result == OperationResultSkipped) {
+            // Already marked as skipped, keep it
+        } else if (!verified) {
+            rec.result = OperationResultFailed;
+        } else if (exitCode != 0) {
+            rec.result = OperationResultFailed;
+        } else {
+            rec.result = OperationResultSuccess;
         }
-        [self.transactions[operationID] addObject:record];
+
+        [self.pendingRecords removeObjectForKey:recordID];
+
+        NSString *icon = (rec.result == OperationResultSuccess) ? @"✅" : @"❌";
+        NSLog(@"[OperationLog] %@ [%@] END | %@ | exit=%d | verified=%@ | %.3fs | %@",
+              icon, [rec phaseName], rec.operation, exitCode,
+              verified ? @"YES" : @"NO", duration, rec.target);
+        if (rawError.length > 0) NSLog(@"[OperationLog]   Error: %@", rawError);
+        if (!verified && verification.length > 0) NSLog(@"[OperationLog]   Verification failed: %@", verification);
     });
-
-    // Always print to console
-    NSLog(@"%@", [record logLine]);
-    if (rawError.length > 0) NSLog(@"[OperationLog] ERROR: %@", rawError);
 }
 
-- (void)logCommand:(NSString *)command
-              args:(NSArray *)args
-            target:(NSString *)target
-            result:(OperationResult)result
-          exitCode:(int)exitCode
-          rawOutput:(NSString *)rawOutput
-           rawError:(NSString *)rawError
-          duration:(NSTimeInterval)duration
-     operationID:(NSString *)operationID {
-
-    NSString *fullCmd = [NSString stringWithFormat:@"%@ %@", command, [args componentsJoinedByString:@" "]];
-    [self logOperation:fullCmd
-                 phase:OperationPhaseUnknown
-                target:target
-                result:result
-              exitCode:exitCode
-             rawOutput:rawOutput
-              rawError:rawError
-              duration:duration
-               context:@{@"command": command, @"args": args ?: @[]}
-         operationID:operationID];
-}
-
-- (void)logFileOp:(NSString *)operation
-             from:(NSString *)sourcePath
-               to:(NSString *)destPath
-           result:(OperationResult)result
-         exitCode:(int)exitCode
-          rawError:(NSString *)rawError
-         duration:(NSTimeInterval)duration
-    operationID:(NSString *)operationID {
-
-    NSString *target = destPath.length > 0 ? [NSString stringWithFormat:@"%@ -> %@", sourcePath, destPath] : sourcePath;
-    OperationPhase phase = OperationPhaseFileCopy;
-    if ([operation containsString:@"chmod"]) phase = OperationPhasePermission;
-    else if ([operation containsString:@"remove"] || [operation containsString:@"rm"]) phase = OperationPhaseCleanup;
-    else if ([operation containsString:@"sign"] || [operation containsString:@"ldid"]) phase = OperationPhaseSign;
-
-    [self logOperation:operation
-                 phase:phase
-                target:target
-                result:result
-              exitCode:exitCode
-             rawOutput:@""
-              rawError:rawError
-              duration:duration
-               context:@{@"source": sourcePath ?: @"", @"destination": destPath ?: @""}
-         operationID:operationID];
-}
-
-#pragma mark - Phase Markers
-
-- (OperationRecord *)markPhaseStart:(OperationPhase)phase
-                          operation:(NSString *)operation
-                             target:(NSString *)target
-                      operationID:(NSString *)operationID {
-
-    OperationRecord *record = [[OperationRecord alloc] initWithOperationID:operationID
-                                                                       phase:phase
-                                                                   operation:operation
-                                                                      target:target
-                                                                      result:OperationResultPending
-                                                                    exitCode:0
-                                                                   rawOutput:@""
-                                                                    rawError:@""
-                                                                    duration:0
-                                                                     context:@{}];
-
-    dispatch_async(self.queue, ^{
-        if (!self.transactions[operationID]) self.transactions[operationID] = [NSMutableArray array];
-        [self.transactions[operationID] addObject:record];
-    });
-
-    NSLog(@"[OperationLog] ▶️  %@: %@", [record phaseName], operation);
-    return record;
-}
-
-- (void)markPhaseEnd:(OperationPhase)phase
-            record:(OperationRecord *)record
-            result:(OperationResult)result
-          exitCode:(int)exitCode
-          rawOutput:(NSString *)rawOutput
-           rawError:(NSString *)rawError
-          duration:(NSTimeInterval)duration
-           context:(NSDictionary *)context {
-
-    if (!record) return;
-
-    // Update the record in-place
-    [record setValue:@(result) forKey:@"result"];
-    [record setValue:@(exitCode) forKey:@"exitCode"];
-    [record setValue:(rawOutput ?: @"") forKey:@"rawOutput"];
-    [record setValue:(rawError ?: @"") forKey:@"rawError"];
-    [record setValue:@(duration) forKey:@"duration"];
-    [record setValue:(context ?: @{}) forKey:@"context"];
-
-    NSString *icon = result == OperationResultSuccess ? @"✅" : (result == OperationResultFailed ? @"❌" : @"⏭");
-    NSLog(@"[OperationLog] %@ %@ completed in %.3fs | exit=%d", icon, [record phaseName], duration, exitCode);
-    if (rawError.length > 0) NSLog(@"[OperationLog]   Error: %@", rawError);
-
-    dispatch_async(self.queue, ^{ [self saveLogs]; });
+- (void)endPhase:(NSString *)recordID
+        exitCode:(int)exitCode
+       rawOutput:(NSString *)rawOutput
+        rawError:(NSString *)rawError
+    verification:(NSString *)verification
+        verified:(BOOL)verified
+        duration:(NSTimeInterval)duration {
+    [self endPhase:recordID exitCode:exitCode rawOutput:rawOutput rawError:rawError
+      verification:verification verified:verified duration:duration context:@{}];
 }
 
 #pragma mark - Query
 
-- (NSArray<OperationRecord *> *)recordsForTransaction:(NSString *)operationID {
+- (NSArray<OperationRecord *> *)recordsForTransaction:(NSString *)transactionID {
     __block NSArray<OperationRecord *> *result;
-    dispatch_sync(self.queue, ^{ result = [self.transactions[operationID] copy]; });
+    dispatch_sync(self.queue, ^{ result = [self.transactions[transactionID] copy]; });
     return result ?: @[];
 }
 
-- (NSArray<OperationRecord *> *)allRecords {
-    __block NSMutableArray *all = [NSMutableArray array];
+- (OperationRecord *)recordByID:(NSString *)recordID {
+    __block OperationRecord *result = nil;
     dispatch_sync(self.queue, ^{
-        for (NSString *tid in self.transactionOrder) {
-            [all addObjectsFromArray:self.transactions[tid]];
+        result = self.pendingRecords[recordID];
+        if (!result) {
+            for (NSString *tid in self.transactions) {
+                for (OperationRecord *rec in self.transactions[tid]) {
+                    if ([rec.recordID isEqualToString:recordID]) { result = rec; break; }
+                }
+                if (result) break;
+            }
         }
     });
-    return all;
+    return result;
 }
 
-- (NSArray<OperationRecord *> *)failedRecords {
+- (NSArray<OperationRecord *> *)failedRecordsInTransaction:(NSString *)transactionID {
     NSMutableArray *failed = [NSMutableArray array];
-    for (OperationRecord *r in [self allRecords]) {
-        if (r.result == OperationResultFailed) [failed addObject:r];
+    for (OperationRecord *rec in [self recordsForTransaction:transactionID]) {
+        if (rec.result == OperationResultFailed) [failed addObject:rec];
     }
     return failed;
 }
 
-- (NSArray<OperationRecord *> *)recordsForPhase:(OperationPhase)phase {
-    NSMutableArray *result = [NSMutableArray array];
-    for (OperationRecord *r in [self allRecords]) {
-        if (r.phase == phase) [result addObject:r];
+- (OperationRecord *)firstFailureInTransaction:(NSString *)transactionID {
+    for (OperationRecord *rec in [self recordsForTransaction:transactionID]) {
+        if (rec.result == OperationResultFailed) return rec;
     }
-    return result;
+    return nil;
 }
 
-- (OperationRecord *)lastRecordForTransaction:(NSString *)operationID {
-    NSArray *records = [self recordsForTransaction:operationID];
-    return records.lastObject;
+- (BOOL)transactionHasFailures:(NSString *)transactionID {
+    return [self firstFailureInTransaction:transactionID] != nil;
 }
 
 #pragma mark - Reports
 
-- (NSString *)transactionReport:(NSString *)operationID {
-    NSArray<OperationRecord *> *records = [self recordsForTransaction:operationID];
+- (NSString *)transactionReport:(NSString *)transactionID {
+    NSArray<OperationRecord *> *records = [self recordsForTransaction:transactionID];
     if (records.count == 0) return @"No records for this transaction.";
 
-    NSMutableString *report = [NSMutableString string];
-    [report appendString:@"═══════════════════════════════════════════════════\n"];
-    [report appendString:@"  IPA INSTALLER PRO — INSTALLATION AUDIT TRAIL\n"];
-    [report appendString:@"═══════════════════════════════════════════════════\n\n"];
-    [report appendFormat:@"Transaction: %@\n", operationID];
-    [report appendFormat:@"Total Operations: %lu\n\n", (unsigned long)records.count];
+    NSMutableString *r = [NSMutableString string];
+    [r appendString:@"═══════════════════════════════════════════════════\n"];
+    [r appendString:@"  IPA INSTALLER PRO — INSTALLATION AUDIT TRAIL\n"];
+    [r appendString:@"═══════════════════════════════════════════════════\n\n"];
+    [r appendFormat:@"Transaction: %@\n", transactionID];
+    [r appendFormat:@"Total Records: %lu\n\n", (unsigned long)records.count];
+
+    // Find first failure
+    OperationRecord *firstFail = [self firstFailureInTransaction:transactionID];
+    if (firstFail) {
+        [r appendString:@"⚠️ FIRST FAILURE:\n"];
+        [r appendFormat:@"  Phase: %@\n", [firstFail phaseName]];
+        [r appendFormat:@"  Operation: %@\n", firstFail.operation];
+        [r appendFormat:@"  Target: %@\n", firstFail.target];
+        [r appendFormat:@"  Exit Code: %d\n", firstFail.exitCode];
+        [r appendFormat:@"  Verification: %@\n", firstFail.verification];
+        [r appendFormat:@"  Verified: %@\n", firstFail.verified ? @"YES" : @"NO"];
+        [r appendFormat:@"  Error: %@\n\n", firstFail.rawError];
+    }
 
     // Statistics
-    NSUInteger success = 0, failed = 0, skipped = 0;
-    NSTimeInterval totalDuration = 0;
-    for (OperationRecord *r in records) {
-        switch (r.result) {
+    NSUInteger success = 0, failed = 0, skipped = 0, pending = 0;
+    for (OperationRecord *rec in records) {
+        switch (rec.result) {
             case OperationResultSuccess: success++; break;
             case OperationResultFailed: failed++; break;
             case OperationResultSkipped: skipped++; break;
+            case OperationResultPending: pending++; break;
             default: break;
         }
-        totalDuration += r.duration;
     }
+    [r appendString:@"━━━ STATISTICS ━━━\n"];
+    [r appendFormat:@"✅ Success: %lu\n", (unsigned long)success];
+    [r appendFormat:@"❌ Failed: %lu\n", (unsigned long)failed];
+    [r appendFormat:@"⏭ Skipped: %lu\n", (unsigned long)skipped];
+    [r appendFormat:@"⏳ Pending: %lu\n\n", (unsigned long)pending];
 
-    [report appendString:@"━━━ STATISTICS ━━━\n"];
-    [report appendFormat:@"✅ Success: %lu\n", (unsigned long)success];
-    [report appendFormat:@"❌ Failed: %lu\n", (unsigned long)failed];
-    [report appendFormat:@"⏭ Skipped: %lu\n", (unsigned long)skipped];
-    [report appendFormat:@"⏱ Total Duration: %.3f seconds\n\n", totalDuration];
-
-    // Operation list
-    [report appendString:@"━━━ OPERATIONS ━━━\n\n"];
-    for (OperationRecord *r in records) {
-        [report appendString:[r logLine]];
-        [report appendString:@"\n"];
-        if (r.rawError.length > 0) {
-            [report appendFormat:@"     ERROR: %@\n", r.rawError];
+    // Pipeline view
+    [r appendString:@"━━━ PIPELINE ━━━\n\n"];
+    for (OperationRecord *rec in records) {
+        [r appendString:[rec logLine]];
+        [r appendString:@"\n"];
+        if (rec.rawError.length > 0) {
+            [r appendFormat:@"     ERROR: %@\n", rec.rawError];
         }
-        if (r.rawOutput.length > 0 && r.rawOutput.length < 500) {
-            [report appendFormat:@"     OUTPUT: %@\n", r.rawOutput];
+        if (rec.verification.length > 0 && rec.result != OperationResultSuccess) {
+            [r appendFormat:@"     VERIFICATION: %@\n", rec.verification];
         }
     }
 
     // Final status
-    [report appendString:@"\n━━━ FINAL STATUS ━━━\n"];
-    OperationRecord *last = records.lastObject;
-    if (last.phase == OperationPhaseComplete && last.result == OperationResultSuccess) {
-        [report appendString:@"✅ INSTALLATION COMPLETED\n"];
+    [r appendString:@"\n━━━ FINAL STATUS ━━━\n"];
+    if (failed == 0 && pending == 0) {
+        [r appendString:@"✅ ALL PHASES COMPLETED SUCCESSFULLY\n"];
     } else if (failed > 0) {
-        [report appendFormat:@"❌ INSTALLATION FAILED (%lu operation(s) failed)\n", (unsigned long)failed];
+        [r appendFormat:@"❌ INSTALLATION FAILED (%lu phase(s) failed)\n", (unsigned long)failed];
+        [r appendString:@"Pipeline continued after failure — review log for details.\n"];
     } else {
-        [report appendString:@"⚠️ INSTALLATION STATUS UNCLEAR\n"];
+        [r appendString:@"⏳ INSTALLATION INCOMPLETE (pending phases)\n"];
     }
 
-    return report;
+    return r;
 }
 
-- (NSString *)transactionSummary:(NSString *)operationID {
-    NSArray<OperationRecord *> *records = [self recordsForTransaction:operationID];
-    if (records.count == 0) return @"No data";
+- (NSString *)transactionSummary:(NSString *)transactionID {
+    NSArray<OperationRecord *> *records = [self recordsForTransaction:transactionID];
+    OperationRecord *firstFail = [self firstFailureInTransaction:transactionID];
+    NSUInteger total = records.count;
+    NSUInteger failed = [self failedRecordsInTransaction:transactionID].count;
 
-    NSUInteger failed = 0;
-    for (OperationRecord *r in records) {
-        if (r.result == OperationResultFailed) failed++;
+    if (firstFail) {
+        return [NSString stringWithFormat:@"❌ FAILED at %@ | %@/%@ phases failed",
+                [firstFail phaseName], @(failed), @(total)];
+    } else if (total > 0) {
+        return [NSString stringWithFormat:@"✅ Completed | %@ phases | no failures", @(total)];
     }
-
-    OperationRecord *first = records.firstObject;
-    OperationRecord *last = records.lastObject;
-
-    if (failed > 0) {
-        return [NSString stringWithFormat:@"❌ Failed (%lu errors) | %@ operations", (unsigned long)failed, @(records.count)];
-    } else if (last.phase == OperationPhaseComplete) {
-        return [NSString stringWithFormat:@"✅ Completed | %@ operations | %.1fs", @(records.count), last.duration];
-    } else {
-        return [NSString stringWithFormat:@"⏳ In Progress | %@ operations", @(records.count)];
-    }
+    return @"No data";
 }
 
-- (NSDictionary *)transactionStats:(NSString *)operationID {
-    NSArray<OperationRecord *> *records = [self recordsForTransaction:operationID];
+- (NSDictionary *)transactionStats:(NSString *)transactionID {
+    NSArray<OperationRecord *> *records = [self recordsForTransaction:transactionID];
     NSUInteger success = 0, failed = 0, skipped = 0;
     NSTimeInterval totalDuration = 0;
-    for (OperationRecord *r in records) {
-        switch (r.result) {
+    for (OperationRecord *rec in records) {
+        switch (rec.result) {
             case OperationResultSuccess: success++; break;
             case OperationResultFailed: failed++; break;
             case OperationResultSkipped: skipped++; break;
             default: break;
         }
-        totalDuration += r.duration;
+        totalDuration += rec.duration;
     }
+    OperationRecord *firstFail = [self firstFailureInTransaction:transactionID];
     return @{
-        @"totalOperations": @(records.count),
+        @"totalPhases": @(records.count),
         @"success": @(success),
         @"failed": @(failed),
         @"skipped": @(skipped),
         @"totalDuration": @(totalDuration),
-        @"successRate": records.count > 0 ? @(success / (double)records.count) : @0
+        @"hasFailures": @(firstFail != nil),
+        @"firstFailurePhase": firstFail ? [firstFail phaseName] : @"",
+        @"firstFailureOperation": firstFail ? firstFail.operation : @""
     };
 }
 
-#pragma mark - Export
-
-- (NSString *)exportTransactionAsJSON:(NSString *)operationID {
-    NSArray<OperationRecord *> *records = [self recordsForTransaction:operationID];
+- (NSString *)exportTransactionAsJSON:(NSString *)transactionID {
+    NSArray<OperationRecord *> *records = [self recordsForTransaction:transactionID];
     NSMutableArray *dicts = [NSMutableArray array];
-    for (OperationRecord *r in records) {
-        [dicts addObject:[r dictionaryRepresentation]];
+    for (OperationRecord *rec in records) {
+        [dicts addObject:[rec dictionaryRepresentation]];
     }
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:dicts options:NSJSONWritingPrettyPrinted error:&error];
     return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"{}";
 }
 
-- (NSString *)exportAllAsJSON {
-    NSMutableDictionary *all = [NSMutableDictionary dictionary];
-    dispatch_sync(self.queue, ^{
-        for (NSString *tid in self.transactionOrder) {
-            NSMutableArray *dicts = [NSMutableArray array];
-            for (OperationRecord *r in self.transactions[tid]) {
-                [dicts addObject:[r dictionaryRepresentation]];
-            }
-            all[tid] = dicts;
-        }
-    });
-    NSError *error = nil;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:all options:NSJSONWritingPrettyPrinted error:&error];
-    return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"{}";
-}
-
 #pragma mark - Management
 
-- (void)clearTransaction:(NSString *)operationID {
+- (void)clearTransaction:(NSString *)transactionID {
     dispatch_async(self.queue, ^{
-        [self.transactions removeObjectForKey:operationID];
-        [self.transactionOrder removeObject:operationID];
-        [self saveLogs];
+        [self.transactions removeObjectForKey:transactionID];
+        [self.transactionOrder removeObject:transactionID];
+        if ([self.activeTransactionID isEqualToString:transactionID]) self.activeTransactionID = nil;
     });
 }
 
@@ -560,53 +502,22 @@ static NSString * const kOperationLogStorageKey = @"IPAInstallerPro_OperationLog
     dispatch_async(self.queue, ^{
         [self.transactions removeAllObjects];
         [self.transactionOrder removeAllObjects];
+        [self.pendingRecords removeAllObjects];
         self.activeTransactionID = nil;
-        [self saveLogs];
     });
 }
 
-#pragma mark - Persistence
+#pragma mark - Helpers
 
-- (void)saveLogs {
-    NSMutableArray *data = [NSMutableArray array];
-    dispatch_sync(self.queue, ^{
-        for (NSString *tid in self.transactionOrder) {
-            NSMutableArray *records = [NSMutableArray array];
-            for (OperationRecord *r in self.transactions[tid]) {
-                [records addObject:[r dictionaryRepresentation]];
-            }
-            [data addObject:@{@"transactionID": tid, @"records": records}];
-        }
-    });
-    [[NSUserDefaults standardUserDefaults] setObject:data forKey:kOperationLogStorageKey];
-}
-
-- (void)loadLogs {
-    NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:kOperationLogStorageKey];
-    if (!saved) return;
-
-    dispatch_async(self.queue, ^{
-        for (NSDictionary *tDict in saved) {
-            NSString *tid = tDict[@"transactionID"];
-            NSArray *rDicts = tDict[@"records"];
-            NSMutableArray *records = [NSMutableArray array];
-            for (NSDictionary *dict in rDicts) {
-                OperationRecord *r = [[OperationRecord alloc] initWithOperationID:dict[@"operationID"] ?: tid
-                                                                              phase:OperationPhaseUnknown
-                                                                          operation:dict[@"operation"] ?: @"unknown"
-                                                                             target:dict[@"target"] ?: @""
-                                                                             result:OperationResultSuccess
-                                                                           exitCode:[dict[@"exitCode"] intValue]
-                                                                          rawOutput:dict[@"rawOutput"] ?: @""
-                                                                           rawError:dict[@"rawError"] ?: @""
-                                                                           duration:[dict[@"duration"] doubleValue]
-                                                                            context:dict[@"context"] ?: @{}];
-                [records addObject:r];
-            }
-            self.transactions[tid] = records;
-            [self.transactionOrder addObject:tid];
-        }
-    });
+- (NSString *)resultName:(OperationResult)result {
+    switch (result) {
+        case OperationResultSuccess: return @"SUCCESS";
+        case OperationResultFailed: return @"FAILED";
+        case OperationResultSkipped: return @"SKIPPED";
+        case OperationResultPartial: return @"PARTIAL";
+        case OperationResultPending: return @"PENDING";
+        default: return @"UNKNOWN";
+    }
 }
 
 #pragma mark - Properties
