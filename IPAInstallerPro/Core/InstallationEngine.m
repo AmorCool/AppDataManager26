@@ -4,6 +4,7 @@
 //
 
 #import "InstallationEngine.h"
+#import "IPAValidator.h"
 #import "DirectInstallationProvider.h"
 #import "SystemInstallationProvider.h"
 #import "AppInstInstallationProvider.h"
