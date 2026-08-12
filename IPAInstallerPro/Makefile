@@ -1,36 +1,28 @@
-export TARGET = iphone:clang:latest:15.0
-export ARCHS = arm64 arm64e
+# IPAInstallerPro Makefile
+# Version: 1.1.0
 
-THEOS_PACKAGE_SCHEME = rootless
-INSTALL_TARGET_PROCESSES = IPAInstallerPro
+TARGET := iphone:clang:latest:15.0
+ARCHS := arm64
 
 include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = IPAInstallerPro
 
-IPAInstallerPro_FILES =  main.m  AppDelegate.m  Core/Logger.m  Core/JailbreakEnvironment.m  Core/RootlessManager.m  Core/CapabilityManager.m  Core/IPAValidator.m  Core/IPAExtractor.m  Core/InstallationProvider.m  Core/AppInstInstallationProvider.m  Core/SystemInstallationProvider.m  Core/DirectInstallationProvider.m  Core/OperationLog.m  Core/InstallationEngine.m  Core/VerificationEngine.m  Core/CrashReporter.m  Core/CrashLogParser.m  Core/CrashIncident.m  Core/CrashClassifier.m  Core/CrashDiscovery.m  Core/CrashDeduplicator.m  Core/CrashCorrelator.m  Core/DiagnosticPipeline.m  Core/ProcessMonitor.m  Core/LaunchDetector.m  Core/InstallationLogger.m  Core/ApplicationManager.m  Core/DependencyManager.m  UI/MainViewController.m  UI/IPAFileBrowserViewController.m  UI/IPAInstallViewController.m  UI/InstallationProgressViewController.m  UI/InstalledAppsViewController.m  UI/AppDetailsViewController.m  UI/SettingsViewController.m  UI/CrashReporterViewController.m
+IPAInstallerPro_FILES =     AppDelegate.m     MainViewController.m     IPAFileBrowserViewController.m     IPAInstallViewController.m     InstallationProgressViewController.m     SettingsViewController.m     Core/DirectInstallationProvider.m     Core/SystemInstallationProvider.m     Core/AppInstInstallationProvider.m     Core/InstallationEngine.m     Core/IPAValidator.m     Core/IPAExtractor.m     Core/CapabilityManager.m     Core/RootlessManager.m     Core/CrashReporter.m     Core/DiagnosticPipeline.m     Core/ProcessMonitor.m     Core/LogCollector.m     Core/TransactionLogger.m     Core/LiveInstallationLogger.m
 
-IPAInstallerPro_FRAMEWORKS = UIKit CoreGraphics
+IPAInstallerPro_FRAMEWORKS = UIKit Foundation
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
-IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-format
+IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 IPAInstallerPro_CODESIGN_FLAGS = -Sentitlements.plist
-IPAInstallerPro_RESOURCE_DIRS = Resources
 
 include $(THEOS_MAKE_PATH)/application.mk
 
-# Root helper for privileged operations (setuid root)
+# Helper binary
 TOOL_NAME = ipainstallerpro_helper
+
 ipainstallerpro_helper_FILES = helper.c
-ipainstallerpro_helper_CFLAGS = 
+ipainstallerpro_helper_CFLAGS = -fobjc-arc
 ipainstallerpro_helper_CODESIGN_FLAGS = -Sentitlements.plist
 ipainstallerpro_helper_INSTALL_PATH = /usr/bin
 
 include $(THEOS_MAKE_PATH)/tool.mk
-
-# Dopamine 3.0 / Rootless specific
-after-install::
-	install.exec "chmod 4755 /var/jb/usr/bin/ipainstallerpro_helper 2>/dev/null || chmod 4755 /usr/bin/ipainstallerpro_helper 2>/dev/null || true"
-	install.exec "uicache -p /var/jb/Applications/IPAInstallerPro.app || uicache -p /Applications/IPAInstallerPro.app || true"
-
-# Force xz compression
-export THEOS_PLATFORM_DEB_COMPRESSION_TYPE = xz
