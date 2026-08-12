@@ -2,41 +2,32 @@
 //  InstallationEngine.m
 //  IPAInstallerPro
 //
-//  Enhanced version - retry logic and better error handling
-//
 
 #import "InstallationEngine.h"
 #import "DirectInstallationProvider.h"
 #import "SystemInstallationProvider.h"
 #import "AppInstInstallationProvider.h"
 #import "CapabilityManager.h"
-#import "InstallationLogger.h"
-#import "RootlessManager.h"
 #import <Foundation/Foundation.h>
-#import <objc/runtime.h>
 
 @interface InstallationEngine ()
 @property (nonatomic, strong) NSMutableArray *providers;
-@property (nonatomic, strong) CapabilityManager *capabilityManager;
 @property (nonatomic, strong) id<InstallationProvider> lastUsedProvider;
 @end
 
 @implementation InstallationEngine
 
 + (instancetype)sharedEngine {
-    static InstallationEngine *shared = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        shared = [[self alloc] init];
-    });
-    return shared;
+    static InstallationEngine *s = nil;
+    static dispatch_once_t t;
+    dispatch_once(&t, ^{ s = [[self alloc] init]; });
+    return s;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
         self.providers = [NSMutableArray array];
-        self.capabilityManager = [CapabilityManager sharedManager];
         [self registerDefaultProviders];
     }
     return self;
@@ -49,145 +40,91 @@
 }
 
 - (void)registerProvider:(id<InstallationProvider>)provider {
-    if (provider && ![self.providers containsObject:provider]) {
-        [self.providers addObject:provider];
-    }
+    if (provider && ![self.providers containsObject:provider]) [self.providers addObject:provider];
 }
 
 - (NSArray<id<InstallationProvider>> *)availableProviders {
-    NSMutableArray *available = [NSMutableArray array];
-    for (id<InstallationProvider> provider in self.providers) {
-        if ([provider isAvailable]) {
-            [available addObject:provider];
-        }
-    }
-    return available;
+    NSMutableArray *a = [NSMutableArray array];
+    for (id<InstallationProvider> p in self.providers) if ([p isAvailable]) [a addObject:p];
+    return a;
 }
 
 - (id<InstallationProvider>)bestProvider {
-    NSArray *available = [self availableProviders];
-    if (available.count == 0) return nil;
-
-    // Sort by priority (highest first)
-    NSArray *sorted = [available sortedArrayUsingComparator:^NSComparisonResult(id<InstallationProvider> a, id<InstallationProvider> b) {
-        return [@([b providerPriority]) compare:@([a providerPriority])];
+    NSArray *a = [self availableProviders];
+    if (a.count == 0) return nil;
+    NSArray *s = [a sortedArrayUsingComparator:^NSComparisonResult(id<InstallationProvider> x, id<InstallationProvider> y) {
+        return [@([y priority]) compare:@([x priority])];
     }];
-
-    // Prefer Direct Install if available and working
-    for (id<InstallationProvider> provider in sorted) {
-        if ([[provider providerName] isEqualToString:@"Direct Install"]) {
-            return provider;
-        }
-    }
-
-    return sorted.firstObject;
+    for (id<InstallationProvider> p in s) if ([[p providerName] isEqualToString:@"Direct Install"]) return p;
+    return s.firstObject;
 }
 
-- (void)installIPA:(NSString *)ipaPath
-     progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
-        completion:(void (^)(InstallationResult *result))completion {
+- (NSString *)currentProviderName {
+    id<InstallationProvider> p = [self bestProvider];
+    return p ? [p providerName] : @"No provider available";
+}
 
-    // Validate IPA first
-    if (progressBlock) {
-        progressBlock(InstallationStageValidating, @"جاري التحقق من صحة IPA...", 0.05f);
+- (NSString *)stageDescription:(InstallationStage)stage {
+    switch (stage) {
+        case InstallationStageIdle: return @"Idle";
+        case InstallationStagePreparing: return @"Preparing";
+        case InstallationStageValidating: return @"Validating";
+        case InstallationStageInstalling: return @"Installing";
+        case InstallationStageRegistering: return @"Registering";
+        case InstallationStageCompleted: return @"Completed";
+        case InstallationStageFailed: return @"Failed";
+        default: return @"Unknown";
     }
+}
 
-    IPAValidator *validator = [[IPAValidator alloc] init];
-    ValidationResult *validation = [validator validateIPA:ipaPath];
+- (void)installIPA:(NSString *)ipaPath progressBlock:(void (^)(InstallationStage, NSString *, float))progressBlock completion:(void (^)(InstallationResult *))completion {
+    if (progressBlock) progressBlock(InstallationStageValidating, @"Validating IPA...", 0.05f);
 
-    if (!validation.isValid) {
-        NSString *errorMsg = [NSString stringWithFormat:@"فشل التحقق: %@", [validation.errors componentsJoinedByString:@", "]];
-        InstallationResult *result = [InstallationResult failureResult:errorMsg error:nil];
-        if (completion) completion(result);
+    IPAValidator *v = [IPAValidator sharedValidator];
+    IPAValidationResult *vr = [v validateIPAAtPath:ipaPath];
+
+    if (vr.status != IPAValidationStatusValid) {
+        NSString *msg = [NSString stringWithFormat:@"Validation failed: %@", [vr.issues componentsJoinedByString:@", "]];
+        if (completion) completion([InstallationResult failureResult:msg error:nil]);
         return;
     }
 
-    // Log warnings
-    for (NSString *warning in validation.warnings) {
-        NSLog(@"[IPAInstallerPro] Warning: %@", warning);
-    }
+    for (NSString *w in vr.issues) NSLog(@"[IPAInstallerPro] Warning: %@", w);
 
-    // Get available providers
     NSArray *providers = [self availableProviders];
     if (providers.count == 0) {
-        InstallationResult *result = [InstallationResult failureResult:@"لا يوجد محرك تثبيت متاح" error:nil];
-        if (completion) completion(result);
+        if (completion) completion([InstallationResult failureResult:@"No installation provider available" error:nil]);
         return;
     }
 
-    // Try providers in order with retry
-    [self tryProviders:providers
-               forIPA:ipaPath
-              attempt:0
-        progressBlock:progressBlock
-           completion:completion];
+    [self tryProviders:providers forIPA:ipaPath attempt:0 progressBlock:progressBlock completion:completion];
 }
 
-- (void)tryProviders:(NSArray *)providers
-             forIPA:(NSString *)ipaPath
-            attempt:(NSInteger)attempt
-      progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
-         completion:(void (^)(InstallationResult *result))completion {
-
+- (void)tryProviders:(NSArray *)providers forIPA:(NSString *)ipaPath attempt:(NSInteger)attempt progressBlock:(void (^)(InstallationStage, NSString *, float))progressBlock completion:(void (^)(InstallationResult *))completion {
     if (attempt >= providers.count) {
-        // All providers failed
-        InstallationResult *result = [InstallationResult failureResult:@"فشل التثبيت بجميع المحركات المتاحة" error:nil];
-        if (completion) completion(result);
+        if (completion) completion([InstallationResult failureResult:@"All providers failed" error:nil]);
         return;
     }
+    id<InstallationProvider> p = providers[attempt];
+    self.lastUsedProvider = p;
+    if (progressBlock) progressBlock(InstallationStageInstalling, [NSString stringWithFormat:@"Installing via %@...", [p providerName]], 0.1f + (attempt * 0.1f));
 
-    id<InstallationProvider> provider = providers[attempt];
-    self.lastUsedProvider = provider;
-
-    if (progressBlock) {
-        progressBlock(InstallationStageInstalling, 
-                     [NSString stringWithFormat:@"جاري التثبيت عبر %@...", [provider providerName]], 
-                     0.1f + (attempt * 0.1f));
-    }
-
-    [provider installIPA:ipaPath completion:^(InstallationResult *result) {
+    [p installIPA:ipaPath completion:^(InstallationResult *result) {
         if (result.success) {
-            // Success!
-            if (progressBlock) {
-                progressBlock(InstallationStageCompleted, @"اكتمل التثبيت بنجاح!", 1.0f);
-            }
+            if (progressBlock) progressBlock(InstallationStageCompleted, @"Installation complete!", 1.0f);
             if (completion) completion(result);
         } else {
-            // Log the failure
-            NSLog(@"[IPAInstallerPro] Provider %@ failed: %@", [provider providerName], result.errorMessage);
-
-            // Try next provider
-            if (progressBlock) {
-                progressBlock(InstallationStageInstalling, 
-                             [NSString stringWithFormat:@"فشل %@، جرب المحرك التالي...", [provider providerName]], 
-                             0.1f + (attempt * 0.1f));
-            }
-
-            [self tryProviders:providers
-                        forIPA:ipaPath
-                       attempt:attempt + 1
-                 progressBlock:progressBlock
-                    completion:completion];
+            NSLog(@"[IPAInstallerPro] %@ failed: %@", [p providerName], result.message);
+            if (progressBlock) progressBlock(InstallationStageInstalling, [NSString stringWithFormat:@"%@ failed, trying next...", [p providerName]], 0.1f + (attempt * 0.1f));
+            [self tryProviders:providers forIPA:ipaPath attempt:attempt + 1 progressBlock:progressBlock completion:completion];
         }
     }];
 }
 
-- (id<InstallationProvider>)lastProvider {
-    return self.lastUsedProvider;
-}
-
-- (NSString *)installationMethodDescription {
-    id<InstallationProvider> provider = [self bestProvider];
-    if (provider) {
-        return [NSString stringWithFormat:@"%@ - %@", [provider providerName], [provider providerDescription]];
-    }
-    return @"لا يوجد محرك متاح";
-}
-
-- (BOOL)canInstallIPA:(NSString *)ipaPath {
-    IPAValidator *validator = [[IPAValidator alloc] init];
-    ValidationResult *result = [validator validateIPA:ipaPath];
-    return result.isValid;
+- (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
+    id<InstallationProvider> p = [self bestProvider];
+    if (!p) { if (completion) completion(NO, @"No provider available"); return; }
+    [p uninstallAppWithBundleID:bundleID completion:completion];
 }
 
 @end
