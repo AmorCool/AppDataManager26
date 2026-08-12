@@ -23,7 +23,6 @@ extern char **environ;
 @property (nonatomic, strong) NSString *rmPath;
 @property (nonatomic, strong) NSString *cpPath;
 @property (nonatomic, strong) NSString *unzipPath;
-@property (nonatomic, strong) NSString *sbreloadPath;
 @property (nonatomic, strong) NSString *helperPath;
 @property (nonatomic, strong) NSString *whoamiPath;
 @end
@@ -45,8 +44,7 @@ extern char **environ;
         self.rmPath = [rm resolvePath:@"/bin/rm"];
         self.cpPath = [rm resolvePath:@"/bin/cp"];
         self.unzipPath = [rm resolvePath:@"/usr/bin/unzip"];
-        self.sbreloadPath = [rm resolvePath:@"/usr/bin/sbreload"];
-        self.whoamiPath = [rm resolvePath:@"/usr/bin/whoami"];
+                self.whoamiPath = [rm resolvePath:@"/usr/bin/whoami"];
         [self findWorkingHelper];
     }
     return self;
@@ -207,12 +205,12 @@ extern char **environ;
         [self runRoot:self.uicachePath args:@[@"-p", logicalDest]];
         [self runRoot:self.uicachePath args:@[@"-p", destApp]];
         [self runRoot:self.uicachePath args:@[@"-a"]];
-        [self runRoot:self.sbreloadPath args:@[]];
+        // [sbreload removed] — uicache -p is sufficient, no respring needed
     } else {
         [self runCmd:self.uicachePath args:@[@"-p", logicalDest]];
         [self runCmd:self.uicachePath args:@[@"-p", destApp]];
         [self runCmd:self.uicachePath args:@[@"-a"]];
-        [self runCmd:self.sbreloadPath args:@[]];
+        // [sbreload removed] — uicache -p is sufficient, no respring needed
     }
 
     BOOL ok = [self verify:destApp bundleID:bundleID exeName:exeName];
@@ -238,8 +236,8 @@ extern char **environ;
     if (!path) { if (completion) completion(NO, @"Cannot determine app path"); return; }
     BOOL removed = [self hasRootHelper] ? [self runRoot:self.rmPath args:@[@"-rf", path]] : [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
     if (removed) {
-        if ([self hasRootHelper]) { [self runRoot:self.uicachePath args:@[@"-a"]]; [self runRoot:self.sbreloadPath args:@[]]; }
-        else { [self runCmd:self.uicachePath args:@[@"-a"]]; [self runCmd:self.sbreloadPath args:@[]]; }
+        if ([self hasRootHelper]) { [self runRoot:self.uicachePath args:@[@"-a"]]; }
+        else { [self runCmd:self.uicachePath args:@[@"-a"]]; }
         if (completion) completion(YES, nil);
     } else { if (completion) completion(NO, @"Remove failed"); }
 }
@@ -280,18 +278,47 @@ extern char **environ;
     NSLog(@"[IPAInstallerPro] %@: %@", ok ? @"✅" : @"⚠️", label);
 }
 
+- (NSString *)runCmdOutput:(NSString *)cmd args:(NSArray *)args {
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return nil;
+    pid_t pid;
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+    const char *c = [cmd UTF8String];
+    char **argv = malloc((args.count + 2) * sizeof(char*));
+    argv[0] = (char*)c;
+    for (NSUInteger i = 0; i < args.count; i++) argv[i+1] = (char*)[args[i] UTF8String];
+    argv[args.count + 1] = NULL;
+    int st = posix_spawn(&pid, c, &actions, NULL, argv, environ);
+    free(argv);
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[1]);
+    if (st != 0) { close(pipefd[0]); return nil; }
+    NSMutableString *output = [NSMutableString string];
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) { buf[n] = '\0'; [output appendString:[NSString stringWithUTF8String:buf]]; }
+    close(pipefd[0]);
+    waitpid(pid, NULL, 0);
+    return output;
+}
+
 - (void)signExe:(NSString *)path hasHelper:(BOOL)hasH {
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return;
     NSString *ep = [NSTemporaryDirectory() stringByAppendingPathComponent:@"orig.ent"];
-    BOOL extracted = hasH ? [self runRoot:self.ldidPath args:@[@"-e", @">", ep, path]] : [self runCmd:self.ldidPath args:@[@"-e", @">", ep, path]];
     BOOL ok = NO;
-    if (extracted && [[NSFileManager defaultManager] fileExistsAtPath:ep]) {
-        NSData *d = [NSData dataWithContentsOfFile:ep];
-        if (d && d.length > 10) {
-            NSString *sf = [NSString stringWithFormat:@"-S%@", ep];
-            ok = hasH ? [self runRoot:self.ldidPath args:@[sf, path]] : [self runCmd:self.ldidPath args:@[sf, path]];
-        }
+
+    // Try to extract original entitlements via pipe (NOT shell redirection)
+    NSString *entOutput = hasH ? [self runRootCmdOutput:self.ldidPath args:@[@"-e", path]] : [self runCmdOutput:self.ldidPath args:@[@"-e", path]];
+    if (entOutput && entOutput.length > 10) {
+        [entOutput writeToFile:ep atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSString *sf = [NSString stringWithFormat:@"-S%@", ep];
+        ok = hasH ? [self runRoot:self.ldidPath args:@[sf, path]] : [self runCmd:self.ldidPath args:@[sf, path]];
     }
+
     if (!ok) ok = hasH ? [self runRoot:self.ldidPath args:@[@"-S", path]] : [self runCmd:self.ldidPath args:@[@"-S", path]];
     if (!ok) {
         NSString *ep2 = [NSTemporaryDirectory() stringByAppendingPathComponent:@"min.ent"];
@@ -300,6 +327,36 @@ extern char **environ;
         ok = hasH ? [self runRoot:self.ldidPath args:@[sf, path]] : [self runCmd:self.ldidPath args:@[sf, path]];
     }
     NSLog(@"[IPAInstallerPro] Main exe sign: %@", ok ? @"OK" : @"⚠️");
+}
+
+- (NSString *)runRootCmdOutput:(NSString *)cmd args:(NSArray *)args {
+    if (![self hasRootHelper]) return [self runCmdOutput:cmd args:args];
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return nil;
+    pid_t pid;
+    const char *h = [self.helperPath UTF8String];
+    const char *c = [cmd UTF8String];
+    char **argv = malloc((args.count + 3) * sizeof(char*));
+    argv[0] = (char*)h; argv[1] = (char*)c;
+    for (NSUInteger i = 0; i < args.count; i++) argv[i+2] = (char*)[args[i] UTF8String];
+    argv[args.count + 2] = NULL;
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+    int st = posix_spawn(&pid, h, &actions, NULL, argv, environ);
+    free(argv);
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[1]);
+    if (st != 0) { close(pipefd[0]); return nil; }
+    NSMutableString *output = [NSMutableString string];
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) { buf[n] = '\0'; [output appendString:[NSString stringWithUTF8String:buf]]; }
+    close(pipefd[0]);
+    waitpid(pid, NULL, 0);
+    return output;
 }
 
 - (void)fixFrameworks:(NSString *)appPath hasHelper:(BOOL)hasH {
