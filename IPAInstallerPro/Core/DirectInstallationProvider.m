@@ -30,8 +30,7 @@ extern char **environ;
 
 @implementation DirectInstallationProvider
 
-// Current operation log transaction ID
-static NSString *_currentOpID = nil;
+static NSString *_currentTxnID = nil;
 
 - (NSString *)providerName { return @"Direct Install"; }
 - (NSString *)providerDescription { return @"Direct installation using root helper with full signing"; }
@@ -124,164 +123,236 @@ static NSString *_currentOpID = nil;
 - (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL hasH = [self hasRootHelper];
-
-    // ─── BEGIN OPERATION LOG ───
     OperationLog *opLog = [OperationLog sharedLog];
-    _currentOpID = [opLog beginTransactionForIPA:ipaPath];
-    NSString *opID = _currentOpID;
-    NSLog(@"[IPAInstallerPro] Install: %@ | OpID: %@", ipaPath, opID);
+    NSString *txnID = [opLog beginTransactionForIPA:ipaPath];
+    _currentTxnID = txnID;
+    NSLog(@"[IPAInstallerPro] Install: %@ | Txn: %@", ipaPath, txnID);
 
-    // [STEP 0] Check IPA exists
+    // ───────────────────────────────────────────────
+    // PHASE 1: Verify IPA file exists
+    // ───────────────────────────────────────────────
+    NSString *rec1 = [opLog beginPhase:OperationPhaseIPAOpen
+                             operation:@"fileExistsAtPath"
+                                target:ipaPath
+                                 input:ipaPath
+                         transactionID:txnID];
+    NSDate *t0 = [NSDate date];
     BOOL ipaExists = [fm fileExistsAtPath:ipaPath];
     NSDictionary *ipaAttrs = ipaExists ? [fm attributesOfItemAtPath:ipaPath error:nil] : nil;
-    [opLog logOperation:@"fileExistsAtPath"
-                  phase:OperationPhaseIPAOpen
-                 target:ipaPath
-                 result:ipaExists ? OperationResultSuccess : OperationResultFailed
-               exitCode:ipaExists ? 0 : ENOENT
-              rawOutput:@""
-               rawError:ipaExists ? @"" : @"IPA file not found on filesystem"
-               duration:0
-                context:@{@"size": ipaAttrs ? @(ipaAttrs.fileSize) : @0}
-          operationID:opID];
+    BOOL ipaReadable = ipaExists ? [fm isReadableFileAtPath:ipaPath] : NO;
+    NSTimeInterval dur1 = [[NSDate date] timeIntervalSinceDate:t0];
 
-    if (!ipaExists) {
-        [opLog endTransaction:opID];
-        _currentOpID = nil;
-        if (completion) completion([InstallationResult failureResult:@"IPA not found" error:nil]);
+    [opLog endPhase:rec1
+            exitCode:ipaExists ? 0 : ENOENT
+           rawOutput:@""
+            rawError:ipaExists ? @"" : @"IPA file not found"
+        verification:[NSString stringWithFormat:@"exists=%@ readable=%@ size=%lld",
+                      ipaExists ? @"YES" : @"NO",
+                      ipaReadable ? @"YES" : @"NO",
+                      ipaAttrs ? ipaAttrs.fileSize : 0]
+            verified:(ipaExists && ipaReadable)
+            duration:dur1];
+
+    if (!ipaExists || !ipaReadable) {
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
+        if (completion) completion([InstallationResult failureResult:@"IPA not found or unreadable" error:nil]);
         return;
     }
 
-    // [STEP 1] Create temp directory
-    NSDate *t0 = [NSDate date];
+    // ───────────────────────────────────────────────
+    // PHASE 2: Create temp directory
+    // ───────────────────────────────────────────────
+    NSString *rec2 = [opLog beginPhase:OperationPhaseIPAExtract
+                             operation:@"createDirectoryAtPath"
+                                target:NSTemporaryDirectory()
+                                 input:@""
+                         transactionID:txnID];
+    t0 = [NSDate date];
     NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
     BOOL tmpCreated = [fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
-    [opLog logOperation:@"createDirectoryAtPath"
-                  phase:OperationPhaseIPAExtract
-                 target:tmp
-                 result:tmpCreated ? OperationResultSuccess : OperationResultFailed
-               exitCode:tmpCreated ? 0 : 1
-              rawOutput:@""
-               rawError:tmpCreated ? @"" : @"Failed to create temp directory"
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{}
-          operationID:opID];
+    NSTimeInterval dur2 = [[NSDate date] timeIntervalSinceDate:t0];
+    BOOL tmpVerified = tmpCreated && [fm fileExistsAtPath:tmp];
 
-    // [STEP 2] Unzip IPA
+    [opLog endPhase:rec2
+            exitCode:tmpCreated ? 0 : 1
+           rawOutput:@""
+            rawError:tmpCreated ? @"" : @"Failed to create temp directory"
+        verification:[NSString stringWithFormat:@"created=%@ exists=%@", tmpCreated ? @"YES" : @"NO", tmpVerified ? @"YES" : @"NO"]
+            verified:tmpVerified
+            duration:dur2];
+
+    if (!tmpVerified) {
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
+        if (completion) completion([InstallationResult failureResult:@"Temp directory creation failed" error:nil]);
+        return;
+    }
+
+    // ───────────────────────────────────────────────
+    // PHASE 3: Unzip IPA
+    // ───────────────────────────────────────────────
+    NSString *rec3 = [opLog beginPhase:OperationPhaseIPAExtract
+                             operation:@"unzip"
+                                target:ipaPath
+                                 input:[@[@"-o", ipaPath, @"-d", tmp] componentsJoinedByString:@" "]
+                         transactionID:txnID];
     t0 = [NSDate date];
-    NSArray *unzipArgs = @[@"-o", ipaPath, @"-d", tmp];
-    BOOL unzipOk = [self runCmd:self.unzipPath args:unzipArgs];
-    NSTimeInterval unzipDur = [[NSDate date] timeIntervalSinceDate:t0];
-    [opLog logOperation:@"unzip"
-                  phase:OperationPhaseIPAExtract
-                 target:ipaPath
-                 result:unzipOk ? OperationResultSuccess : OperationResultFailed
-               exitCode:unzipOk ? 0 : 1
-              rawOutput:@""
-               rawError:unzipOk ? @"" : @"unzip command returned non-zero exit code"
-               duration:unzipDur
-                context:@{@"args": [unzipArgs componentsJoinedByString:@" "], @"tmp": tmp}
-          operationID:opID];
+    BOOL unzipOk = [self runCmd:self.unzipPath args:@[@"-o", ipaPath, @"-d", tmp]];
+    NSTimeInterval dur3 = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: Payload folder must exist
+    NSString *payload = [tmp stringByAppendingPathComponent:@"Payload"];
+    BOOL payloadExists = [fm fileExistsAtPath:payload];
 
-    if (!unzipOk) {
+    [opLog endPhase:rec3
+            exitCode:unzipOk ? 0 : 1
+           rawOutput:@""
+            rawError:unzipOk ? @"" : @"unzip returned non-zero"
+        verification:[NSString stringWithFormat:@"Payload exists=%@", payloadExists ? @"YES" : @"NO"]
+            verified:(unzipOk && payloadExists)
+            duration:dur3];
+
+    if (!unzipOk || !payloadExists) {
         [fm removeItemAtPath:tmp error:nil];
-        [opLog endTransaction:opID];
-        _currentOpID = nil;
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
         if (completion) completion([InstallationResult failureResult:@"Unzip failed" error:nil]);
         return;
     }
 
-    // [STEP 3] Find Payload/*.app
+    // ───────────────────────────────────────────────
+    // PHASE 4: Find .app in Payload
+    // ───────────────────────────────────────────────
+    NSString *rec4 = [opLog beginPhase:OperationPhaseAppIdentify
+                             operation:@"find .app in Payload"
+                                target:payload
+                                 input:@""
+                         transactionID:txnID];
     t0 = [NSDate date];
-    NSString *payload = [tmp stringByAppendingPathComponent:@"Payload"];
     NSArray *items = [fm contentsOfDirectoryAtPath:payload error:nil];
     NSString *appFolder = nil;
     for (NSString *i in items) { if ([i hasSuffix:@".app"]) { appFolder = i; break; } }
+    NSTimeInterval dur4 = [[NSDate date] timeIntervalSinceDate:t0];
     BOOL appFound = (appFolder != nil);
-    [opLog logOperation:@"find .app in Payload"
-                  phase:OperationPhaseAppIdentify
-                 target:payload
-                 result:appFound ? OperationResultSuccess : OperationResultFailed
-               exitCode:appFound ? 0 : 1
-              rawOutput:@""
-               rawError:appFound ? @"" : @"No .app folder found in extracted Payload"
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{@"payloadContents": items ?: @[]}
-          operationID:opID];
+
+    [opLog endPhase:rec4
+            exitCode:appFound ? 0 : 1
+           rawOutput:@""
+            rawError:appFound ? @"" : @"No .app folder found in Payload"
+        verification:[NSString stringWithFormat:@"found=%@ name=%@", appFound ? @"YES" : @"NO", appFolder ?: @"N/A"]
+            verified:appFound
+            duration:dur4];
 
     if (!appFound) {
         [fm removeItemAtPath:tmp error:nil];
-        [opLog endTransaction:opID];
-        _currentOpID = nil;
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
         if (completion) completion([InstallationResult failureResult:@"No .app found" error:nil]);
         return;
     }
 
-    // [STEP 4] Read Info.plist
-    t0 = [NSDate date];
+    // ───────────────────────────────────────────────
+    // PHASE 5: Read Info.plist
+    // ───────────────────────────────────────────────
     NSString *srcApp = [payload stringByAppendingPathComponent:appFolder];
     NSString *infoPath = [srcApp stringByAppendingPathComponent:@"Info.plist"];
+    NSString *rec5 = [opLog beginPhase:OperationPhaseAppIdentify
+                             operation:@"dictionaryWithContentsOfFile (Info.plist)"
+                                target:infoPath
+                                 input:@""
+                         transactionID:txnID];
+    t0 = [NSDate date];
     NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+    NSTimeInterval dur5 = [[NSDate date] timeIntervalSinceDate:t0];
     BOOL infoRead = (info != nil);
-    [opLog logOperation:@"dictionaryWithContentsOfFile (Info.plist)"
-                  phase:OperationPhaseAppIdentify
-                 target:infoPath
-                 result:infoRead ? OperationResultSuccess : OperationResultFailed
-               exitCode:infoRead ? 0 : 1
-              rawOutput:@""
-               rawError:infoRead ? @"" : @"Info.plist could not be read"
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{}
-          operationID:opID];
+    BOOL infoHasKeys = infoRead && (info[@"CFBundleIdentifier"] != nil) && (info[@"CFBundleExecutable"] != nil);
 
-    if (!infoRead) {
+    [opLog endPhase:rec5
+            exitCode:infoRead ? 0 : 1
+           rawOutput:@""
+            rawError:infoRead ? @"" : @"Info.plist could not be parsed"
+        verification:[NSString stringWithFormat:@"read=%@ hasBundleID=%@ hasExe=%@",
+                      infoRead ? @"YES" : @"NO",
+                      info[@"CFBundleIdentifier"] ? @"YES" : @"NO",
+                      info[@"CFBundleExecutable"] ? @"YES" : @"NO"]
+            verified:(infoRead && infoHasKeys)
+            duration:dur5];
+
+    if (!infoRead || !infoHasKeys) {
         [fm removeItemAtPath:tmp error:nil];
-        [opLog endTransaction:opID];
-        _currentOpID = nil;
-        if (completion) completion([InstallationResult failureResult:@"No Info.plist" error:nil]);
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
+        if (completion) completion([InstallationResult failureResult:@"Invalid Info.plist" error:nil]);
         return;
     }
 
-    // [STEP 5] Extract metadata
+    // ───────────────────────────────────────────────
+    // PHASE 6: Extract metadata
+    // ───────────────────────────────────────────────
     NSString *bundleID = info[@"CFBundleIdentifier"];
     NSString *appName = info[@"CFBundleDisplayName"] ?: info[@"CFBundleName"] ?: appFolder;
     NSString *exeName = info[@"CFBundleExecutable"];
-    BOOL metaValid = (bundleID != nil && exeName != nil);
-    [opLog logOperation:@"extract bundle metadata"
-                  phase:OperationPhaseAppIdentify
-                 target:appFolder
-                 result:metaValid ? OperationResultSuccess : OperationResultFailed
-               exitCode:metaValid ? 0 : 1
-              rawOutput:@""
-               rawError:metaValid ? @"" : @"Missing CFBundleIdentifier or CFBundleExecutable"
-               duration:0
-                context:@{@"bundleID": bundleID ?: @"", @"appName": appName, @"exeName": exeName ?: @""}
-          operationID:opID];
+    NSString *rec6 = [opLog beginPhase:OperationPhaseAppIdentify
+                             operation:@"extract bundle metadata"
+                                target:appFolder
+                                 input:@""
+                         transactionID:txnID];
+    BOOL metaValid = (bundleID.length > 0 && exeName.length > 0);
+
+    [opLog endPhase:rec6
+            exitCode:metaValid ? 0 : 1
+           rawOutput:@""
+            rawError:metaValid ? @"" : @"Missing CFBundleIdentifier or CFBundleExecutable"
+        verification:[NSString stringWithFormat:@"bundleID=%@ exeName=%@ appName=%@",
+                      bundleID ?: @"N/A", exeName ?: @"N/A", appName]
+            verified:metaValid
+            duration:0];
 
     if (!metaValid) {
         [fm removeItemAtPath:tmp error:nil];
-        [opLog endTransaction:opID];
-        _currentOpID = nil;
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
         if (completion) completion([InstallationResult failureResult:@"Missing bundleID/exe" error:nil]);
         return;
     }
 
-    // [STEP 6] Resolve destination path
+    // ───────────────────────────────────────────────
+    // PHASE 7: Resolve destination path
+    // ───────────────────────────────────────────────
     NSString *logicalDest = [@"/Applications" stringByAppendingPathComponent:appFolder];
+    NSString *rec7 = [opLog beginPhase:OperationPhaseFileCopy
+                             operation:@"resolvePath"
+                                target:logicalDest
+                                 input:logicalDest
+                         transactionID:txnID];
     NSString *destApp = [[RootlessManager sharedManager] resolvePath:logicalDest];
-    [opLog logOperation:@"resolvePath"
-                  phase:OperationPhaseFileCopy
-                 target:logicalDest
-                 result:OperationResultSuccess
-               exitCode:0
-              rawOutput:destApp
-               rawError:@""
-               duration:0
-                context:@{@"resolvedPath": destApp}
-          operationID:opID];
+    BOOL destResolved = (destApp != nil && destApp.length > 0);
 
-    // [STEP 7] Delete existing app if present
+    [opLog endPhase:rec7
+            exitCode:destResolved ? 0 : 1
+           rawOutput:destApp ?: @""
+            rawError:destResolved ? @"" : @"RootlessManager could not resolve path"
+        verification:[NSString stringWithFormat:@"resolved=%@ path=%@", destResolved ? @"YES" : @"NO", destApp ?: @"N/A"]
+            verified:destResolved
+            duration:0];
+
+    if (!destResolved) {
+        [fm removeItemAtPath:tmp error:nil];
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
+        if (completion) completion([InstallationResult failureResult:@"Could not resolve destination path" error:nil]);
+        return;
+    }
+
+    // ───────────────────────────────────────────────
+    // PHASE 8: Delete existing app if present
+    // ───────────────────────────────────────────────
     if ([fm fileExistsAtPath:destApp]) {
+        NSString *rec8 = [opLog beginPhase:OperationPhaseFileCopy
+                                 operation:hasH ? @"rm -rf (root)" : @"removeItemAtPath"
+                                    target:destApp
+                                     input:@""
+                             transactionID:txnID];
         t0 = [NSDate date];
         BOOL deleted;
         if (hasH) {
@@ -289,30 +360,39 @@ static NSString *_currentOpID = nil;
         } else {
             deleted = [fm removeItemAtPath:destApp error:nil];
         }
-        [opLog logOperation:hasH ? @"rm -rf (root)" : @"removeItemAtPath"
-                      phase:OperationPhaseFileCopy
-                     target:destApp
-                     result:deleted ? OperationResultSuccess : OperationResultFailed
-                   exitCode:deleted ? 0 : 1
-                  rawOutput:@""
-                   rawError:deleted ? @"" : @"Failed to delete existing app"
-                   duration:[[NSDate date] timeIntervalSinceDate:t0]
-                    context:@{}
-              operationID:opID];
+        NSTimeInterval dur8 = [[NSDate date] timeIntervalSinceDate:t0];
+        BOOL verifyDeleted = ![fm fileExistsAtPath:destApp];
+
+        [opLog endPhase:rec8
+                exitCode:deleted ? 0 : 1
+               rawOutput:@""
+                rawError:deleted ? @"" : @"Delete command failed"
+            verification:[NSString stringWithFormat:@"command=%@ stillExists=%@", deleted ? @"YES" : @"NO", verifyDeleted ? @"NO" : @"YES"]
+                verified:verifyDeleted
+                duration:dur8];
     } else {
-        [opLog logOperation:@"check existing"
-                      phase:OperationPhaseFileCopy
-                     target:destApp
-                     result:OperationResultSkipped
-                   exitCode:0
-                  rawOutput:@"No existing app at destination"
-                   rawError:@""
-                   duration:0
-                    context:@{}
-              operationID:opID];
+        NSString *rec8 = [opLog beginPhase:OperationPhaseFileCopy
+                                 operation:@"check existing"
+                                    target:destApp
+                                     input:@""
+                             transactionID:txnID];
+        [opLog endPhase:rec8
+                exitCode:0
+               rawOutput:@"No existing app at destination"
+                rawError:@""
+            verification:@"No existing app — nothing to delete"
+                verified:YES
+                duration:0];
     }
 
-    // [STEP 8] Copy app bundle
+    // ───────────────────────────────────────────────
+    // PHASE 9: Copy app bundle
+    // ───────────────────────────────────────────────
+    NSString *rec9 = [opLog beginPhase:OperationPhaseFileCopy
+                             operation:@"copy app bundle"
+                                target:[NSString stringWithFormat:@"%@ -> %@", srcApp, destApp]
+                                 input:@""
+                         transactionID:txnID];
     t0 = [NSDate date];
     BOOL copied = NO;
     int copyErrno = 0;
@@ -338,213 +418,273 @@ static NSString *_currentOpID = nil;
             [fm copyItemAtPath:srcApp toPath:destApp error:&e];
             copied = (e == nil);
             copyMethod = copied ? @"copyItemAtPath" : @"copyItemAtPath (failed)";
-            if (!copied) {
-                [opLog logOperation:copyMethod
-                              phase:OperationPhaseFileCopy
-                             target:[NSString stringWithFormat:@"%@ -> %@", srcApp, destApp]
-                             result:OperationResultFailed
-                           exitCode:(int)e.code
-                          rawOutput:@""
-                           rawError:e.localizedDescription
-                           duration:[[NSDate date] timeIntervalSinceDate:t0]
-                            context:@{}
-                      operationID:opID];
-            }
         }
     }
-    NSTimeInterval copyDur = [[NSDate date] timeIntervalSinceDate:t0];
+    NSTimeInterval dur9 = [[NSDate date] timeIntervalSinceDate:t0];
 
-    if (copied) {
-        NSDictionary *destAttrs = [fm attributesOfItemAtPath:destApp error:nil];
-        [opLog logOperation:copyMethod
-                      phase:OperationPhaseFileCopy
-                     target:[NSString stringWithFormat:@"%@ -> %@", srcApp, destApp]
-                     result:OperationResultSuccess
-                   exitCode:0
-                  rawOutput:@""
-                   rawError:@""
-                   duration:copyDur
-                    context:@{@"destSize": destAttrs ? @(destAttrs.fileSize) : @0}
-              operationID:opID];
-    } else {
-        [opLog logOperation:copyMethod
-                      phase:OperationPhaseFileCopy
-                     target:[NSString stringWithFormat:@"%@ -> %@", srcApp, destApp]
-                     result:OperationResultFailed
-                   exitCode:copyErrno
-                  rawOutput:@""
-                   rawError:[NSString stringWithFormat:@"Copy failed, errno=%d", copyErrno]
-                   duration:copyDur
-                    context:@{}
-              operationID:opID];
+    // Verification: dest must exist, must contain Info.plist and executable
+    BOOL destExists = [fm fileExistsAtPath:destApp];
+    NSString *destInfoPath = [destApp stringByAppendingPathComponent:@"Info.plist"];
+    BOOL destInfoExists = [fm fileExistsAtPath:destInfoPath];
+    NSString *destExePath = [destApp stringByAppendingPathComponent:exeName];
+    BOOL destExeExists = [fm fileExistsAtPath:destExePath];
+
+    [opLog endPhase:rec9
+            exitCode:copied ? 0 : copyErrno
+           rawOutput:@""
+            rawError:copied ? @"" : [NSString stringWithFormat:@"%@ failed, errno=%d", copyMethod, copyErrno]
+        verification:[NSString stringWithFormat:@"destExists=%@ infoExists=%@ exeExists=%@ method=%@",
+                      destExists ? @"YES" : @"NO",
+                      destInfoExists ? @"YES" : @"NO",
+                      destExeExists ? @"YES" : @"NO",
+                      copyMethod]
+            verified:(copied && destExists && destInfoExists && destExeExists)
+            duration:dur9];
+
+    if (!copied || !destExists || !destInfoExists || !destExeExists) {
         [fm removeItemAtPath:tmp error:nil];
-        [opLog endTransaction:opID];
-        _currentOpID = nil;
-        if (completion) completion([InstallationResult failureResult:@"Copy failed" error:nil]);
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        _currentTxnID = nil;
+        if (completion) completion([InstallationResult failureResult:@"Copy failed or verification failed" error:nil]);
         return;
     }
 
-    // [STEP 9] Set permissions
+    // ───────────────────────────────────────────────
+    // PHASE 10: Set permissions (chmod)
+    // ───────────────────────────────────────────────
+    NSString *rec10a = [opLog beginPhase:OperationPhasePermission
+                               operation:@"chmod -R 755"
+                                  target:destApp
+                                   input:@""
+                           transactionID:txnID];
     t0 = [NSDate date];
-    BOOL chmodOk, chownOk;
-    if (hasH) {
-        chmodOk = [self runRoot:self.chmodPath args:@[@"-R", @"755", destApp]];
-        chownOk = [self runRoot:self.chownPath args:@[@"-R", @"root:wheel", destApp]];
-    } else {
-        chmodOk = [self runCmd:self.chmodPath args:@[@"-R", @"755", destApp]];
-        chownOk = [self runCmd:self.chownPath args:@[@"-R", @"root:wheel", destApp]];
-    }
-    [opLog logOperation:@"chmod -R 755"
-                  phase:OperationPhasePermission
-                 target:destApp
-                 result:chmodOk ? OperationResultSuccess : OperationResultFailed
-               exitCode:chmodOk ? 0 : 1
-              rawOutput:@""
-               rawError:chmodOk ? @"" : @"chmod failed"
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{}
-          operationID:opID];
-    [opLog logOperation:@"chown -R root:wheel"
-                  phase:OperationPhasePermission
-                 target:destApp
-                 result:chownOk ? OperationResultSuccess : OperationResultFailed
-               exitCode:chownOk ? 0 : 1
-              rawOutput:@""
-               rawError:chownOk ? @"" : @"chown failed"
-               duration:0
-                context:@{}
-          operationID:opID];
+    BOOL chmodOk = hasH ? [self runRoot:self.chmodPath args:@[@"-R", @"755", destApp]]
+                        : [self runCmd:self.chmodPath args:@[@"-R", @"755", destApp]];
+    NSTimeInterval dur10a = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: check executable is readable
+    BOOL exeReadableAfterChmod = [fm isReadableFileAtPath:destExePath];
 
-    // [STEP 10] Sign all binaries recursively
+    [opLog endPhase:rec10a
+            exitCode:chmodOk ? 0 : 1
+           rawOutput:@""
+            rawError:chmodOk ? @"" : @"chmod command failed"
+        verification:[NSString stringWithFormat:@"command=%@ exeReadable=%@", chmodOk ? @"YES" : @"NO", exeReadableAfterChmod ? @"YES" : @"NO"]
+            verified:(chmodOk && exeReadableAfterChmod)
+            duration:dur10a];
+
+    // ───────────────────────────────────────────────
+    // PHASE 10b: Set ownership (chown)
+    // ───────────────────────────────────────────────
+    NSString *rec10b = [opLog beginPhase:OperationPhasePermission
+                               operation:@"chown -R root:wheel"
+                                  target:destApp
+                                   input:@""
+                           transactionID:txnID];
+    t0 = [NSDate date];
+    BOOL chownOk = hasH ? [self runRoot:self.chownPath args:@[@"-R", @"root:wheel", destApp]]
+                        : [self runCmd:self.chownPath args:@[@"-R", @"root:wheel", destApp]];
+    NSTimeInterval dur10b = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: check we can still read
+    BOOL exeReadableAfterChown = [fm isReadableFileAtPath:destExePath];
+
+    [opLog endPhase:rec10b
+            exitCode:chownOk ? 0 : 1
+           rawOutput:@""
+            rawError:chownOk ? @"" : @"chown command failed"
+        verification:[NSString stringWithFormat:@"command=%@ exeReadable=%@", chownOk ? @"YES" : @"NO", exeReadableAfterChown ? @"YES" : @"NO"]
+            verified:(chownOk && exeReadableAfterChown)
+            duration:dur10b];
+
+    // ───────────────────────────────────────────────
+    // PHASE 11: Sign all binaries recursively
+    // ───────────────────────────────────────────────
+    NSString *rec11 = [opLog beginPhase:OperationPhaseSign
+                              operation:@"signAllAt (recursive)"
+                                 target:destApp
+                                  input:@""
+                          transactionID:txnID];
     t0 = [NSDate date];
     [self signAllAt:destApp hasHelper:hasH];
-    [opLog logOperation:@"signAllAt (recursive)"
-                  phase:OperationPhaseSign
-                 target:destApp
-                 result:OperationResultSuccess
-               exitCode:0
-              rawOutput:@""
-               rawError:@""
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{}
-          operationID:opID];
+    NSTimeInterval dur11 = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: check main executable is still readable after signing
+    BOOL exeReadableAfterSignAll = [fm isReadableFileAtPath:destExePath];
 
-    // [STEP 11] Sign main executable
-    t0 = [NSDate date];
+    [opLog endPhase:rec11
+            exitCode:0
+           rawOutput:@""
+            rawError:@""
+        verification:[NSString stringWithFormat:@"exeReadable=%@", exeReadableAfterSignAll ? @"YES" : @"NO"]
+            verified:exeReadableAfterSignAll
+            duration:dur11];
+
+    // ───────────────────────────────────────────────
+    // PHASE 12: Sign main executable
+    // ───────────────────────────────────────────────
     NSString *exePath = [destApp stringByAppendingPathComponent:exeName];
+    NSString *rec12 = [opLog beginPhase:OperationPhaseSign
+                              operation:@"signExe (main executable)"
+                                 target:exePath
+                                  input:@""
+                          transactionID:txnID];
+    t0 = [NSDate date];
     [self signExe:exePath hasHelper:hasH];
-    [opLog logOperation:@"signExe (main executable)"
-                  phase:OperationPhaseSign
-                 target:exePath
-                 result:OperationResultSuccess
-               exitCode:0
-              rawOutput:@""
-               rawError:@""
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{}
-          operationID:opID];
+    NSTimeInterval dur12 = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: executable must exist and be readable
+    BOOL exeExistsAfterSign = [fm fileExistsAtPath:exePath];
+    BOOL exeReadableAfterSign = [fm isReadableFileAtPath:exePath];
 
-    // [STEP 12] Fix frameworks
+    [opLog endPhase:rec12
+            exitCode:0
+           rawOutput:@""
+            rawError:@""
+        verification:[NSString stringWithFormat:@"exeExists=%@ exeReadable=%@", exeExistsAfterSign ? @"YES" : @"NO", exeReadableAfterSign ? @"YES" : @"NO"]
+            verified:(exeExistsAfterSign && exeReadableAfterSign)
+            duration:dur12];
+
+    // ───────────────────────────────────────────────
+    // PHASE 13: Fix frameworks
+    // ───────────────────────────────────────────────
+    NSString *rec13 = [opLog beginPhase:OperationPhaseFramework
+                              operation:@"fixFrameworks"
+                                 target:destApp
+                                  input:@""
+                          transactionID:txnID];
     t0 = [NSDate date];
     [self fixFrameworks:destApp hasHelper:hasH];
-    [opLog logOperation:@"fixFrameworks"
-                  phase:OperationPhaseFramework
-                 target:destApp
-                 result:OperationResultSuccess
-               exitCode:0
-              rawOutput:@""
-               rawError:@""
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{}
-          operationID:opID];
-
-    // [STEP 13] Run uicache
-    t0 = [NSDate date];
-    BOOL uc1, uc2, uc3;
-    if (hasH) {
-        uc1 = [self runRoot:self.uicachePath args:@[@"-p", logicalDest]];
-        uc2 = [self runRoot:self.uicachePath args:@[@"-p", destApp]];
-        uc3 = [self runRoot:self.uicachePath args:@[@"-a"]];
-    } else {
-        uc1 = [self runCmd:self.uicachePath args:@[@"-p", logicalDest]];
-        uc2 = [self runCmd:self.uicachePath args:@[@"-p", destApp]];
-        uc3 = [self runCmd:self.uicachePath args:@[@"-a"]];
+    NSTimeInterval dur13 = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: if Frameworks folder exists, check dylibs are readable
+    NSString *fwPath = [destApp stringByAppendingPathComponent:@"Frameworks"];
+    BOOL fwVerified = YES;
+    NSString *fwVerifyDetail = @"No Frameworks folder";
+    if ([fm fileExistsAtPath:fwPath]) {
+        NSMutableString *detail = [NSMutableString string];
+        for (NSString *item in [fm contentsOfDirectoryAtPath:fwPath error:nil]) {
+            if ([item hasSuffix:@".dylib"]) {
+                NSString *dp = [fwPath stringByAppendingPathComponent:item];
+                BOOL readable = [fm isReadableFileAtPath:dp];
+                [detail appendFormat:@"%@=%@ ", item, readable ? @"OK" : @"FAIL"];
+                if (!readable) fwVerified = NO;
+            }
+        }
+        fwVerifyDetail = detail.length > 0 ? detail : @"Frameworks folder empty";
     }
-    NSTimeInterval ucDur = [[NSDate date] timeIntervalSinceDate:t0];
-    [opLog logOperation:@"uicache -p logicalDest"
-                  phase:OperationPhaseUICache
-                 target:logicalDest
-                 result:uc1 ? OperationResultSuccess : OperationResultFailed
-               exitCode:uc1 ? 0 : 1
-              rawOutput:@""
-               rawError:uc1 ? @"" : @"uicache -p logicalDest failed"
-               duration:ucDur
-                context:@{}
-          operationID:opID];
-    [opLog logOperation:@"uicache -p destApp"
-                  phase:OperationPhaseUICache
-                 target:destApp
-                 result:uc2 ? OperationResultSuccess : OperationResultFailed
-               exitCode:uc2 ? 0 : 1
-              rawOutput:@""
-               rawError:uc2 ? @"" : @"uicache -p destApp failed"
-               duration:0
-                context:@{}
-          operationID:opID];
-    [opLog logOperation:@"uicache -a"
-                  phase:OperationPhaseUICache
-                 target:@""
-                 result:uc3 ? OperationResultSuccess : OperationResultFailed
-               exitCode:uc3 ? 0 : 1
-              rawOutput:@""
-               rawError:uc3 ? @"" : @"uicache -a failed"
-               duration:0
-                context:@{}
-          operationID:opID];
 
-    // [STEP 14] Verify installation
+    [opLog endPhase:rec13
+            exitCode:0
+           rawOutput:@""
+            rawError:@""
+        verification:fwVerifyDetail
+            verified:fwVerified
+            duration:dur13];
+
+    // ───────────────────────────────────────────────
+    // PHASE 14: Run uicache
+    // ───────────────────────────────────────────────
+    NSString *rec14a = [opLog beginPhase:OperationPhaseUICache
+                               operation:@"uicache -p logicalDest"
+                                  target:logicalDest
+                                   input:@""
+                           transactionID:txnID];
+    t0 = [NSDate date];
+    BOOL uc1 = hasH ? [self runRoot:self.uicachePath args:@[@"-p", logicalDest]]
+                    : [self runCmd:self.uicachePath args:@[@"-p", logicalDest]];
+    NSTimeInterval dur14a = [[NSDate date] timeIntervalSinceDate:t0];
+
+    [opLog endPhase:rec14a
+            exitCode:uc1 ? 0 : 1
+           rawOutput:@""
+            rawError:uc1 ? @"" : @"uicache -p logicalDest failed"
+        verification:[NSString stringWithFormat:@"command=%@", uc1 ? @"YES" : @"NO"]
+            verified:uc1
+            duration:dur14a];
+
+    NSString *rec14b = [opLog beginPhase:OperationPhaseUICache
+                               operation:@"uicache -p destApp"
+                                  target:destApp
+                                   input:@""
+                           transactionID:txnID];
+    t0 = [NSDate date];
+    BOOL uc2 = hasH ? [self runRoot:self.uicachePath args:@[@"-p", destApp]]
+                    : [self runCmd:self.uicachePath args:@[@"-p", destApp]];
+    NSTimeInterval dur14b = [[NSDate date] timeIntervalSinceDate:t0];
+
+    [opLog endPhase:rec14b
+            exitCode:uc2 ? 0 : 1
+           rawOutput:@""
+            rawError:uc2 ? @"" : @"uicache -p destApp failed"
+        verification:[NSString stringWithFormat:@"command=%@", uc2 ? @"YES" : @"NO"]
+            verified:uc2
+            duration:dur14b];
+
+    NSString *rec14c = [opLog beginPhase:OperationPhaseUICache
+                               operation:@"uicache -a"
+                                  target:@""
+                                   input:@""
+                           transactionID:txnID];
+    t0 = [NSDate date];
+    BOOL uc3 = hasH ? [self runRoot:self.uicachePath args:@[@"-a"]]
+                    : [self runCmd:self.uicachePath args:@[@"-a"]];
+    NSTimeInterval dur14c = [[NSDate date] timeIntervalSinceDate:t0];
+
+    [opLog endPhase:rec14c
+            exitCode:uc3 ? 0 : 1
+           rawOutput:@""
+            rawError:uc3 ? @"" : @"uicache -a failed"
+        verification:[NSString stringWithFormat:@"command=%@", uc3 ? @"YES" : @"NO"]
+            verified:uc3
+            duration:dur14c];
+
+    // ───────────────────────────────────────────────
+    // PHASE 15: Post-install verification
+    // ───────────────────────────────────────────────
+    NSString *rec15 = [opLog beginPhase:OperationPhaseVerify
+                              operation:@"verify"
+                                 target:destApp
+                                  input:bundleID
+                          transactionID:txnID];
     t0 = [NSDate date];
     BOOL ok = [self verify:destApp bundleID:bundleID exeName:exeName];
-    [opLog logOperation:@"verify"
-                  phase:OperationPhaseVerify
-                 target:destApp
-                 result:ok ? OperationResultSuccess : OperationResultFailed
-               exitCode:ok ? 0 : 1
-              rawOutput:@""
-               rawError:ok ? @"" : @"Verification failed"
-               duration:[[NSDate date] timeIntervalSinceDate:t0]
-                context:@{@"bundleID": bundleID}
-          operationID:opID];
+    NSTimeInterval dur15 = [[NSDate date] timeIntervalSinceDate:t0];
 
-    // [STEP 15] Cleanup temp
+    [opLog endPhase:rec15
+            exitCode:ok ? 0 : 1
+           rawOutput:@""
+            rawError:ok ? @"" : @"Verification reported failures"
+        verification:[NSString stringWithFormat:@"verify returned %@", ok ? @"YES" : @"NO"]
+            verified:ok
+            duration:dur15];
+
+    // ───────────────────────────────────────────────
+    // PHASE 16: Cleanup temp
+    // ───────────────────────────────────────────────
+    NSString *rec16 = [opLog beginPhase:OperationPhaseCleanup
+                              operation:@"removeItemAtPath (temp)"
+                                 target:tmp
+                                  input:@""
+                          transactionID:txnID];
     [fm removeItemAtPath:tmp error:nil];
-    [opLog logOperation:@"removeItemAtPath (temp)"
-                  phase:OperationPhaseCleanup
-                 target:tmp
-                 result:OperationResultSuccess
-               exitCode:0
-              rawOutput:@""
-               rawError:@""
-               duration:0
-                context:@{}
-          operationID:opID];
+    BOOL tmpRemoved = ![fm fileExistsAtPath:tmp];
 
-    // [COMPLETE]
+    [opLog endPhase:rec16
+            exitCode:tmpRemoved ? 0 : 1
+           rawOutput:@""
+            rawError:tmpRemoved ? @"" : @"Temp directory still exists"
+        verification:[NSString stringWithFormat:@"removed=%@", tmpRemoved ? @"YES" : @"NO"]
+            verified:tmpRemoved
+            duration:0];
+
+    // ───────────────────────────────────────────────
+    // FINAL: Determine overall result
+    // ───────────────────────────────────────────────
+    BOOL hasFailures = [opLog transactionHasFailures:txnID];
+    OperationResult finalResult = hasFailures ? OperationResultPartial : OperationResultSuccess;
+
     InstallationResult *res = [InstallationResult successResult:[NSString stringWithFormat:@"Installed %@", appName]];
     res.bundleID = bundleID;
-    res.detailedOutput = ok ? @"Verification passed" : @"Verification incomplete - may need reboot";
-    [opLog logOperation:@"INSTALL_COMPLETE"
-                  phase:OperationPhaseComplete
-                 target:bundleID
-                 result:OperationResultSuccess
-               exitCode:0
-              rawOutput:res.detailedOutput
-               rawError:@""
-               duration:0
-                context:@{@"appName": appName, @"destApp": destApp, @"hasHelper": @(hasH)}
-          operationID:opID];
-    [opLog endTransaction:opID];
-    _currentOpID = nil;
+    res.detailedOutput = hasFailures ? @"Installation completed with warnings — review audit trail" : @"Verification passed";
+
+    [opLog endTransaction:txnID finalResult:finalResult];
+    _currentTxnID = nil;
     if (completion) completion(res);
 }
 
@@ -592,19 +732,30 @@ static NSString *_currentOpID = nil;
 
 - (void)signBin:(NSString *)path hasHelper:(BOOL)hasH label:(NSString *)label {
     if (!path || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        if (_currentOpID) {
-            [[OperationLog sharedLog] logOperation:[NSString stringWithFormat:@"ldid SKIP (%@)", label]
-                                             phase:OperationPhaseSign
-                                            target:path
-                                            result:OperationResultSkipped
-                                          exitCode:0
-                                         rawOutput:@""
-                                          rawError:@"File does not exist"
-                                          duration:0
-                                           context:@{@"label": label}
-                                     operationID:_currentOpID];
+        if (_currentTxnID) {
+            NSString *rec = [[OperationLog sharedLog] beginPhase:OperationPhaseSign
+                                                        operation:[NSString stringWithFormat:@"ldid SKIP (%@)", label]
+                                                           target:path
+                                                            input:@""
+                                                    transactionID:_currentTxnID];
+            [[OperationLog sharedLog] endPhase:rec
+                                        exitCode:0
+                                       rawOutput:@""
+                                        rawError:@"File does not exist"
+                                    verification:@"File missing — skipped"
+                                        verified:YES
+                                        duration:0];
         }
         return;
+    }
+
+    NSString *rec = nil;
+    if (_currentTxnID) {
+        rec = [[OperationLog sharedLog] beginPhase:OperationPhaseSign
+                                          operation:[NSString stringWithFormat:@"ldid -S (%@)", label]
+                                             target:path
+                                              input:@""
+                                      transactionID:_currentTxnID];
     }
 
     NSDate *t0 = [NSDate date];
@@ -623,19 +774,20 @@ static NSString *_currentOpID = nil;
     }
 
     NSTimeInterval dur = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: file must still exist and be readable after signing
+    BOOL stillExists = [[NSFileManager defaultManager] fileExistsAtPath:path];
+    BOOL stillReadable = [[NSFileManager defaultManager] isReadableFileAtPath:path];
+
     NSLog(@"[IPAInstallerPro] %@: %@", ok ? @"✅" : @"⚠️", label);
 
-    if (_currentOpID) {
-        [[OperationLog sharedLog] logOperation:[NSString stringWithFormat:@"%@ (%@)", signMethod, label]
-                                         phase:OperationPhaseSign
-                                        target:path
-                                        result:ok ? OperationResultSuccess : OperationResultFailed
-                                      exitCode:ok ? 0 : 1
-                                     rawOutput:@""
-                                      rawError:ok ? @"" : [NSString stringWithFormat:@"ldid failed for %@", label]
-                                      duration:dur
-                                       context:@{@"label": label}
-                                 operationID:_currentOpID];
+    if (rec) {
+        [[OperationLog sharedLog] endPhase:rec
+                                    exitCode:ok ? 0 : 1
+                                   rawOutput:@""
+                                    rawError:ok ? @"" : [NSString stringWithFormat:@"%@ failed for %@", signMethod, label]
+                                verification:[NSString stringWithFormat:@"exists=%@ readable=%@", stillExists ? @"YES" : @"NO", stillReadable ? @"YES" : @"NO"]
+                                    verified:(ok && stillExists && stillReadable)
+                                    duration:dur];
     }
 }
 
@@ -669,19 +821,30 @@ static NSString *_currentOpID = nil;
 
 - (void)signExe:(NSString *)path hasHelper:(BOOL)hasH {
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        if (_currentOpID) {
-            [[OperationLog sharedLog] logOperation:@"ldid SKIP (main exe)"
-                                             phase:OperationPhaseSign
-                                            target:path
-                                            result:OperationResultSkipped
-                                          exitCode:0
-                                         rawOutput:@""
-                                          rawError:@"Main executable does not exist"
-                                          duration:0
-                                           context:@{}
-                                     operationID:_currentOpID];
+        if (_currentTxnID) {
+            NSString *rec = [[OperationLog sharedLog] beginPhase:OperationPhaseSign
+                                                        operation:@"ldid SKIP (main exe)"
+                                                           target:path
+                                                            input:@""
+                                                    transactionID:_currentTxnID];
+            [[OperationLog sharedLog] endPhase:rec
+                                        exitCode:0
+                                       rawOutput:@""
+                                        rawError:@"Main executable does not exist"
+                                    verification:@"File missing — skipped"
+                                        verified:YES
+                                        duration:0];
         }
         return;
+    }
+
+    NSString *rec = nil;
+    if (_currentTxnID) {
+        rec = [[OperationLog sharedLog] beginPhase:OperationPhaseSign
+                                          operation:@"signExe (main executable)"
+                                             target:path
+                                              input:@""
+                                      transactionID:_currentTxnID];
     }
 
     NSDate *t0 = [NSDate date];
@@ -689,7 +852,6 @@ static NSString *_currentOpID = nil;
     BOOL ok = NO;
     NSString *signMethod = @"";
 
-    // Try to extract original entitlements via pipe
     NSString *entOutput = hasH ? [self runRootCmdOutput:self.ldidPath args:@[@"-e", path]] : [self runCmdOutput:self.ldidPath args:@[@"-e", path]];
     if (entOutput && entOutput.length > 10) {
         [entOutput writeToFile:ep atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -711,19 +873,20 @@ static NSString *_currentOpID = nil;
     }
 
     NSTimeInterval dur = [[NSDate date] timeIntervalSinceDate:t0];
+    // Verify: file must exist and be readable
+    BOOL stillExists = [[NSFileManager defaultManager] fileExistsAtPath:path];
+    BOOL stillReadable = [[NSFileManager defaultManager] isReadableFileAtPath:path];
+
     NSLog(@"[IPAInstallerPro] Main exe sign: %@", ok ? @"OK" : @"⚠️");
 
-    if (_currentOpID) {
-        [[OperationLog sharedLog] logOperation:[NSString stringWithFormat:@"%@ (main exe)", signMethod]
-                                         phase:OperationPhaseSign
-                                        target:path
-                                        result:ok ? OperationResultSuccess : OperationResultFailed
-                                      exitCode:ok ? 0 : 1
-                                     rawOutput:entOutput ?: @""
-                                      rawError:ok ? @"" : @"All ldid attempts failed"
-                                      duration:dur
-                                       context:@{@"hadEntitlements": @(entOutput.length > 10)}
-                                 operationID:_currentOpID];
+    if (rec) {
+        [[OperationLog sharedLog] endPhase:rec
+                                    exitCode:ok ? 0 : 1
+                                   rawOutput:entOutput ?: @""
+                                    rawError:ok ? @"" : @"All ldid attempts failed"
+                                verification:[NSString stringWithFormat:@"exists=%@ readable=%@ method=%@", stillExists ? @"YES" : @"NO", stillReadable ? @"YES" : @"NO", signMethod]
+                                    verified:(ok && stillExists && stillReadable)
+                                    duration:dur];
     }
 }
 
@@ -761,32 +924,36 @@ static NSString *_currentOpID = nil;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *fw = [appPath stringByAppendingPathComponent:@"Frameworks"];
     if (![fm fileExistsAtPath:fw]) {
-        if (_currentOpID) {
-            [[OperationLog sharedLog] logOperation:@"Frameworks folder check"
-                                             phase:OperationPhaseFramework
-                                            target:fw
-                                            result:OperationResultSkipped
-                                          exitCode:0
-                                         rawOutput:@"No Frameworks folder"
-                                          rawError:@""
-                                          duration:0
-                                           context:@{}
-                                     operationID:_currentOpID];
+        if (_currentTxnID) {
+            NSString *rec = [[OperationLog sharedLog] beginPhase:OperationPhaseFramework
+                                                        operation:@"Frameworks check"
+                                                           target:fw
+                                                            input:@""
+                                                    transactionID:_currentTxnID];
+            [[OperationLog sharedLog] endPhase:rec
+                                        exitCode:0
+                                       rawOutput:@"No Frameworks folder"
+                                        rawError:@""
+                                    verification:@"No Frameworks folder — nothing to process"
+                                        verified:YES
+                                        duration:0];
         }
         return;
     }
 
-    if (_currentOpID) {
-        [[OperationLog sharedLog] logOperation:@"Frameworks folder found"
-                                         phase:OperationPhaseFramework
-                                        target:fw
-                                        result:OperationResultSuccess
-                                      exitCode:0
-                                     rawOutput:@""
-                                      rawError:@""
-                                      duration:0
-                                       context:@{}
-                                 operationID:_currentOpID];
+    if (_currentTxnID) {
+        NSString *rec = [[OperationLog sharedLog] beginPhase:OperationPhaseFramework
+                                                    operation:@"Frameworks found"
+                                                       target:fw
+                                                        input:@""
+                                                transactionID:_currentTxnID];
+        [[OperationLog sharedLog] endPhase:rec
+                                    exitCode:0
+                                   rawOutput:@""
+                                    rawError:@""
+                                verification:@"Frameworks folder exists"
+                                    verified:YES
+                                    duration:0];
     }
 
     for (NSString *item in [fm contentsOfDirectoryAtPath:fw error:nil]) {
@@ -815,36 +982,10 @@ static NSString *_currentOpID = nil;
     else if (!exeReadable) { NSLog(@"❌ exe unreadable"); ok = NO; }
     else NSLog(@"✅ exe OK");
 
-    if (_currentOpID) {
-        [[OperationLog sharedLog] logOperation:@"verify executable"
-                                         phase:OperationPhaseVerify
-                                        target:ep
-                                        result:(exeExists && exeReadable) ? OperationResultSuccess : OperationResultFailed
-                                      exitCode:(exeExists && exeReadable) ? 0 : 1
-                                     rawOutput:@""
-                                      rawError:(exeExists && exeReadable) ? @"" : @"Executable missing or unreadable"
-                                      duration:0
-                                       context:@{@"exists": @(exeExists), @"readable": @(exeReadable)}
-                                 operationID:_currentOpID];
-    }
-
     NSString *ip = [appPath stringByAppendingPathComponent:@"Info.plist"];
     BOOL infoExists = [fm fileExistsAtPath:ip];
     if (!infoExists) { NSLog(@"❌ Info.plist missing"); ok = NO; }
     else NSLog(@"✅ Info.plist OK");
-
-    if (_currentOpID) {
-        [[OperationLog sharedLog] logOperation:@"verify Info.plist"
-                                         phase:OperationPhaseVerify
-                                        target:ip
-                                        result:infoExists ? OperationResultSuccess : OperationResultFailed
-                                      exitCode:infoExists ? 0 : 1
-                                     rawOutput:@""
-                                      rawError:infoExists ? @"" : @"Info.plist missing"
-                                      duration:0
-                                       context:@{}
-                                 operationID:_currentOpID];
-    }
 
     NSString *fwp = [appPath stringByAppendingPathComponent:@"Frameworks"];
     if ([fm fileExistsAtPath:fwp]) {
@@ -854,19 +995,6 @@ static NSString *_currentOpID = nil;
                 BOOL dylibReadable = [fm isReadableFileAtPath:p];
                 if (!dylibReadable) { NSLog(@"❌ %@ unreadable", item); ok = NO; }
                 else NSLog(@"✅ %@ OK", item);
-
-                if (_currentOpID) {
-                    [[OperationLog sharedLog] logOperation:@"verify dylib"
-                                                     phase:OperationPhaseVerify
-                                                    target:p
-                                                    result:dylibReadable ? OperationResultSuccess : OperationResultFailed
-                                                  exitCode:dylibReadable ? 0 : 1
-                                                 rawOutput:@""
-                                                  rawError:dylibReadable ? @"" : @"Dylib unreadable"
-                                                  duration:0
-                                                   context:@{@"item": item}
-                                             operationID:_currentOpID];
-                }
             }
         }
     }
@@ -878,19 +1006,6 @@ static NSString *_currentOpID = nil;
             id a = [ws performSelector:@selector(applicationForIdentifier:) withObject:bid];
             BOOL registered = (a != nil);
             NSLog(@"%@", registered ? @"✅ Registered" : @"⚠️ Not registered yet");
-
-            if (_currentOpID) {
-                [[OperationLog sharedLog] logOperation:@"LSApplicationWorkspace registration check"
-                                                 phase:OperationPhaseVerify
-                                                target:bid
-                                                result:registered ? OperationResultSuccess : OperationResultFailed
-                                              exitCode:registered ? 0 : 1
-                                             rawOutput:@""
-                                              rawError:registered ? @"" : @"App not registered in LSApplicationWorkspace"
-                                              duration:0
-                                               context:@{}
-                                         operationID:_currentOpID];
-            }
         }
     }
     return ok;
