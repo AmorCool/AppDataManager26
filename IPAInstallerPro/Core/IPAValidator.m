@@ -167,35 +167,36 @@ extern char **environ;
 #pragma mark - Main Validation
 
 - (IPAValidationResult *)validateIPAAtPath:(NSString *)ipaPath {
-    NSMutableArray *issues = [NSMutableArray array];
+    NSMutableArray *errors = [NSMutableArray array];
+    NSMutableArray *warnings = [NSMutableArray array];
     NSMutableArray *missing = [NSMutableArray array];
     NSFileManager *fm = [NSFileManager defaultManager];
 
     if (![fm fileExistsAtPath:ipaPath]) {
-        [issues addObject:@"IPA not found"];
-        return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
+        [errors addObject:@"IPA not found"];
+        return [self result:IPAValidationStatusInvalidZip errors:errors warnings:warnings missing:missing ready:NO];
     }
     if (![fm isReadableFileAtPath:ipaPath]) {
-        [issues addObject:@"IPA not readable"];
-        return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
+        [errors addObject:@"IPA not readable"];
+        return [self result:IPAValidationStatusInvalidZip errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     // Check ZIP magic number
     NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:ipaPath];
     if (!fh) {
-        [issues addObject:@"Cannot open IPA"];
-        return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
+        [errors addObject:@"Cannot open IPA"];
+        return [self result:IPAValidationStatusInvalidZip errors:errors warnings:warnings missing:missing ready:NO];
     }
     NSData *header = [fh readDataOfLength:4];
     [fh closeFile];
     if (header.length < 4) {
-        [issues addObject:@"IPA empty/corrupt"];
-        return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
+        [errors addObject:@"IPA empty/corrupt"];
+        return [self result:IPAValidationStatusInvalidZip errors:errors warnings:warnings missing:missing ready:NO];
     }
     const unsigned char *b = (const unsigned char *)header.bytes;
     if (b[0] != 0x50 || b[1] != 0x4B || b[2] != 0x03 || b[3] != 0x04) {
-        [issues addObject:@"Not a valid ZIP"];
-        return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
+        [errors addObject:@"Not a valid ZIP"];
+        return [self result:IPAValidationStatusInvalidZip errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     // Extract IPA using unzip directly (NO /bin/sh)
@@ -203,16 +204,16 @@ extern char **environ;
     [fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
 
     if (![self runCmd:self.unzipPath args:@[@"-o", ipaPath, @"-d", tmp]]) {
-        [issues addObject:@"Unzip failed"];
+        [errors addObject:@"Unzip failed"];
         [fm removeItemAtPath:tmp error:nil];
-        return [self result:IPAValidationStatusInvalidZip issues:issues missing:missing ready:NO];
+        return [self result:IPAValidationStatusInvalidZip errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     NSString *payload = [tmp stringByAppendingPathComponent:@"Payload"];
     if (![fm fileExistsAtPath:payload]) {
-        [issues addObject:@"Payload missing"];
+        [errors addObject:@"Payload missing"];
         [fm removeItemAtPath:tmp error:nil];
-        return [self result:IPAValidationStatusMissingPayload issues:issues missing:missing ready:NO];
+        return [self result:IPAValidationStatusMissingPayload errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     NSString *appFolder = nil;
@@ -220,9 +221,9 @@ extern char **environ;
         if ([i hasSuffix:@".app"]) { appFolder = i; break; }
     }
     if (!appFolder) {
-        [issues addObject:@"No .app in Payload"];
+        [errors addObject:@"No .app in Payload"];
         [fm removeItemAtPath:tmp error:nil];
-        return [self result:IPAValidationStatusMissingAppBundle issues:issues missing:missing ready:NO];
+        return [self result:IPAValidationStatusMissingAppBundle errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     NSString *appPath = [payload stringByAppendingPathComponent:appFolder];
@@ -232,19 +233,20 @@ extern char **environ;
 }
 
 - (IPAValidationResult *)validateExtractedAppAtPath:(NSString *)appPath {
-    NSMutableArray *issues = [NSMutableArray array];
+    NSMutableArray *errors = [NSMutableArray array];      // CRITICAL: blocks install
+    NSMutableArray *warnings = [NSMutableArray array];    // NON-CRITICAL: does NOT block install
     NSMutableArray *missing = [NSMutableArray array];
     NSFileManager *fm = [NSFileManager defaultManager];
 
     NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
     if (![fm fileExistsAtPath:infoPath]) {
-        [issues addObject:@"Info.plist missing"];
-        return [self result:IPAValidationStatusMissingInfoPlist issues:issues missing:missing ready:NO];
+        [errors addObject:@"Info.plist missing"];
+        return [self result:IPAValidationStatusMissingInfoPlist errors:errors warnings:warnings missing:missing ready:NO];
     }
     NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
     if (!info) {
-        [issues addObject:@"Info.plist corrupt"];
-        return [self result:IPAValidationStatusMissingInfoPlist issues:issues missing:missing ready:NO];
+        [errors addObject:@"Info.plist corrupt"];
+        return [self result:IPAValidationStatusMissingInfoPlist errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     NSString *bundleID = info[@"CFBundleIdentifier"];
@@ -253,51 +255,51 @@ extern char **environ;
     NSArray *supportedDevices = info[@"UISupportedDevices"];
 
     if (!bundleID || bundleID.length == 0) {
-        [issues addObject:@"BundleID missing"];
-        return [self result:IPAValidationStatusInvalidBundleID issues:issues missing:missing ready:NO];
+        [errors addObject:@"BundleID missing"];
+        return [self result:IPAValidationStatusInvalidBundleID errors:errors warnings:warnings missing:missing ready:NO];
     }
     if (!exeName || exeName.length == 0) {
-        [issues addObject:@"Executable missing"];
-        return [self result:IPAValidationStatusMissingExecutable issues:issues missing:missing ready:NO];
+        [errors addObject:@"Executable missing"];
+        return [self result:IPAValidationStatusMissingExecutable errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     NSString *exePath = [appPath stringByAppendingPathComponent:exeName];
     if (![fm fileExistsAtPath:exePath]) {
-        [issues addObject:[NSString stringWithFormat:@"Executable %@ missing", exeName]];
-        return [self result:IPAValidationStatusMissingExecutable issues:issues missing:missing ready:NO];
+        [errors addObject:[NSString stringWithFormat:@"Executable %@ missing", exeName]];
+        return [self result:IPAValidationStatusMissingExecutable errors:errors warnings:warnings missing:missing ready:NO];
     }
     if (![fm isReadableFileAtPath:exePath]) {
-        [issues addObject:[NSString stringWithFormat:@"Executable %@ not readable", exeName]];
+        [errors addObject:[NSString stringWithFormat:@"Executable %@ not readable", exeName]];
     }
 
     NSArray *archs = [self archsFor:exePath];
-    if (archs.count == 0) [issues addObject:@"Cannot determine architecture"];
+    if (archs.count == 0) [warnings addObject:@"Cannot determine architecture"];
     else {
         BOOL hasArm64 = NO;
         for (NSString *a in archs) if ([a containsString:@"arm64"]) hasArm64 = YES;
-        if (!hasArm64) [issues addObject:@"No arm64 support"];
+        if (!hasArm64) [warnings addObject:@"No arm64 support - may not work on modern devices"];
     }
 
     if (minOS) {
         NSString *mos = [minOS isKindOfClass:[NSString class]] ? (NSString*)minOS : [minOS stringValue];
         NSInteger maj = [[[mos componentsSeparatedByString:@"."] firstObject] integerValue];
-        if (maj > 15) [issues addObject:[NSString stringWithFormat:@"Requires iOS %@+", mos]];
+        if (maj > 15) [warnings addObject:[NSString stringWithFormat:@"Requires iOS %@+", mos]];
     }
 
     if ([fm fileExistsAtPath:self.ldidPath]) {
-        if (![self isSigned:exePath]) [issues addObject:@"Not signed - will re-sign"];
+        if (![self isSigned:exePath]) [warnings addObject:@"Not signed - will re-sign during install"];
     }
 
     if ([fm fileExistsAtPath:[appPath stringByAppendingPathComponent:@"embedded.mobileprovision"]]) {
-        [issues addObject:@"Has Apple provisioning - will remove and re-sign"];
+        [warnings addObject:@"Has Apple provisioning - will remove and re-sign"];
     }
 
-    if (supportedDevices && supportedDevices.count > 0) [issues addObject:@"Device restrictions"];
+    if (supportedDevices && supportedDevices.count > 0) [warnings addObject:@"Device restrictions present"];
 
     if ([fm fileExistsAtPath:self.ldidPath]) {
         NSDictionary *ents = [self extractEnts:exePath];
         if (ents && ents[@"com.apple.private.security.container-required"] && [ents[@"com.apple.private.security.container-required"] boolValue]) {
-            [issues addObject:@"Requires special security container"];
+            [warnings addObject:@"Requires special security container - may need adjustment"];
         }
     }
 
@@ -308,12 +310,12 @@ extern char **environ;
             BOOL isDir = NO;
             [fm fileExistsAtPath:ip isDirectory:&isDir];
             if ([item hasSuffix:@".dylib"] || [item hasSuffix:@".so"]) {
-                if (![fm isReadableFileAtPath:ip]) [issues addObject:[NSString stringWithFormat:@"Frameworks/%@ unreadable", item]];
-                else if ([fm fileExistsAtPath:self.ldidPath] && ![self isSigned:ip]) [issues addObject:[NSString stringWithFormat:@"Frameworks/%@ unsigned", item]];
+                if (![fm isReadableFileAtPath:ip]) [errors addObject:[NSString stringWithFormat:@"Frameworks/%@ unreadable", item]];
+                else if ([fm fileExistsAtPath:self.ldidPath] && ![self isSigned:ip]) [warnings addObject:[NSString stringWithFormat:@"Frameworks/%@ unsigned - will sign during install", item]];
             } else if (isDir && [item hasSuffix:@".framework"]) {
                 NSString *fn = [item stringByDeletingPathExtension];
                 NSString *fep = [ip stringByAppendingPathComponent:fn];
-                if ([fm fileExistsAtPath:fep] && ![fm isReadableFileAtPath:fep]) [issues addObject:[NSString stringWithFormat:@"Frameworks/%@/%@ unreadable", item, fn]];
+                if ([fm fileExistsAtPath:fep] && ![fm isReadableFileAtPath:fep]) [errors addObject:[NSString stringWithFormat:@"Frameworks/%@/%@ unreadable", item, fn]];
             }
         }
     }
@@ -321,20 +323,27 @@ extern char **environ;
     NSArray *deps = [self checkDependenciesAtAppPath:appPath];
     for (NSString *dep in deps) {
         if (![dep hasPrefix:@"@rpath/"] && ![dep hasPrefix:@"@executable_path/"] && ![dep hasPrefix:@"/usr/lib/"] && ![dep hasPrefix:@"/System/Library/"]) {
-            [issues addObject:[NSString stringWithFormat:@"External dependency: %@", dep]];
+            [warnings addObject:[NSString stringWithFormat:@"External dependency: %@ - may not be available", dep]];
         }
     }
 
-    if ([fm fileExistsAtPath:[appPath stringByAppendingPathComponent:@"PlugIns"]]) [issues addObject:@"Has PlugIns - may need extra signing"];
+    if ([fm fileExistsAtPath:[appPath stringByAppendingPathComponent:@"PlugIns"]]) [warnings addObject:@"Has PlugIns - may need extra signing"];
 
-    BOOL ready = (issues.count == 0);
-    return [self result:ready ? IPAValidationStatusValid : IPAValidationStatusIncompatibleArchitecture issues:issues missing:missing ready:ready];
+    // CRITICAL: ready = YES if no errors, even if warnings exist
+    BOOL ready = (errors.count == 0);
+
+    // Merge warnings into errors for UI display (backward compatibility)
+    NSMutableArray *allIssues = [NSMutableArray arrayWithArray:errors];
+    [allIssues addObjectsFromArray:warnings];
+
+    IPAValidationStatus status = ready ? IPAValidationStatusValid : IPAValidationStatusIncompatibleArchitecture;
+    return [self result:status errors:errors warnings:warnings missing:missing ready:ready];
 }
 
-- (IPAValidationResult *)result:(IPAValidationStatus)status issues:(NSArray *)issues missing:(NSArray *)missing ready:(BOOL)ready {
+- (IPAValidationResult *)result:(IPAValidationStatus)status errors:(NSArray *)errors warnings:(NSArray *)warnings missing:(NSArray *)missing ready:(BOOL)ready {
     IPAValidationResult *r = [[IPAValidationResult alloc] init];
     r.status = status;
-    r.issues = issues;
+    r.issues = errors;  // Only errors, not warnings
     r.missingLibraries = missing;
     r.isReadyForInstall = ready;
     if (status == IPAValidationStatusValid) r.statusMessage = @"Valid for install";
@@ -344,7 +353,7 @@ extern char **environ;
     else if (status == IPAValidationStatusMissingInfoPlist) r.statusMessage = @"Info.plist missing";
     else if (status == IPAValidationStatusMissingExecutable) r.statusMessage = @"Executable missing";
     else if (status == IPAValidationStatusInvalidBundleID) r.statusMessage = @"Invalid BundleID";
-    else r.statusMessage = @"Has warnings - may need fixes";
+    else r.statusMessage = @"Has errors - cannot install";
     return r;
 }
 
