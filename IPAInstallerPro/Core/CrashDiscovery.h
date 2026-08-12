@@ -9,7 +9,7 @@
 #import <Foundation/Foundation.h>
 
 @interface CrashDiscoveryResult : NSObject
-@property (nonatomic, strong) NSArray<NSString *> *newPaths;
+@property (nonatomic, strong) NSArray<NSString *> *freshPaths;
 @property (nonatomic, strong) NSArray<NSString *> *allPaths;
 @property (nonatomic, strong) NSDate *scanTime;
 @end
