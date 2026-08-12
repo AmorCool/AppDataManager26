@@ -4,6 +4,7 @@
 //
 
 #import "OperationLog.h"
+#import <UIKit/UIKit.h>
 
 // ============================================================
 // OperationRecord
