@@ -28,7 +28,9 @@ jobs:
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
       - name: Setup dependencies
-        run: brew install dpkg ldid
+        run: |
+          export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
+          brew install dpkg ldid
 
       - name: Fix permissions
         run: |
