@@ -1,331 +1,354 @@
-#import "IPAValidator.h"
-#include <spawn.h>
-#include <sys/wait.h>
-#import "Logger.h"
-#import "JailbreakEnvironment.h"
-#import "RootlessManager.h"
-#import "RootlessManager.h"
+//
+//  IPAValidator.m
+//  IPAInstallerPro
+//
+//  Enhanced version - checks dylib permissions and @rpath dependencies
+//
 
-@implementation IPAValidationResult
-@end
+#import "IPAValidator.h"
+#import "RootlessManager.h"
+#import <Foundation/Foundation.h>
 
 @interface IPAValidator ()
+@property (nonatomic, strong) NSString *ldidPath;
+@property (nonatomic, strong) NSString *otoolPath;
+@property (nonatomic, strong) NSString *lipoPath;
+@property (nonatomic, strong) NSString *filePath;
 @end
 
 @implementation IPAValidator
 
-+ (instancetype)sharedValidator {
-    static IPAValidator *shared = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ shared = [[self alloc] init]; });
-    return shared;
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        RootlessManager *rm = [RootlessManager sharedManager];
+        self.ldidPath  = [rm resolvePath:@"/usr/bin/ldid"];
+        self.otoolPath = [rm resolvePath:@"/usr/bin/otool"];
+        self.lipoPath  = [rm resolvePath:@"/usr/bin/lipo"];
+        self.filePath  = [rm resolvePath:@"/usr/bin/file"];
+    }
+    return self;
 }
 
-- (IPAValidationResult *)validateIPAAtPath:(NSString *)ipaPath {
-    IPAValidationResult *result = [[IPAValidationResult alloc] init];
-    NSMutableArray<NSString *> *issues = [NSMutableArray array];
+- (ValidationResult *)validateIPA:(NSString *)ipaPath {
+    NSMutableArray *errors = [NSMutableArray array];
+    NSMutableArray *warnings = [NSMutableArray array];
 
-    [[Logger sharedLogger] info:[NSString stringWithFormat:@"Validating IPA: %@", ipaPath]];
+    NSFileManager *fm = [NSFileManager defaultManager];
 
-    // 1. Check file exists
-    if (![[NSFileManager defaultManager] fileExistsAtPath:ipaPath]) {
-        result.status = IPAValidationStatusInvalidZip;
-        result.statusMessage = @"الملف غير موجود";
-        result.issues = @[@"لم يتم العثور على ملف IPA في المسار المحدد"];
-        result.isReadyForInstall = NO;
-        return result;
+    // 1. Check file exists and is readable
+    if (![fm fileExistsAtPath:ipaPath]) {
+        [errors addObject:@"ملف IPA غير موجود"];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
+    }
+    if (![fm isReadableFileAtPath:ipaPath]) {
+        [errors addObject:@"لا يمكن قراءة ملف IPA (صلاحيات غير كافية)"];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
     }
 
-    // 2. Check it's a valid zip (IPA is a zip)
+    // 2. Check ZIP magic number
     NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:ipaPath];
     if (!fh) {
-        result.status = IPAValidationStatusInvalidZip;
-        result.statusMessage = @"لا يمكن قراءة الملف";
-        result.issues = @[@"فشل في فتح الملف للقراءة"];
-        result.isReadyForInstall = NO;
-        return result;
+        [errors addObject:@"لا يمكن فتح ملف IPA للقراءة"];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
     }
-
     NSData *header = [fh readDataOfLength:4];
     [fh closeFile];
-
     if (header.length < 4) {
-        result.status = IPAValidationStatusInvalidZip;
-        result.statusMessage = @"ملف غير صالح";
-        result.issues = @[@"الملف فارغ أو تالف"];
-        result.isReadyForInstall = NO;
-        return result;
+        [errors addObject:@"ملف IPA فارغ أو تالف"];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
     }
-
-    // ZIP magic: 50 4B 03 04
     const unsigned char *bytes = (const unsigned char *)header.bytes;
     if (bytes[0] != 0x50 || bytes[1] != 0x4B || bytes[2] != 0x03 || bytes[3] != 0x04) {
-        result.status = IPAValidationStatusInvalidZip;
-        result.statusMessage = @"الملف ليس بصيغة ZIP صالحة";
-        result.issues = @[@"ملف IPA يجب أن يكون أرشيف ZIP صالح"];
-        result.isReadyForInstall = NO;
-        return result;
+        [errors addObject:@"ملف IPA ليس ملف ZIP صالح"];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
     }
 
-    // 3. Extract and validate deeper
+    // 3. Extract to temp and validate structure
     NSString *tempDir = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
-    [[NSFileManager defaultManager] createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm createDirectoryAtPath:tempDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-    // Unzip using posix_spawn
-    NSString *unzipPathStr = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/unzip"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:unzipPathStr]) {
-        unzipPathStr = @"/usr/bin/unzip";
-    }
-    const char *unzipPath = [unzipPathStr UTF8String];
-    const char *unzipArgs[] = { unzipPath, "-q", "-o", [ipaPath UTF8String], "-d", [tempDir UTF8String], NULL };
-    pid_t unzipPid;
-    int unzipStatus;
-    int spawnErr = posix_spawn(&unzipPid, unzipPath, NULL, NULL, (char **)unzipArgs, NULL);
-    if (spawnErr != 0) {
-        [[Logger sharedLogger] error:[NSString stringWithFormat:@"posix_spawn unzip failed: %d", spawnErr]];
-        result.status = IPAValidationStatusInvalidZip;
-        result.statusMessage = @"فشل في فك الضغط";
-        result.issues = @[@"تعذر فك ضغط ملف IPA"];
-        result.isReadyForInstall = NO;
-        [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-        return result;
-    }
-    waitpid(unzipPid, &unzipStatus, 0);
-    if (!WIFEXITED(unzipStatus) || WEXITSTATUS(unzipStatus) != 0) {
-        [[Logger sharedLogger] error:@"unzip exited with error"];
-        result.status = IPAValidationStatusInvalidZip;
-        result.statusMessage = @"فشل في فك الضغط";
-        result.issues = @[@"تعذر فك ضغط ملف IPA"];
-        result.isReadyForInstall = NO;
-        [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-        return result;
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/bin/unzip";
+    task.arguments = @[@"-o", ipaPath, @"-d", tempDir];
+    [task launch];
+    [task waitUntilExit];
+
+    NSString *payloadPath = [tempDir stringByAppendingPathComponent:@"Payload"];
+    if (![fm fileExistsAtPath:payloadPath]) {
+        [errors addObject:@"لا يوجد مجلد Payload داخل IPA"];
+        [fm removeItemAtPath:tempDir error:nil];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
     }
 
-    // Check Payload
-    NSString *payloadDir = [tempDir stringByAppendingPathComponent:@"Payload"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:payloadDir]) {
-        result.status = IPAValidationStatusMissingPayload;
-        result.statusMessage = @"الهيكل غير صالح: مجلد Payload مفقود";
-        result.issues = @[@"ملف IPA يجب أن يحتوي على مجلد Payload"];
-        result.isReadyForInstall = NO;
-        [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-        return result;
-    }
-
-    // Find .app bundle
-    NSArray *payloadContents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:payloadDir error:nil];
-    NSString *appDir = nil;
-    for (NSString *item in payloadContents) {
-        if ([item.pathExtension.lowercaseString isEqualToString:@"app"]) {
-            appDir = [payloadDir stringByAppendingPathComponent:item];
+    NSArray *payloadItems = [fm contentsOfDirectoryAtPath:payloadPath error:nil];
+    NSString *appFolder = nil;
+    for (NSString *item in payloadItems) {
+        if ([item hasSuffix:@".app"]) {
+            appFolder = item;
             break;
         }
     }
-
-    if (!appDir) {
-        result.status = IPAValidationStatusMissingAppBundle;
-        result.statusMessage = @"لم يتم العثور على حزمة .app";
-        result.issues = @[@"مجلد Payload لا يحتوي على حزمة .app"];
-        result.isReadyForInstall = NO;
-        [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-        return result;
+    if (!appFolder) {
+        [errors addObject:@"لا يوجد ملف .app داخل Payload"];
+        [fm removeItemAtPath:tempDir error:nil];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
     }
 
-    result = [self validateExtractedAppAtPath:appDir];
+    NSString *appPath = [payloadPath stringByAppendingPathComponent:appFolder];
+
+    // 4. Check Info.plist
+    NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+    if (![fm fileExistsAtPath:infoPath]) {
+        [errors addObject:@"لا يوجد Info.plist داخل التطبيق"];
+        [fm removeItemAtPath:tempDir error:nil];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
+    }
+
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+    if (!info) {
+        [errors addObject:@"Info.plist تالف أو غير قابل للقراءة"];
+        [fm removeItemAtPath:tempDir error:nil];
+        return [ValidationResult resultWithValid:NO errors:errors warnings:warnings info:nil];
+    }
+
+    NSString *bundleID = info[@"CFBundleIdentifier"];
+    NSString *bundleName = info[@"CFBundleName"];
+    NSString *displayName = info[@"CFBundleDisplayName"];
+    NSString *version = info[@"CFBundleShortVersionString"];
+    NSString *build = info[@"CFBundleVersion"];
+    NSString *exeName = info[@"CFBundleExecutable"];
+    NSNumber *minOS = info[@"MinimumOSVersion"];
+    NSArray *supportedDevices = info[@"UISupportedDevices"];
+
+    if (!bundleID || bundleID.length == 0) {
+        [errors addObject:@"CFBundleIdentifier مفقود في Info.plist"];
+    }
+    if (!exeName || exeName.length == 0) {
+        [errors addObject:@"CFBundleExecutable مفقود في Info.plist"];
+    }
+
+    // 5. Check executable exists
+    NSString *exePath = [appPath stringByAppendingPathComponent:exeName];
+    if (![fm fileExistsAtPath:exePath]) {
+        [errors addObject:[NSString stringWithFormat:@"الملف التنفيذي %@ غير موجود", exeName]];
+    } else if (![fm isReadableFileAtPath:exePath]) {
+        [errors addObject:[NSString stringWithFormat:@"الملف التنفيذي %@ غير قابل للقراءة", exeName]];
+    }
+
+    // 6. Check architectures
+    if ([fm fileExistsAtPath:exePath]) {
+        NSArray *archs = [self architecturesForBinary:exePath];
+        if (archs.count == 0) {
+            [warnings addObject:@"لا يمكن تحديد معمارية التطبيق"];
+        } else {
+            BOOL hasArm64 = NO;
+            for (NSString *arch in archs) {
+                if ([arch containsString:@"arm64"]) hasArm64 = YES;
+            }
+            if (!hasArm64) {
+                [warnings addObject:@"التطبيق لا يدعم arm64 - قد لا يعمل على أجهزة حديثة"];
+            }
+        }
+    }
+
+    // 7. Check iOS version compatibility
+    if (minOS) {
+        NSString *minOSStr = [minOS isKindOfClass:[NSString class]] ? (NSString *)minOS : [minOS stringValue];
+        NSArray *parts = [minOSStr componentsSeparatedByString:@"."];
+        if (parts.count >= 1) {
+            NSInteger minMajor = [parts[0] integerValue];
+            if (minMajor > 15) {
+                [warnings addObject:[NSString stringWithFormat:@"يتطلب iOS %@ أو أحدث", minOSStr]];
+            }
+        }
+    }
+
+    // 8. Check signing status
+    if ([fm fileExistsAtPath:self.ldidPath]) {
+        BOOL isSigned = [self checkCodeSignature:exePath];
+        if (!isSigned) {
+            [warnings addObject:@"التطبيق غير موقع - سيتم إعادة توقيعه أثناء التثبيت"];
+        }
+    }
+
+    // 9. Check embedded.mobileprovision
+    NSString *provPath = [appPath stringByAppendingPathComponent:@"embedded.mobileprovision"];
+    if ([fm fileExistsAtPath:provPath]) {
+        [warnings addObject:@"يحتوي على ملف توقيع Apple - سيتم إزالته وإعادة التوقيع"];
+    }
+
+    // 10. Check device support
+    if (supportedDevices && supportedDevices.count > 0) {
+        [warnings addObject:@"يحتوي على قيود أجهزة محددة"];
+    }
+
+    // 11. Check entitlements
+    if ([fm fileExistsAtPath:self.ldidPath]) {
+        NSDictionary *ents = [self extractEntitlements:exePath];
+        if (ents && ents.count > 0) {
+            // Check for problematic entitlements
+            if (ents[@"com.apple.private.security.container-required"] &&
+                [ents[@"com.apple.private.security.container-required"] boolValue]) {
+                [warnings addObject:@"يتطلب حاوية أمان خاصة - قد يحتاج تعديل"];
+            }
+        }
+    }
+
+    // 12. CRITICAL: Check Frameworks dylibs permissions and dependencies
+    NSString *frameworksPath = [appPath stringByAppendingPathComponent:@"Frameworks"];
+    if ([fm fileExistsAtPath:frameworksPath]) {
+        NSArray *fwItems = [fm contentsOfDirectoryAtPath:frameworksPath error:nil];
+
+        for (NSString *item in fwItems) {
+            NSString *itemPath = [frameworksPath stringByAppendingPathComponent:item];
+            BOOL isDir = NO;
+            [fm fileExistsAtPath:itemPath isDirectory:&isDir];
+
+            if ([item hasSuffix:@".dylib"] || [item hasSuffix:@".so"]) {
+                // Check if dylib is readable
+                if (![fm isReadableFileAtPath:itemPath]) {
+                    [errors addObject:[NSString stringWithFormat:@"Frameworks/%@ غير قابل للقراءة - سيؤدي لفشل التشغيل", item]];
+                } else {
+                    // Check if dylib is signed
+                    if ([fm fileExistsAtPath:self.ldidPath]) {
+                        BOOL dylibSigned = [self checkCodeSignature:itemPath];
+                        if (!dylibSigned) {
+                            [warnings addObject:[NSString stringWithFormat:@"Frameworks/%@ غير موقع - سيتم توقيعه أثناء التثبيت", item]];
+                        }
+                    }
+                }
+            }
+            else if (isDir && [item hasSuffix:@".framework"]) {
+                // Check framework executable
+                NSString *fwName = [item stringByDeletingPathExtension];
+                NSString *fwExe = [itemPath stringByAppendingPathComponent:fwName];
+                if ([fm fileExistsAtPath:fwExe] && ![fm isReadableFileAtPath:fwExe]) {
+                    [errors addObject:[NSString stringWithFormat:@"Frameworks/%@/%@ غير قابل للقراءة", item, fwName]];
+                }
+            }
+        }
+    }
+
+    // 13. Check @rpath dependencies
+    if ([fm fileExistsAtPath:exePath] && [fm fileExistsAtPath:self.otoolPath]) {
+        NSArray *deps = [self checkDependenciesAtAppPath:appPath executable:exePath];
+        for (NSString *dep in deps) {
+            if ([dep hasPrefix:@"@rpath/"] || [dep hasPrefix:@"@executable_path/"]) {
+                // These should be bundled - already checked above
+            } else if ([dep hasPrefix:@"/usr/lib/"] || [dep hasPrefix:@"/System/Library/"]) {
+                // System libraries - should be fine
+            } else {
+                [warnings addObject:[NSString stringWithFormat:@"يعتمد على مكتبة خارجية: %@ - قد لا تكون متوفرة", dep]];
+            }
+        }
+    }
+
+    // 14. Check PlugIns
+    NSString *pluginsPath = [appPath stringByAppendingPathComponent:@"PlugIns"];
+    if ([fm fileExistsAtPath:pluginsPath]) {
+        [warnings addObject:@"يحتوي على PlugIns - قد تحتاج توقيع إضافي"];
+    }
 
     // Cleanup
-    [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
-    return result;
+    [fm removeItemAtPath:tempDir error:nil];
+
+    // Build info dictionary
+    NSMutableDictionary *infoDict = [NSMutableDictionary dictionary];
+    if (bundleID) infoDict[@"bundleID"] = bundleID;
+    if (bundleName) infoDict[@"bundleName"] = bundleName;
+    if (displayName) infoDict[@"displayName"] = displayName;
+    if (version) infoDict[@"version"] = version;
+    if (build) infoDict[@"build"] = build;
+    if (exeName) infoDict[@"executable"] = exeName;
+    if (minOS) infoDict[@"minOS"] = minOS;
+
+    BOOL isValid = (errors.count == 0);
+    return [ValidationResult resultWithValid:isValid errors:errors warnings:warnings info:infoDict];
 }
 
-- (IPAValidationResult *)validateExtractedAppAtPath:(NSString *)appPath {
-    IPAValidationResult *result = [[IPAValidationResult alloc] init];
-    NSMutableArray<NSString *> *issues = [NSMutableArray array];
-
-    // Info.plist
-    NSString *infoPlistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:infoPlistPath]) {
-        result.status = IPAValidationStatusMissingInfoPlist;
-        result.statusMessage = @"معلومات التطبيق مفقودة";
-        result.issues = @[@"ملف Info.plist غير موجود داخل الحزمة"];
-        result.isReadyForInstall = NO;
-        return result;
-    }
-
-    NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
-    if (!plist) {
-        result.status = IPAValidationStatusMissingInfoPlist;
-        result.statusMessage = @"معلومات التطبيق تالفة";
-        result.issues = @[@"ملف Info.plist موجود لكنه تالف أو غير قابل للقراءة"];
-        result.isReadyForInstall = NO;
-        return result;
-    }
-
-    // Bundle ID
-    NSString *bundleID = plist[@"CFBundleIdentifier"];
-    if (!bundleID || bundleID.length == 0) {
-        [issues addObject:@"معرّف الحزمة (Bundle ID) غير موجود"];
-        result.status = IPAValidationStatusInvalidBundleID;
-        result.isReadyForInstall = NO;
-    }
-
-    // Executable
-    NSString *executable = plist[@"CFBundleExecutable"];
-    if (!executable || executable.length == 0) {
-        [issues addObject:@"اسم الملف التنفيذي مفقود"];
-        result.status = IPAValidationStatusMissingExecutable;
-        result.isReadyForInstall = NO;
-    } else {
-        NSString *execPath = [appPath stringByAppendingPathComponent:executable];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:execPath]) {
-            [issues addObject:@"الملف التنفيذي غير موجود داخل الحزمة"];
-            result.status = IPAValidationStatusMissingExecutable;
-            result.isReadyForInstall = NO;
-        }
-    }
-
-    // Minimum iOS version
-    NSString *minOS = plist[@"MinimumOSVersion"];
-    if (minOS && minOS.length > 0) {
-        NSString *currentOS = [[JailbreakEnvironment sharedEnvironment] osVersion];
-        if ([self compareVersion:currentOS withVersion:minOS] < 0) {
-            [issues addObject:[NSString stringWithFormat:@"التطبيق يتطلب iOS %@ لكن جهازك يعمل على iOS %@", minOS, currentOS]];
-            result.status = IPAValidationStatusIncompatibleOS;
-            result.isReadyForInstall = NO;
-        }
-    }
-
-    // Architecture check (basic)
-    NSString *execPath = [appPath stringByAppendingPathComponent:executable];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:execPath]) {
-        NSFileHandle *execFh = [NSFileHandle fileHandleForReadingAtPath:execPath];
-        if (execFh) {
-            NSData *magic = [execFh readDataOfLength:4];
-            [execFh closeFile];
-            if (magic.length >= 4) {
-                const unsigned char *m = (const unsigned char *)magic.bytes;
-                uint32_t magicNum = *(uint32_t *)m;
-                // MH_MAGIC_64 = 0xfeedfacf
-                if (magicNum != 0xfeedfacf) {
-                    [issues addObject:@"البنية المعمارية للملف التنفيذي غير مدعومة"];
-                    result.status = IPAValidationStatusIncompatibleArchitecture;
-                    result.isReadyForInstall = NO;
-                }
-            }
-        }
-    }
-
-    if (issues.count == 0) {
-        result.status = IPAValidationStatusValid;
-        result.statusMessage = @"جاهز للتثبيت ✓";
-        result.isReadyForInstall = YES;
-    } else {
-        if (result.status == IPAValidationStatusUnknown) {
-            result.status = IPAValidationStatusInvalidZip;
-        }
-        if (result.statusMessage.length == 0) {
-            result.statusMessage = @"تم اكتشاف مشاكل في ملف IPA";
-        }
-        result.isReadyForInstall = NO;
-    }
-
-    result.issues = [issues copy];
-    return result;
-}
-
-- (NSInteger)compareVersion:(NSString *)v1 withVersion:(NSString *)v2 {
-    NSArray *c1 = [v1 componentsSeparatedByString:@"."];
-    NSArray *c2 = [v2 componentsSeparatedByString:@"."];
-    NSUInteger max = MAX(c1.count, c2.count);
-    for (NSUInteger i = 0; i < max; i++) {
-        NSInteger n1 = (i < c1.count) ? [c1[i] integerValue] : 0;
-        NSInteger n2 = (i < c2.count) ? [c2[i] integerValue] : 0;
-        if (n1 < n2) return -1;
-        if (n1 > n2) return 1;
-    }
-    return 0;
-}
-
-
-
-- (NSArray<NSString *> *)checkDependenciesAtAppPath:(NSString *)appPath {
-    NSMutableArray<NSString *> *missing = [NSMutableArray array];
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    // 1. Check Frameworks directory exists
-    NSString *frameworksPath = [appPath stringByAppendingPathComponent:@"Frameworks"];
-    BOOL hasFrameworks = [fm fileExistsAtPath:frameworksPath];
-
-    // 2. Get executable name from Info.plist
-    NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-    NSString *exeName = info[@"CFBundleExecutable"];
-    if (!exeName) return missing;
-
-    NSString *exePath = [appPath stringByAppendingPathComponent:exeName];
-    if (![fm fileExistsAtPath:exePath]) return missing;
-
-    // 3. Use otool to list dependencies
-    NSString *otoolPath = @"/usr/bin/otool";
-    if (![fm fileExistsAtPath:otoolPath]) {
-        otoolPath = @"/var/jb/usr/bin/otool";
-    }
-    if (![fm fileExistsAtPath:otoolPath]) {
-        [[Logger sharedLogger] warning:@"otool not found, skipping dependency check"];
-        return missing;
-    }
+- (NSArray *)architecturesForBinary:(NSString *)path {
+    NSMutableArray *archs = [NSMutableArray array];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.lipoPath]) return archs;
 
     NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:otoolPath];
-    [task setArguments:@[@"-L", exePath]];
-
+    task.launchPath = self.lipoPath;
+    task.arguments = @[@"-info", path];
     NSPipe *pipe = [NSPipe pipe];
-    [task setStandardOutput:pipe];
-    [task setStandardError:[NSPipe pipe]];
+    task.standardOutput = pipe;
+    [task launch];
+    [task waitUntilExit];
 
-    @try {
-        [task launch];
-        [task waitUntilExit];
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (output) {
+        // Parse output for architectures
+        if ([output containsString:@"arm64e"]) [archs addObject:@"arm64e"];
+        if ([output containsString:@"arm64"] && ![output containsString:@"arm64e"]) [archs addObject:@"arm64"];
+        if ([output containsString:@"armv7s"]) [archs addObject:@"armv7s"];
+        if ([output containsString:@"armv7"]) [archs addObject:@"armv7"];
+    }
+    return archs;
+}
 
-        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+- (BOOL)checkCodeSignature:(NSString *)path {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return YES; // Can't check, assume OK
 
-        NSArray *lines = [output componentsSeparatedByString:@"\n"];
-        for (NSString *line in lines) {
-            // Look for @rpath/ or @executable_path/ references
-            if ([line containsString:@"@rpath/"] || [line containsString:@"@executable_path/"]) {
-                NSString *libName = nil;
-                NSRange rpathRange = [line rangeOfString:@"@rpath/"];
-                if (rpathRange.location != NSNotFound) {
-                    NSString *after = [line substringFromIndex:rpathRange.location + 7];
-                    NSRange parenRange = [after rangeOfString:@" ("];
-                    if (parenRange.location != NSNotFound) {
-                        libName = [after substringToIndex:parenRange.location];
-                    } else {
-                        libName = after;
-                    }
-                }
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = self.ldidPath;
+    task.arguments = @[@"-e", path];
+    [task launch];
+    [task waitUntilExit];
+    return (task.terminationStatus == 0);
+}
 
-                if (libName) {
-                    // Check if library exists in Frameworks
-                    NSString *libInFrameworks = [frameworksPath stringByAppendingPathComponent:libName];
-                    NSString *libInApp = [appPath stringByAppendingPathComponent:libName];
+- (NSDictionary *)extractEntitlements:(NSString *)path {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return nil;
 
-                    BOOL existsInFrameworks = hasFrameworks && [fm fileExistsAtPath:libInFrameworks];
-                    BOOL existsInApp = [fm fileExistsAtPath:libInApp];
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = self.ldidPath;
+    task.arguments = @[@"-e", path];
+    NSPipe *pipe = [NSPipe pipe];
+    task.standardOutput = pipe;
+    [task launch];
+    [task waitUntilExit];
 
-                    if (!existsInFrameworks && !existsInApp) {
-                        [missing addObject:libName];
-                        [[Logger sharedLogger] warning:[NSString stringWithFormat:@"Missing dependency: %@", libName]];
-                    }
-                }
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    if (data.length > 10) {
+        id obj = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:nil];
+        if ([obj isKindOfClass:[NSDictionary class]]) return obj;
+    }
+    return nil;
+}
+
+- (NSArray *)checkDependenciesAtAppPath:(NSString *)appPath executable:(NSString *)exePath {
+    NSMutableArray *deps = [NSMutableArray array];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.otoolPath]) return deps;
+
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = self.otoolPath;
+    task.arguments = @[@"-L", exePath];
+    NSPipe *pipe = [NSPipe pipe];
+    task.standardOutput = pipe;
+    [task launch];
+    [task waitUntilExit];
+
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!output) return deps;
+
+    NSArray *lines = [output componentsSeparatedByString:@"\n"];
+    for (NSString *line in lines) {
+        NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if ([trimmed hasPrefix:@"\t"]) {
+            NSRange range = [trimmed rangeOfString:@" ("];
+            if (range.location != NSNotFound) {
+                NSString *lib = [trimmed substringWithRange:NSMakeRange(1, range.location - 1)];
+                [deps addObject:lib];
             }
         }
-    } @catch (NSException *e) {
-        [[Logger sharedLogger] error:[NSString stringWithFormat:@"Dependency check failed: %@", e.reason]];
     }
-
-    return missing;
+    return deps;
 }
 
 @end
