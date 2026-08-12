@@ -1,335 +1,179 @@
-# دليل المطور — AppDataManager / IPA Installer Pro
+# AppDataManager + IPAInstallerPro — Developer Workflow
 
-> **الإصدار:** 2.1
-> **التاريخ:** 2026-08-11
-> **المؤلف:** ZAIN (@Zainqkvd)
-> **البيئة:** Dopamine 3.0 (Rootless) | iOS 15.0+ | arm64/arm64e
+## Overview
 
----
+This repository contains **two** independent tools:
 
-## 📁 هيكل المستودع
+| Tool | Path | Status | Version |
+|------|------|--------|---------|
+| **AppData Manager** | `AppDataManager/` | ✅ Stable | 1.4.0 |
+| **IPA Installer Pro** | `IPAInstallerPro/` | 🔄 Active Dev | 1.1.0 |
 
-يحتوي الريبو على **أداتين منفصلتين** بنفس المستودع:
-
-```
-AppDataManager/
-├── AppDataManager/ ← الأداة الأولى (مكتملة ومستقرة)
-│   ├── Core/
-│   ├── UI/
-│   ├── Makefile
-│   └── control
-│
-├── IPAInstallerPro/ ← الأداة الثانية (قيد التطوير)
-│   ├── Core/ ← محركات التثبيت + التحقق
-│   ├── UI/ ← واجهات المستخدم
-│   ├── Resources/
-│   ├── Makefile
-│   ├── control
-│   └── entitlements.plist
-│
-├── scripts/
-│   ├── generate-repo.py ← توليد Packages & Release
-│   └── validate-repo.py ← التحقق من سلامة الريبو
-│
-├── .github/workflows/
-│   ├── sync-to-repo.yml ← CI/CD تلقائي → repo-dev
-│   └── release-to-production.yml ← CI/CD يدوي → repo
-│
-├── Makefile ← بناء الأداتين معاً
-├── build.sh ← سكربت البناء المحلي
-└── WORKFLOW.md ← هذا الملف
-```
+Both share the same repository but are **separate packages** in Sileo.
 
 ---
 
-## 🏛️ نظام الريبو المزدوج (Repo Architecture)
+## Dual Repository System
 
-| الريبو | الرابط | الغرض | الجمهور | طريقة الرفع |
-|--------|--------|-------|---------|-------------|
-| **الريبو الرئيسي** | `https://aosaid3224-ops.github.io/repo/` | الإطلاق العام (Production) | **جميع المستخدمين** | **يدوي فقط** |
-| **ريبو التطوير** | `https://aosaid3224-ops.github.io/repo-dev/` | التطوير والاختبار (Dev) | **المطور فقط** | **تلقائي** |
+| Repository | URL | Purpose | Update Method |
+|------------|-----|---------|---------------|
+| **Production** | `https://aosaid3224-ops.github.io/repo/` | Public releases | Manual only |
+| **Development** | `https://aosaid3224-ops.github.io/repo-dev/` | Testing & beta | Automatic via CI/CD |
 
-### ⚠️ قاعدة ذهبية
-
-> **أثناء التطوير** → ارفع إلى `repo-dev` (تلقائي)  
-> **عند اكتمال النسخة** → ارفع إلى `repo` الرئيسي (يدوي)  
-> **لا ترفع أبداً** نسخ غير مكتملة إلى الريبو الرئيسي.
-
-### 🔧 كيفية التبديل بين الريبوين
-
-#### أثناء التطوير (repo-dev) — تلقائي
-```
-[Commit] → [GitHub Actions: sync-to-repo.yml] → [repo-dev] → [Sileo]
-```
-
-#### عند الإطلاق (repo) — يدوي
-```
-[GitHub Actions: release-to-production.yml] → [YES] → [repo] → [Sileo]
-```
-
-### 📱 في Sileo
-
-**المستخدمون العاديون:**
-- يضيفون فقط: `https://aosaid3224-ops.github.io/repo/`
-- يرون: AppData Manager فقط ✅
-
-**المطور (أنت):**
-- تضيف المصدر الرئيسي: `https://aosaid3224-ops.github.io/repo/`
-- **وتضيف أيضاً:** `https://aosaid3224-ops.github.io/repo-dev/`
-- ترى: AppData Manager + IPA Installer Pro ✅
+> **End users** see only AppData Manager in the production repo.
+> **Developers** add the dev repo to Sileo to see and test IPA Installer Pro.
 
 ---
 
-## ⚙️ CI/CD Pipeline
+## IPA Installer Pro v1.1.0 — Architecture
 
-### 1. البناء التلقائي → repo-dev (التطوير)
+### Core Philosophy
+> **Precision > Speed** | **Evidence > Assumption** | **Verification > Exit Code** | **Root Cause > Patch**
 
-**Workflow:** `sync-to-repo.yml`
+### Installation Pipeline (11 Phases)
 
-```yaml
-Trigger: workflow_dispatch (يدوي من GitHub Actions)
-Target:  aosaid3224-ops/repo-dev
-Result:  IPA Installer Pro يظهر فقط في repo-dev
+```
+[IPA_OPEN] → [IPA_EXTRACT] → [APP_IDENTIFY] → [FILE_COPY] → [PERMISSION_chmod]
+     → [PERMISSION_chown] → [SIGN_signAllAt] → [SIGN_signExe] → [FRAMEWORK]
+     → [UICACHE] → [VERIFY] → [CLEANUP] → [COMPLETE]
 ```
 
-**الخطوات:**
-1. Checkout AppDataManager + repo-dev
-2. Setup Theos + dependencies
-3. Build IPA Installer Pro
-4. Copy .deb → repo-dev/pool/
-5. Run `generate-repo.py . --dev`
-6. Push to repo-dev
+### Zero-Gap Verification System
 
-**كيفية التشغيل:**
+Every phase performs **deep verification** before proceeding:
+
+| Phase | Verification Checks |
+|-------|---------------------|
+| **FILE_COPY** | File count match, size match, symlink preservation, deep copy verification via `copyfile()` |
+| **PERMISSION_chmod** | `stat()` mode bits ≥ 755 |
+| **PERMISSION_chown** | `stat()` uid=0 (root), gid=0 (wheel) |
+| **SIGN_signAllAt** | `ldid -d` signature detection |
+| **SIGN_signExe** | File exists + readable + signed |
+| **FRAMEWORK** | Per-dylib: `stat()` mode/uid/gid + `access(X_OK)` + `ldid -d` |
+| **VERIFY** | `access(X_OK)` on executable + `otool -L` dependency resolution + LSApplicationWorkspace registration |
+
+### Live Installation Logging
+
+Real-time structured logging with:
+- **Timestamped entries** (HH:mm:ss.SSS)
+- **Phase indicators** (visual dots in UI)
+- **Structured verification** (PASS/FAIL with detail)
+- **Command execution tracking** (exit codes + output)
+- **File operation tracking** (path + result + errno)
+- **Stat results** (mode, uid, gid)
+- **Access checks** (R_OK, W_OK, X_OK, F_OK)
+
+### Provider Selection (Fallback Chain)
+
 ```
-GitHub → Actions → "Build IPA Installer Pro and Sync to Dev Repo" → Run workflow
-```
-
-### 2. الإطلاق اليدوي → repo (الإنتاج)
-
-**Workflow:** `release-to-production.yml`
-
-```yaml
-Trigger: workflow_dispatch + confirmation YES
-Target:  aosaid3224-ops/repo
-Result:  IPA Installer Pro يظهر في الريبو الرئيسي
-```
-
-**الخطوات:**
-1. يطلب إدخال: `version` + `confirm: YES`
-2. Checkout AppDataManager + repo
-3. Build IPA Installer Pro
-4. Copy .deb → repo/pool/
-5. Run `generate-repo.py . --prod`
-6. Push to repo
-
-**كيفية التشغيل:**
-```
-GitHub → Actions → "Release to Production Repo" → Run workflow
-→ أدخل الإصدار (مثلاً: 1.0.5)
-→ اكتب YES في حقل التأكيد
-→ Run
+1. Direct Install (score: 100) — preferred
+   └─ Deep verification + live logging
+2. appinst (score: 100) — fallback
+3. System Install (score: 10) — last resort
 ```
 
-### 3. generate-repo.py — التوليد الذكي
+If the primary provider fails, the engine automatically tries the next provider.
 
+---
+
+## File Structure
+
+```
+IPAInstallerPro/
+├── Core/
+│   ├── DirectInstallationProvider.m    ← Main provider (zero-gap verification)
+│   ├── SystemInstallationProvider.m    ← LSApplicationWorkspace fallback
+│   ├── AppInstInstallationProvider.m   ← appinst CLI fallback
+│   ├── InstallationEngine.m            ← Provider orchestrator
+│   ├── LiveInstallationLogger.h/m      ← Real-time logging system
+│   ├── IPAValidator.m                  ← IPA integrity checks
+│   ├── IPAExtractor.m                  ← Metadata extraction
+│   ├── CapabilityManager.m             ← Environment detection
+│   ├── RootlessManager.m               ← Rootless path resolution
+│   ├── CrashReporter.m                 ← Crash log collection
+│   ├── DiagnosticPipeline.m            ← System diagnostics
+│   ├── ProcessMonitor.m                ← Process monitoring
+│   ├── LogCollector.m                  ← Log aggregation
+│   └── TransactionLogger.m             ← Operation journaling
+├── UI/
+│   ├── MainViewController.m            ← IPA file browser
+│   ├── IPAFileBrowserViewController.m  ← File picker
+│   ├── IPAInstallViewController.m      ← Install confirmation
+│   ├── InstallationProgressViewController.m ← Live log viewer
+│   └── SettingsViewController.m        ← Preferences
+├── helper.c                            ← setuid root helper
+├── entitlements.plist                  ← Wide entitlements
+├── Makefile                            ← Build configuration
+└── control                             ← Package metadata
+```
+
+---
+
+## Development Workflow
+
+### 1. Make Changes
+Edit source files in `IPAInstallerPro/`.
+
+### 2. Bump Version
+Update `IPAInstallerPro/control`:
+```
+Version: X.Y.Z
+```
+
+### 3. Commit & Push
 ```bash
-# للتطوير (repo-dev)
-python3 scripts/generate-repo.py . --dev
-# ينشئ Packages + Release مع بيانات "A-ZAIN Dev Repo"
-
-# للإنتاج (repo)
-python3 scripts/generate-repo.py . --prod
-# ينشئ Packages + Release مع بيانات "A-ZAIN Repo"
+git add .
+git commit -m "feat: description"
+git push origin main
 ```
+
+### 4. Automatic CI/CD
+- `.github/workflows/sync-to-repo.yml` triggers on push
+- Builds the package
+- Generates `Packages` and `Release`
+- Pushes to `repo-dev/` branch
+
+### 5. Test in Sileo
+Add `https://aosaid3224-ops.github.io/repo-dev/` to Sileo.
+Refresh sources. Install/update IPA Installer Pro.
+
+### 6. Promote to Production
+When stable, run the manual release workflow:
+- `.github/workflows/release-to-production.yml`
+- This copies from `repo-dev/` to `repo/`
 
 ---
 
-## 🔧 كيفية إصلاح خطأ بناء (Build Fix)
+## Testing Checklist
 
-### الخطوة 1: قراءة اللوغات
+Before any release, verify:
 
-افتح الرابط:
-```
-https://github.com/aosaid3224-ops/AppDataManager/actions
-```
-
-اضغط على الـ Run الفاشل → **"Build IPA Installer Pro and Sync to Dev Repo"** → ابحث عن `error:`
-
-### الخطوة 2: التعديل عبر GitHub API (Python)
-
-```python
-import requests, base64
-
-TOKEN = "ghp_..."
-HEADERS = {"Authorization": f"token {TOKEN}"}
-REPO = "aosaid3224-ops/AppDataManager"
-
-# 1. احصل على SHA الحالي
-r = requests.get(
-    f"https://api.github.com/repos/{REPO}/contents/{path}?ref=main",
-    headers=HEADERS
-)
-sha = r.json()['sha']
-
-# 2. ارسل التعديل
-payload = {
-    "message": message,
-    "content": base64.b64encode(content.encode()).decode(),
-    "sha": sha,
-    "branch": "main"
-}
-requests.put(
-    f"https://api.github.com/repos/{REPO}/contents/{path}",
-    headers=HEADERS,
-    json=payload
-)
-```
-
-### الخطوة 3: تشغيل البناء التلقائي (repo-dev)
-
-```python
-# تشغيل Workflow التلقائي (repo-dev)
-requests.post(
-    f"https://api.github.com/repos/{REPO}/actions/workflows/sync-to-repo.yml/dispatches",
-    headers=HEADERS,
-    json={"ref": "main"}
-)
-```
-
-### الخطوة 4: التحقق من النجاح
-
-```python
-import time
-time.sleep(60)
-
-r = requests.get(
-    f"https://api.github.com/repos/{REPO}/actions/runs?per_page=1",
-    headers=HEADERS
-)
-run = r.json()['workflow_runs'][0]
-print(run['conclusion'])  # "success" أو "failure"
-```
+- [ ] Build succeeds (`make clean && make`)
+- [ ] Package installs without errors
+- [ ] Live log displays correctly
+- [ ] All 11 phases complete with `verified=YES`
+- [ ] `access(X_OK)` passes on executable
+- [ ] `otool -L` shows all dependencies resolved
+- [ ] App appears on SpringBoard after `uicache`
+- [ ] App launches without crash
+- [ ] Log can be copied/saved
+- [ ] Works on Dopamine 3.x rootless
 
 ---
 
-## 📦 كيفية رفع إصدار جديد (Version Bump)
+## Security Notes
 
-### أثناء التطوير (repo-dev) — تلقائي
-
-```python
-# 1. تعديل control
-update_file(
-    "IPAInstallerPro/control",
-    new_control_content,
-    "Bump IPA Installer Pro dev version to 1.0.5"
-)
-
-# 2. شغل Workflow التلقائي (repo-dev)
-requests.post(
-    f"https://api.github.com/repos/{REPO}/actions/workflows/sync-to-repo.yml/dispatches",
-    headers=HEADERS,
-    json={"ref": "main"}
-)
-```
-
-### عند الإطلاق (repo) — يدوي
-
-```python
-# 1. تأكد من الاستقرار والاختبار في repo-dev
-# 2. اذهب إلى GitHub Actions → "Release to Production Repo"
-# 3. اضغط "Run workflow"
-# 4. أدخل الإصدار (مثلاً: 1.0.5)
-# 5. اكتب YES في حقل التأكيد
-# 6. اضغط Run
-```
-
-### النتيجة في Sileo
-
-بعد 2-3 دقائق:
-```
-IPA Installer Pro
-الإصدار المثبت: 1.0.4
-الإصدار الجديد: 1.0.5
-زر: ⬆️ Upgrade
-```
+- **Never commit GitHub tokens** to the repository
+- **Never share Personal Access Tokens** in chat or issues
+- Helper binary (`ipainstallerpro_helper`) runs as root via setuid
+- Always verify entitlements before signing
 
 ---
 
-## 🐛 قائمة الأخطاء الشائعة وحلولها
+## Version History
 
-| الخطأ | السبب | الحل |
-|-------|-------|------|
-| `no known class method for selector 'successResult:bundleID:'` | Method غير موجود | استخدم `successResult:` ثم `result.bundleID = ...` |
-| `use of undeclared identifier 'NSTask'` | NSTask غير موجود في iOS | استبدل بـ `posix_spawn()` |
-| `ld: symbol(s) not found` | ملف `.m` ناقص من Makefile | أضف الملف لـ `*_FILES` |
-| `implicit declaration of function 'objc_getClass'` | ناقص `#import <objc/runtime.h>` | أضف الـ import |
-| `variable 'x' set but not used` | متغير غير مستخدم | احذف المتغير أو استخدمه |
-| الملف ليس بصيغة ZIP صالحة | نسخ الملف فاشل (security-scoped) | استخدم `NSFileCoordinator` |
-| لا يوجد ملفات IPA بعد الاستيراد | المجلد `IPAInstaller` غير موجود في `loadIPAFiles` | أضف `/var/mobile/Documents/IPAInstaller` للبحث |
-
----
-
-## 🏗️ قواعد التطوير
-
-### 1. Rootless Support
-
-**دائماً** استخدم `RootlessManager` للمسارات:
-
-```objc
-// ❌ خطأ:
-const char *path = "/usr/bin/uicache";
-
-// ✅ صح:
-NSString *pathStr = [[RootlessManager sharedManager] resolvePath:@"/usr/bin/uicache"];
-const char *path = [pathStr UTF8String];
-```
-
-### 2. Private APIs (LSApplicationWorkspace)
-
-استخدم `objc_msgSend` مع cast:
-
-```objc
-#import <objc/runtime.h>
-#import <objc/message.h>
-
-SEL installSel = NSSelectorFromString(@"installApplication:withOptions:error:");
-typedef BOOL (*InstallMethod)(id, SEL, NSURL *, NSDictionary *, NSError **);
-InstallMethod method = (InstallMethod)objc_msgSend;
-BOOL installed = method(workspace, installSel, ipaURL, options, &error);
-```
-
-### 3. File Import (Files App)
-
-استخدم `NSFileCoordinator` دائماً:
-
-```objc
-NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-[coordinator coordinateReadingItemAtURL:url
-                                options:NSFileCoordinatorReadingForUploading
-                                  error:nil
-                             byAccessor:^(NSURL *newURL) {
-    [fm copyItemAtPath:newURL.path toPath:destPath error:&error];
-}];
-```
-
-### 4. Null Safety
-
-```objc
-// ❌ خطأ:
-cell.textLabel.text = info.displayName ?: info.name;
-
-// ✅ صح:
-cell.textLabel.text = info.displayName ?: info.name ?: [info.filePath lastPathComponent];
-```
-
----
-
-## 📞 دعم
-
-- **GitHub Issues:** [github.com/aosaid3224-ops/AppDataManager/issues](https://github.com/aosaid3224-ops/AppDataManager/issues)
-- **X:** @Zainqkvd
-
----
-
-**تم التطوير بـ ❤️ لمجتمع Jailbreak العربي**
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0.0 | 2026-08-11 | Initial release |
+| 1.0.32 | 2026-08-12 | Operation logging, transaction system |
+| **1.1.0** | **2026-08-13** | **Live logging, zero-gap verification, deep copy checks, stat() verification, access(X_OK), otool -L, fallback chain** |
