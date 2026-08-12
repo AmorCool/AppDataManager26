@@ -52,6 +52,10 @@ extern char **environ;
     return [self runCmd:cmd args:args stdin:nil stdout:nil stderrToDevNull:YES];
 }
 
+- (BOOL)runCmd:(NSString *)cmd args:(NSArray<NSString *> *)args stderrToDevNull:(BOOL)errNull {
+    return [self runCmd:cmd args:args stdin:nil stdout:nil stderrToDevNull:errNull];
+}
+
 - (BOOL)runCmd:(NSString *)cmd args:(NSArray<NSString *> *)args stdin:(NSString *)inPath stdout:(NSString *)outPath stderrToDevNull:(BOOL)errNull {
     if (!cmd || cmd.length == 0) return NO;
 
@@ -358,7 +362,7 @@ extern char **environ;
 
 - (BOOL)isSigned:(NSString *)path {
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.ldidPath]) return YES;
-    return [self runCmd:self.ldidPath args:@[@"-e", path] stderrToDevNull:YES];
+    return [self runCmd:self.ldidPath args:@[@"-e", path] stdin:nil stdout:nil stderrToDevNull:YES];
 }
 
 - (NSDictionary *)extractEnts:(NSString *)path {
