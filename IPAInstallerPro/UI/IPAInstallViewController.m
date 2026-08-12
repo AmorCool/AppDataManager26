@@ -143,7 +143,7 @@
 
             if (result.isReadyForInstall) {
                 // Check for missing dependencies
-                NSArray<NSString *> *missingLibs = [[IPAValidator sharedValidator] checkDependenciesAtAppPath:self.ipaInfo.extractedAppPath];
+                NSArray<NSString *> *missingLibs = [[IPAValidator sharedValidator] checkDependenciesAtAppPath:self.ipaInfo.appDirectoryPath];
                 if (missingLibs.count > 0) {
                     NSString *libsList = [missingLibs componentsJoinedByString:@", "];
                     self.validationLabel.text = [NSString stringWithFormat:@"⚠️ جاهز لكن ينقص: %@", libsList];
