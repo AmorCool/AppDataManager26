@@ -2,155 +2,138 @@
 // OperationLog.h
 // IPAInstallerPro
 //
-// Installation Operation Audit Trail.
-// Records exactly what the installer did, step by step.
-// No interpretation. No guesswork. Just facts.
+// Rigorous Installation Operation Audit Trail.
+// Principle: START → Execute → Verify → Result.
+// SUCCESS is never assumed. It must be proven by verification.
 //
 
 #import <Foundation/Foundation.h>
 
-// Result of an operation — exactly what happened
 typedef NS_ENUM(NSInteger, OperationResult) {
-    OperationResultPending = 0,   // Operation started, waiting for result
-    OperationResultSuccess = 1,   // Operation completed as intended
-    OperationResultFailed = 2,    // Operation failed
-    OperationResultSkipped = 3,   // Operation was skipped (not needed)
-    OperationResultPartial = 4    // Operation partially succeeded
+    OperationResultPending = 0,
+    OperationResultSuccess = 1,
+    OperationResultFailed = 2,
+    OperationResultSkipped = 3,
+    OperationResultPartial = 4
 };
 
-// Phase of installation — what area of work
 typedef NS_ENUM(NSInteger, OperationPhase) {
     OperationPhaseStart = 0,
-    OperationPhaseIPAOpen = 1,        // Opening IPA file
-    OperationPhaseIPAValidate = 2,    // Validating IPA structure
-    OperationPhaseIPAExtract = 3,     // Extracting IPA payload
-    OperationPhaseAppIdentify = 4,    // Identifying bundle, Info.plist
-    OperationPhaseFileCopy = 5,       // Copying files to /Applications
-    OperationPhaseFramework = 6,      // Processing Frameworks
-    OperationPhaseDylib = 7,          // Processing dylibs
-    OperationPhaseSign = 8,           // Code signing
-    OperationPhasePermission = 9,     // Setting permissions
-    OperationPhaseUICache = 10,       // Running uicache
-    OperationPhaseVerify = 11,        // Post-install verification
-    OperationPhaseLaunch = 12,        // Launch attempt
-    OperationPhaseCleanup = 13,       // Cleanup temp files
-    OperationPhaseComplete = 14,      // Installation complete
-    OperationPhaseUnknown = 15
+    OperationPhaseIPAOpen = 1,
+    OperationPhaseIPAExtract = 2,
+    OperationPhaseAppIdentify = 3,
+    OperationPhaseFileCopy = 4,
+    OperationPhaseFramework = 5,
+    OperationPhaseDylib = 6,
+    OperationPhaseSign = 7,
+    OperationPhasePermission = 8,
+    OperationPhaseUICache = 9,
+    OperationPhaseVerify = 10,
+    OperationPhaseCleanup = 11,
+    OperationPhaseComplete = 12,
+    OperationPhaseUnknown = 13
 };
 
-// Single operation record — immutable fact
+// ─── OperationRecord ───
+// Immutable fact. Every field represents something that actually happened.
 @interface OperationRecord : NSObject
 
-@property (nonatomic, strong, readonly) NSString *recordID;      // Unique ID
-@property (nonatomic, strong, readonly) NSString *operationID;   // Transaction ID (links all records in one install)
-@property (nonatomic, strong, readonly) NSDate *timestamp;       // When it happened
-@property (nonatomic, assign, readonly) OperationPhase phase;    // What phase
-@property (nonatomic, strong, readonly) NSString *operation;     // What was done (e.g. "copyfile", "ldid -S", "chmod")
-@property (nonatomic, strong, readonly) NSString *target;        // What was operated on (path, bundle ID, etc.)
-@property (nonatomic, assign, readonly) OperationResult result;  // SUCCESS / FAILED / SKIPPED
-@property (nonatomic, assign, readonly) int exitCode;            // Process exit code or errno
-@property (nonatomic, strong, readonly) NSString *rawOutput;     // Raw stdout/stderr (unfiltered)
-@property (nonatomic, strong, readonly) NSString *rawError;      // Raw error message (unfiltered)
-@property (nonatomic, assign, readonly) NSTimeInterval duration; // How long it took (seconds)
-@property (nonatomic, strong, readonly) NSDictionary *context;   // Extra context (file sizes, paths, etc.)
+@property (nonatomic, strong, readonly) NSString *recordID;
+@property (nonatomic, strong, readonly) NSString *transactionID;
+@property (nonatomic, strong, readonly) NSDate *timestamp;
 
-// Formatted timestamp: [HH:MM:SS.mmm]
-- (NSString *)formattedTimestamp;
+// What
+@property (nonatomic, assign, readonly) OperationPhase phase;
+@property (nonatomic, strong, readonly) NSString *operation;
+@property (nonatomic, strong, readonly) NSString *target;
 
-// Human-readable line for display
+// Input
+@property (nonatomic, strong, readonly) NSString *input;
+
+// Execution result
+@property (nonatomic, assign, readonly) int exitCode;
+@property (nonatomic, strong, readonly) NSString *rawOutput;
+@property (nonatomic, strong, readonly) NSString *rawError;
+
+// Verification (the critical part)
+@property (nonatomic, strong, readonly) NSString *verification;  // What was checked
+@property (nonatomic, assign, readonly) BOOL verified;           // Did the check pass?
+
+// Final result — derived from execution + verification
+@property (nonatomic, assign, readonly) OperationResult result;
+
+// Timing
+@property (nonatomic, assign, readonly) NSTimeInterval duration;
+
+// Extra context
+@property (nonatomic, strong, readonly) NSDictionary *context;
+
+- (NSString *)phaseName;
+- (NSString *)resultSymbol;
+- (NSString *)resultName;
 - (NSString *)logLine;
-
-// Full detail dump
 - (NSString *)detailDump;
+- (NSDictionary *)dictionaryRepresentation;
 
 @end
 
-// ============================================================
-// OperationLog — The Logger
-// ============================================================
-
+// ─── OperationLog ───
 @interface OperationLog : NSObject
 
 + (instancetype)sharedLog;
 
-// Start a new installation transaction
-// Returns operationID that links all records
+// Transaction lifecycle
 - (NSString *)beginTransactionForIPA:(NSString *)ipaPath;
+- (void)endTransaction:(NSString *)transactionID finalResult:(OperationResult)result;
 
-// End a transaction
-- (void)endTransaction:(NSString *)operationID;
+// Phase lifecycle: START → (execute) → END with verification
+// Returns recordID. Use this to end the phase with actual results.
+- (NSString *)beginPhase:(OperationPhase)phase
+               operation:(NSString *)operation
+                  target:(NSString *)target
+                   input:(NSString *)input
+           transactionID:(NSString *)transactionID;
 
-// Log an operation that was attempted and completed
-// This is the PRIMARY method — call it AFTER the operation finishes with the REAL result
-- (void)logOperation:(NSString *)operation
-             phase:(OperationPhase)phase
-            target:(NSString *)target
-            result:(OperationResult)result
-          exitCode:(int)exitCode
-          rawOutput:(NSString *)rawOutput
-           rawError:(NSString *)rawError
-          duration:(NSTimeInterval)duration
-           context:(NSDictionary *)context
-     operationID:(NSString *)operationID;
+// End a phase with execution results AND verification.
+// result is determined by: exitCode + verified flag.
+// If verified==NO, result is ALWAYS FAILED regardless of exitCode.
+- (void)endPhase:(NSString *)recordID
+        exitCode:(int)exitCode
+       rawOutput:(NSString *)rawOutput
+        rawError:(NSString *)rawError
+    verification:(NSString *)verification
+        verified:(BOOL)verified
+        duration:(NSTimeInterval)duration
+         context:(NSDictionary *)context;
 
-// Convenience: log a system command that was executed
-- (void)logCommand:(NSString *)command
-              args:(NSArray *)args
-            target:(NSString *)target
-            result:(OperationResult)result
-          exitCode:(int)exitCode
-          rawOutput:(NSString *)rawOutput
-           rawError:(NSString *)rawError
-          duration:(NSTimeInterval)duration
-     operationID:(NSString *)operationID;
-
-// Convenience: log a file operation
-- (void)logFileOp:(NSString *)operation           // "copyfile", "remove", "chmod"
-             from:(NSString *)sourcePath
-               to:(NSString *)destPath
-           result:(OperationResult)result
-         exitCode:(int)exitCode
-          rawError:(NSString *)rawError
-         duration:(NSTimeInterval)duration
-    operationID:(NSString *)operationID;
-
-// Mark the start of a phase (creates a PENDING record)
-- (OperationRecord *)markPhaseStart:(OperationPhase)phase
-                          operation:(NSString *)operation
-                             target:(NSString *)target
-                      operationID:(NSString *)operationID;
-
-// Mark the end of a phase (updates the PENDING record with actual result)
-- (void)markPhaseEnd:(OperationPhase)phase
-            record:(OperationRecord *)record
-            result:(OperationResult)result
-          exitCode:(int)exitCode
-          rawOutput:(NSString *)rawOutput
-           rawError:(NSString *)rawError
-          duration:(NSTimeInterval)duration
-           context:(NSDictionary *)context;
+// Convenience: end with automatic result determination
+- (void)endPhase:(NSString *)recordID
+        exitCode:(int)exitCode
+       rawOutput:(NSString *)rawOutput
+        rawError:(NSString *)rawError
+    verification:(NSString *)verification
+        verified:(BOOL)verified
+        duration:(NSTimeInterval)duration;
 
 // Query
-- (NSArray<OperationRecord *> *)recordsForTransaction:(NSString *)operationID;
-- (NSArray<OperationRecord *> *)allRecords;
-- (NSArray<OperationRecord *> *)failedRecords;
-- (NSArray<OperationRecord *> *)recordsForPhase:(OperationPhase)phase;
-- (OperationRecord *)lastRecordForTransaction:(NSString *)operationID;
+- (NSArray<OperationRecord *> *)recordsForTransaction:(NSString *)transactionID;
+- (OperationRecord *)recordByID:(NSString *)recordID;
+- (NSArray<OperationRecord *> *)failedRecordsInTransaction:(NSString *)transactionID;
+- (OperationRecord *)firstFailureInTransaction:(NSString *)transactionID;
+- (BOOL)transactionHasFailures:(NSString *)transactionID;
 
 // Reports
-- (NSString *)transactionReport:(NSString *)operationID;   // Full human-readable report
-- (NSString *)transactionSummary:(NSString *)operationID;  // One-line summary
-- (NSDictionary *)transactionStats:(NSString *)operationID; // Statistics
+- (NSString *)transactionReport:(NSString *)transactionID;
+- (NSString *)transactionSummary:(NSString *)transactionID;
+- (NSDictionary *)transactionStats:(NSString *)transactionID;
 
 // Export
-- (NSString *)exportTransactionAsJSON:(NSString *)operationID;
-- (NSString *)exportAllAsJSON;
+- (NSString *)exportTransactionAsJSON:(NSString *)transactionID;
 
 // Management
-- (void)clearTransaction:(NSString *)operationID;
+- (void)clearTransaction:(NSString *)transactionID;
 - (void)clearAll;
 
-// Current active transaction
 @property (nonatomic, strong, readonly) NSString *activeTransactionID;
 @property (nonatomic, strong, readonly) NSArray<NSString *> *allTransactionIDs;
 
