@@ -39,4 +39,7 @@ typedef NS_ENUM(NSInteger, InstallationStage) {
 - (NSString *)activeTransactionID;
 - (NSString *)transactionReport:(NSString *)txnID;
 - (OperationLog *)operationLog;
+
+// Prepare transaction ID before installIPA so UI can sync with OperationLog
+- (void)prepareTransactionWithID:(NSString *)txnID;
 @end
