@@ -663,8 +663,10 @@ extern char **environ;
 
     // SUCCESS
     [opLog endTransaction:txnID finalResult:OperationResultSuccess];
-    if (completion) completion([InstallationResult successResult:[NSString stringWithFormat:@"Installed %@", appFolder]
-        provider:[self providerName] transaction:txnID evidence:@{@"bundleID": bundleID, @"path": destApp, @"exe": exeName}]);
+    InstallationResult *result = [InstallationResult successResult:[NSString stringWithFormat:@"Installed %@", appFolder]
+        provider:[self providerName] transaction:txnID evidence:@{@"bundleID": bundleID, @"path": destApp, @"exe": exeName}];
+    result.bundleID = bundleID;
+    if (completion) completion(result);
 }
 
 #pragma mark - Bundle ID Extraction
