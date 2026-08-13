@@ -5,6 +5,8 @@
 #include <spawn.h>
 #include <sys/wait.h>
 
+extern char **environ;
+
 @interface AppInstInstallationProvider ()
 @property (nonatomic, strong) NSString *appInstPath;
 @end
@@ -28,7 +30,7 @@
     return [[NSFileManager defaultManager] fileExistsAtPath:self.appInstPath];
 }
 
-- (void)installIPA:(NSString *)ipaPath completion:(void (^)(InstallationResult *))completion {
+- (void)installIPA:(NSString *)ipaPath operationLog:(OperationLog *)opLog completion:(void (^)(InstallationResult *))completion {
     if (!completion) return;
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -48,13 +50,13 @@
         logStep(@"EXEC", [NSString stringWithFormat:@"%@ -i %@", self.appInstPath, ipaPath]);
 
         pid_t pid;
-        int status = posix_spawn(&pid, cmd, NULL, NULL, (char **)args, NULL);
+        int status = posix_spawn(&pid, cmd, NULL, NULL, (char **)args, environ);
 
         if (status != 0) {
-            NSString *errMsg = [NSString stringWithFormat:@"posix_spawn failed: %d", status];
+            NSString *errMsg = [NSString stringWithFormat:@"posix_spawn failed: %d (errno=%d)", status, errno];
             logStep(@"ERROR", errMsg);
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:errMsg error:nil];
+                InstallationResult *result = [InstallationResult failureResult:errMsg provider:[self providerName] transaction:@"" error:nil evidence:@{@"errno": @(errno)}];
                 result.detailedOutput = log;
                 completion(result);
             });
@@ -68,7 +70,7 @@
         if (success) {
             logStep(@"SUCCESS", @"appinst completed successfully");
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult successResult:@"تم التثبيت عبر appinst"];
+                InstallationResult *result = [InstallationResult successResult:@"تم التثبيت عبر appinst" provider:[self providerName] transaction:@"" evidence:nil];
                 result.detailedOutput = log;
                 completion(result);
             });
@@ -76,7 +78,7 @@
             NSString *errMsg = [NSString stringWithFormat:@"appinst exited with code %d", WEXITSTATUS(waitStatus)];
             logStep(@"ERROR", errMsg);
             dispatch_async(dispatch_get_main_queue(), ^{
-                InstallationResult *result = [InstallationResult failureResult:errMsg error:nil];
+                InstallationResult *result = [InstallationResult failureResult:errMsg provider:[self providerName] transaction:@"" error:nil evidence:@{@"exitCode": @(WEXITSTATUS(waitStatus))}];
                 result.detailedOutput = log;
                 completion(result);
             });
