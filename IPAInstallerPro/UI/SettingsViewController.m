@@ -73,7 +73,7 @@
 
     UISwitch *s = [[UISwitch alloc] initWithFrame:CGRectMake(w - margin - 55, y, 51, 31)];
     s.tag = tag;
-    s.on = (tag == 3); // verbose log default ON
+    s.on = (tag == 3);
     [s addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
     [self.view addSubview:s];
 
@@ -91,33 +91,35 @@
             [[Logger sharedLogger] info:[NSString stringWithFormat:@"Auto clean: %@", sender.isOn ? @"ON" : @"OFF"]];
             break;
         case 3:
-            [[Logger sharedLogger] setVerbose:sender.isOn];
+            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Verbose log: %@", sender.isOn ? @"ON" : @"OFF"]];
             break;
     }
 }
 
 - (void)refreshEnvironment {
-    [[CapabilityManager sharedManager] refreshCapabilities];
+    [[CapabilityManager sharedManager] scanCapabilities];
     NSMutableString *info = [NSMutableString string];
     [info appendString:@"🔧 IPA Installer Pro v2.1 (Standalone Mode)\n\n"];
     [info appendString:@"Required System Tools:\n"];
 
-    NSArray *required = @[@"ldid", @"uicache", @"unzip", @"chmod", @"chown", @"cp", @"rm", @"mkdir"];
-    for (NSString *tool in required) {
-        BOOL has = [[CapabilityManager sharedManager] hasCapability:tool];
-        NSString *path = [[CapabilityManager sharedManager] pathForTool:tool] ?: @"N/A";
-        [info appendFormat:@"%@ %@: %@\n", has ? @"✅" : @"❌", tool, path];
-    }
+    // Use actual CapabilityManager methods
+    BOOL hasLDID = [[CapabilityManager sharedManager] isLDIDAvailable];
+    BOOL hasUICache = [[CapabilityManager sharedManager] isUICacheAvailable];
+    BOOL hasUnzip = [[CapabilityManager sharedManager] isUnzipAvailable];
+    BOOL hasDirect = [[CapabilityManager sharedManager] isDirectInstallationAvailable];
+    BOOL hasSystem = [[CapabilityManager sharedManager] isSystemInstallationAvailable];
+    BOOL hasHelper = [[CapabilityManager sharedManager] isRootHelperAvailable];
 
-    [info appendString:@"\nOptional:\n"];
-    BOOL helper = [[CapabilityManager sharedManager] hasCapability:@"root_helper"];
-    [info appendFormat:@"%@ Root Helper: %@\n", helper ? @"✅" : @"⚠️", helper ? @"Active" : @"Not found (some operations may need manual confirmation)"];
-
-    BOOL ls = [[CapabilityManager sharedManager] hasCapability:@"ls_workspace"];
-    [info appendFormat:@"%@ LSApplicationWorkspace: %@ (verification only)\n", ls ? @"✅" : @"⚠️", ls ? @"Available" : @"Limited"];
+    [info appendFormat:@"%@ ldid (code signing)\n", hasLDID ? @"✅" : @"❌"];
+    [info appendFormat:@"%@ uicache (app registration)\n", hasUICache ? @"✅" : @"❌"];
+    [info appendFormat:@"%@ unzip (archive extraction)\n", hasUnzip ? @"✅" : @"❌"];
+    [info appendFormat:@"%@ Direct Install (standalone)\n", hasDirect ? @"✅" : @"❌"];
+    [info appendFormat:@"%@ System Install (fallback)\n", hasSystem ? @"✅" : @"⚠️"];
+    [info appendFormat:@"%@ Root Helper (privilege elevation)\n", hasHelper ? @"✅" : @"⚠️"];
 
     [info appendString:@"\n📝 Note: This tool works independently without AppSync or appinst.\n"];
-    [info appendString:@"All operations use IPA Installer Pro\'s proprietary signing engine.\n"];
+    [info appendFormat:@"\nInstallation Status: %@\n", [[CapabilityManager sharedManager] installationReadinessStatus]];
+    [info appendFormat:@"%@\n", [[CapabilityManager sharedManager] capabilityStatusString]];
 
     self.environmentTextView.text = info;
 }
