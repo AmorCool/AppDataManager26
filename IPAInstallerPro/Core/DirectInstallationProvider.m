@@ -11,6 +11,7 @@
 #import "JailbreakEnvironment.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
