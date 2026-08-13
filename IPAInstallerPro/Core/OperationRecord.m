@@ -5,24 +5,6 @@
 
 #import "OperationLog.h"
 
-@interface OperationRecord ()
-@property (nonatomic, readwrite, copy) NSString *recordID;
-@property (nonatomic, readwrite, copy) NSString *transactionID;
-@property (nonatomic, readwrite, strong) NSDate *timestamp;
-@property (nonatomic, readwrite, assign) OperationPhase phase;
-@property (nonatomic, readwrite, copy) NSString *operation;
-@property (nonatomic, readwrite, copy) NSString *target;
-@property (nonatomic, readwrite, copy) NSString *input;
-@property (nonatomic, readwrite, assign) int exitCode;
-@property (nonatomic, readwrite, copy) NSString *rawOutput;
-@property (nonatomic, readwrite, copy) NSString *rawError;
-@property (nonatomic, readwrite, copy) NSString *verification;
-@property (nonatomic, readwrite, assign) BOOL verified;
-@property (nonatomic, readwrite, assign) OperationResult result;
-@property (nonatomic, readwrite, assign) NSTimeInterval duration;
-@property (nonatomic, readwrite, strong) NSDictionary *context;
-@end
-
 @implementation OperationRecord
 
 - (NSString *)phaseName {
