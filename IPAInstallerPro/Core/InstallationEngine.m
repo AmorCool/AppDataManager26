@@ -165,7 +165,7 @@
     if (progressBlock) progressBlock(self.currentStage, @"Installing files...", 0.3);
 
     __weak typeof(self) weakSelf = self;
-    [provider installIPA:ipaPath operationLog:self.operationLog completion:^(InstallationResult *result) {
+    [provider installIPA:ipaPath transactionID:self.activeTxnID operationLog:self.operationLog completion:^(InstallationResult *result) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
