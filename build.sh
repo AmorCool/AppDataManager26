@@ -1,84 +1,185 @@
 #!/bin/bash
 # =============================================================================
-# AppData Manager - Build Script for Dopamine 3.0 / Rootless Jailbreak
+# AppDataManager + IPAInstallerPro — Unified Build Script
+# Dopamine 3.0 / Rootless Compatible
 # =============================================================================
-# Usage: ./build.sh
-# Requirements: Theos installed, iOS SDK, Xcode Command Line Tools
+# Usage: ./build.sh [all|appdatamanager|ipainstallerpro]
 # =============================================================================
 
 set -e
 
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+BUILD_MODE="${1:-all}"
+
 echo "=========================================="
-echo " 📱 AppData Manager Build Script"
-echo " Dopamine 3.0 / Rootless Compatible"
+echo " 📱 AppDataManager Build System"
+echo " Mode: $BUILD_MODE"
 echo "=========================================="
 echo ""
 
 # التحقق من Theos
 if [ -z "$THEOS" ]; then
     echo "❌ ERROR: THEOS environment variable not set!"
-    echo " Please install Theos: https://theos.dev/docs/installation"
+    echo "   Install: https://theos.dev/docs/installation"
     exit 1
 fi
+echo "✅ THEOS: $THEOS"
 
-echo "✅ THEOS found at: $THEOS"
-
-# تنظيف
-make clean
-
-# بناء للـ Rootless (Dopamine 3.0)
-echo ""
-echo "🔨 Building for Rootless Jailbreak..."
-echo " Architecture: iphoneos-arm64"
-echo " Target: iOS 15.0+"
+# التحقق من الأدوات المطلوبة
+for tool in dpkg-deb ldid uicache unzip; do
+    if ! command -v "$tool" &> /dev/null; then
+        echo "⚠️  Warning: $tool not found in PATH"
+    fi
+done
 echo ""
 
-make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+BUILD_SUCCESS=0
+BUILD_FAILED=0
+BUILT_PACKAGES=()
 
-# التحقق من نجاح البناء
-DEB_FILE=$(ls -t packages/*.deb 2>/dev/null | head -1)
+# ========== بناء AppData Manager ==========
+build_appdatamanager() {
+    echo "=========================================="
+    echo " 🔨 Building: AppData Manager"
+    echo "=========================================="
+    cd "$PROJECT_ROOT/AppDataManager"
 
-if [ -f "$DEB_FILE" ]; then
+    make clean 2>/dev/null || true
+    make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+
+    DEB=$(ls -t packages/*.deb 2>/dev/null | head -1)
+    if [ -f "$DEB" ]; then
+        echo "✅ AppData Manager built: $(basename $DEB)"
+        BUILT_PACKAGES+=("$DEB")
+        ((BUILD_SUCCESS++))
+
+        # نسخ إلى pool
+        mkdir -p "$PROJECT_ROOT/repo/pool/main/iphoneos-arm64/"
+        cp "$DEB" "$PROJECT_ROOT/repo/pool/main/iphoneos-arm64/"
+        echo "   → Copied to repo/pool/"
+    else
+        echo "❌ AppData Manager build failed!"
+        ((BUILD_FAILED++))
+        return 1
+    fi
     echo ""
-    echo "✅ Build Successful!"
-    echo "📦 Package: $DEB_FILE"
-    echo ""
+}
 
-    # عرض معلومات الحزمة
-    echo "📋 Package Info:"
-    dpkg-deb -I "$DEB_FILE" | grep -E "Package:|Version:|Architecture:|Depends:"
-    echo ""
+# ========== بناء IPA Installer Pro ==========
+build_ipainstallerpro() {
+    echo "=========================================="
+    echo " 🔨 Building: IPA Installer Pro"
+    echo "=========================================="
+    cd "$PROJECT_ROOT/IPAInstallerPro"
 
-    # تثبيت يدوي (اختياري)
-    read -p "🚀 Install via SSH? (y/n): " choice
+    make clean 2>/dev/null || true
+    make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+
+    DEB=$(ls -t packages/*.deb 2>/dev/null | head -1)
+    if [ -f "$DEB" ]; then
+        echo "✅ IPA Installer Pro built: $(basename $DEB)"
+        BUILT_PACKAGES+=("$DEB")
+        ((BUILD_SUCCESS++))
+
+        # نسخ إلى repo-dev فقط (للاختبار)
+        mkdir -p "$PROJECT_ROOT/repo-dev/pool/main/iphoneos-arm64/"
+        cp "$DEB" "$PROJECT_ROOT/repo-dev/pool/main/iphoneos-arm64/"
+        echo "   → Copied to repo-dev/pool/"
+    else
+        echo "❌ IPA Installer Pro build failed!"
+        ((BUILD_FAILED++))
+        return 1
+    fi
+    echo ""
+}
+
+# ========== توليد repo ==========
+generate_repo() {
+    local repo_dir="$1"
+    local is_dev="$2"
+
+    echo "=========================================="
+    echo " 📝 Generating repo: $(basename $repo_dir)"
+    echo "=========================================="
+
+    cd "$PROJECT_ROOT"
+
+    if [ "$is_dev" = "true" ]; then
+        python3 scripts/generate-repo.py "$repo_dir" --dev
+    else
+        python3 scripts/generate-repo.py "$repo_dir" --prod
+    fi
+
+    # التحقق
+    python3 scripts/validate-repo.py "$repo_dir"
+    echo ""
+}
+
+# ========== التثبيت الاختياري عبر SSH ==========
+install_via_ssh() {
+    local deb_path="$1"
+    read -p "📱 Install $(basename $deb_path) via SSH? (y/n): " choice
     if [ "$choice" = "y" ] || [ "$choice" = "Y" ]; then
-        read -p "📱 Enter iPhone IP: " iphone_ip
-        echo "📤 Transferring to device..."
-        scp "$DEB_FILE" root@$iphone_ip:/tmp/
+        read -p "📱 iPhone IP: " iphone_ip
+        echo "📤 Transferring..."
+        scp "$deb_path" root@$iphone_ip:/tmp/
         echo "🔧 Installing..."
-        ssh root@$iphone_ip "dpkg -i /tmp/$(basename $DEB_FILE) && uicache -p /var/jb/Applications/AppDataManager.app || uicache -p /Applications/AppDataManager.app"
+        ssh root@$iphone_ip "dpkg -i /tmp/$(basename $deb_path) && uicache -p /var/jb/Applications/*.app || uicache -p /Applications/*.app"
         echo "✅ Installed!"
     fi
+}
 
-    # نسخ للـ Repo (اختياري)
-    read -p "📦 Copy to repo? (y/n): " repo_choice
-    if [ "$repo_choice" = "y" ] || [ "$repo_choice" = "Y" ]; then
-        REPO_PATH="../repo/pool/main/iphoneos-arm64/"
-        mkdir -p "$REPO_PATH"
-        cp "$DEB_FILE" "$REPO_PATH"
-        echo "✅ Copied to repo!"
-        echo ""
-        echo "📝 Next steps for repo:"
-        echo " 1. cd ../repo"
-        echo " 2. ./update_repo.sh"
-        echo " 3. git add . && git commit -m 'Update package' && git push"
-    fi
-else
-    echo "❌ Build failed!"
-    exit 1
+# ========== التنفيذ الرئيسي ==========
+case "$BUILD_MODE" in
+    appdatamanager|adm)
+        build_appdatamanager
+        generate_repo "$PROJECT_ROOT/repo" "false"
+        ;;
+    ipainstallerpro|ipa)
+        build_ipainstallerpro
+        generate_repo "$PROJECT_ROOT/repo-dev" "true"
+        ;;
+    all|*)
+        build_appdatamanager
+        build_ipainstallerpro
+        generate_repo "$PROJECT_ROOT/repo" "false"
+        generate_repo "$PROJECT_ROOT/repo-dev" "true"
+        ;;
+esac
+
+# ========== ملخص ==========
+echo "=========================================="
+echo " 📊 Build Summary"
+echo "=========================================="
+echo "  Success: $BUILD_SUCCESS"
+echo "  Failed:  $BUILD_FAILED"
+echo ""
+
+if [ ${#BUILT_PACKAGES[@]} -gt 0 ]; then
+    echo " 📦 Built packages:"
+    for pkg in "${BUILT_PACKAGES[@]}"; do
+        echo "    • $(basename $pkg)"
+        dpkg-deb -I "$pkg" | grep -E "Package:|Version:|Architecture:" | sed 's/^/      /'
+    done
+    echo ""
 fi
 
+echo " 🌐 Repositories:"
+echo "    Production: $PROJECT_ROOT/repo/"
+echo "    Dev:        $PROJECT_ROOT/repo-dev/"
 echo ""
-echo "=========================================="
-echo " 🎉 Done!"
-echo "=========================================="
+
+if [ "$BUILD_FAILED" -gt 0 ]; then
+    echo " ❌ Some builds failed!"
+    exit 1
+else
+    echo " ✅ All builds successful!"
+
+    # اقتراح التثبيت
+    if [ ${#BUILT_PACKAGES[@]} -gt 0 ]; then
+        echo ""
+        install_via_ssh "${BUILT_PACKAGES[-1]}"
+    fi
+
+    exit 0
+fi
