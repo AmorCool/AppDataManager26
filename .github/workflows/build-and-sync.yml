@@ -1,0 +1,67 @@
+name: Build & Sync to Dev Repo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'AppDataManager/**'
+      - 'IPAInstallerPro/**'
+      - 'scripts/**'
+      - 'build.sh'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-dir: ${{ github.workspace }}/theos
+
+      - name: Build AppData Manager
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          cd AppDataManager
+          make clean
+          make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+          mkdir -p ../repo/pool/main/iphoneos-arm64/
+          cp packages/*.deb ../repo/pool/main/iphoneos-arm64/
+
+      - name: Build IPA Installer Pro
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          cd IPAInstallerPro
+          make clean
+          make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+          mkdir -p ../repo-dev/pool/main/iphoneos-arm64/
+          cp packages/*.deb ../repo-dev/pool/main/iphoneos-arm64/
+
+      - name: Generate repo files
+        run: |
+          python3 scripts/generate-repo.py repo --prod
+          python3 scripts/generate-repo.py repo-dev --dev
+
+      - name: Validate repos
+        run: |
+          python3 scripts/validate-repo.py repo
+          python3 scripts/validate-repo.py repo-dev
+
+      - name: Commit and push repo-dev
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add repo-dev/
+          git diff --cached --quiet || git commit -m "🔄 Auto-sync repo-dev: IPA Installer Pro $(date +%Y-%m-%d-%H:%M)"
+          git push origin main
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            repo/pool/main/iphoneos-arm64/*.deb
+            repo-dev/pool/main/iphoneos-arm64/*.deb
