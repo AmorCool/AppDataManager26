@@ -5,7 +5,7 @@ include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = IPAInstallerPro
 
-IPAInstallerPro_FILES =     AppDelegate.m     main.m     UI/MainViewController.m     UI/AppDetailsViewController.m     UI/IPAFileBrowserViewController.m     UI/IPAInstallViewController.m     UI/InstallationProgressViewController.m     UI/InstalledAppsViewController.m     UI/SettingsViewController.m     UI/CrashReporterViewController.m     Core/DirectInstallationProvider.m     Core/SystemInstallationProvider.m     Core/AppInstInstallationProvider.m     Core/InstallationEngine.m     Core/InstallationProvider.m     Core/ApplicationManager.m     Core/DependencyManager.m     Core/IPAValidator.m     Core/IPAExtractor.m     Core/CapabilityManager.m     Core/RootlessManager.m     Core/JailbreakEnvironment.m     Core/VerificationEngine.m     Core/Logger.m
+IPAInstallerPro_FILES = AppDelegate.m main.m UI/MainViewController.m UI/AppDetailsViewController.m UI/IPAFileBrowserViewController.m UI/IPAInstallViewController.m UI/InstallationProgressViewController.m UI/InstalledAppsViewController.m UI/SettingsViewController.m UI/CrashReporterViewController.m Core/DirectInstallationProvider.m Core/InstallationEngine.m Core/InstallationProvider.m Core/ApplicationManager.m Core/DependencyManager.m Core/IPAValidator.m Core/IPAExtractor.m Core/CapabilityManager.m Core/RootlessManager.m Core/JailbreakEnvironment.m Core/VerificationEngine.m Core/Logger.m Core/OperationLog.m
 
 IPAInstallerPro_FRAMEWORKS = UIKit Foundation
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
