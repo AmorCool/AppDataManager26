@@ -49,6 +49,12 @@
         // Detect jailbreak type
         if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/usr/bin/dopamine"]) {
             self.jailbreakType = @"Dopamine";
+        } else if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/.installed_dopamine"]) {
+            self.jailbreakType = @"Dopamine 3.0";
+        } else if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/usr/bin/dopamine-cli"]) {
+            self.jailbreakType = @"Dopamine 3.0";
+        } else if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/usr/lib/libdopamine.dylib"]) {
+            self.jailbreakType = @"Dopamine";
         } else if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/.installed_unc0ver"]) {
             self.jailbreakType = @"unc0ver";
         } else if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/.installed_taurine"]) {
