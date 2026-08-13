@@ -258,7 +258,6 @@
                duration:monitorDuration / 1000.0];
         
         NSLog(@"[RuntimeDiagnostics] Process %@ after %.0f ms (exit=%d signal=%d)", state, monitorDuration, exitStatus, signalNum);
-              isCrash ? @"crashed" : @"exited", monitorDuration, terminationReason);
 
         // ─── PHASE 4: COMPREHENSIVE CRASH DIAGNOSTICS ───
         NSString *recCrash = [opLog beginPhase:OperationPhaseCrashDiagnostics

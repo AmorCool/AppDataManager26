@@ -869,25 +869,113 @@ extern char **environ;
 }
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
-    // Find app path via LSApplicationWorkspace
-    Class LS = objc_getClass("LSApplicationWorkspace");
-    if (!LS) { if (completion) completion(NO, @"LSApplicationWorkspace unavailable"); return; }
-    id ws = [LS performSelector:@selector(defaultWorkspace)];
-    if (![ws respondsToSelector:@selector(applicationForIdentifier:)]) {
-        if (completion) completion(NO, @"applicationForIdentifier unavailable"); return;
+    if (!bundleID || bundleID.length == 0) {
+        if (completion) completion(NO, @"Bundle ID is empty");
+        return;
     }
-    id app = [ws performSelector:@selector(applicationForIdentifier:) withObject:bundleID];
-    if (!app) { if (completion) completion(NO, @"App not found"); return; }
-    NSString *path = nil;
-    if ([app respondsToSelector:@selector(bundleURL)]) path = [[app performSelector:@selector(bundleURL)] path];
-    if (!path) { if (completion) completion(NO, @"Cannot determine app path"); return; }
-    BOOL removed = [self hasRootHelper] ? [self runRoot:self.rmPath args:@[@"-rf", path] opLog:nil recordID:nil]
-                                        : [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-    if (removed) {
-        if ([self hasRootHelper]) [self runRoot:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
-        else [self runCmd:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
-        if (completion) completion(YES, nil);
-    } else { if (completion) completion(NO, @"Remove failed"); }
-}
 
-@end
+    // ─── PHASE 1: Try LSApplicationWorkspace uninstall API directly ───
+    Class LS = objc_getClass("LSApplicationWorkspace");
+    if (LS) {
+        id ws = [LS performSelector:@selector(defaultWorkspace)];
+        if (ws) {
+            // iOS 15+ style: pass bundleID (NSString) directly
+            if ([ws respondsToSelector:@selector(uninstallApplication:withOptions:)]) {
+                BOOL ok = (BOOL)[ws performSelector:@selector(uninstallApplication:withOptions:)
+                                         withObject:bundleID
+                                         withObject:@{}];
+                if (ok) {
+                    [self runRoot:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
+                    if (completion) completion(YES, nil);
+                    return;
+                }
+            }
+            // Try with nil options
+            if ([ws respondsToSelector:@selector(uninstallApplication:withOptions:)]) {
+                BOOL ok = (BOOL)[ws performSelector:@selector(uninstallApplication:withOptions:)
+                                         withObject:bundleID
+                                         withObject:nil];
+                if (ok) {
+                    [self runRoot:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
+                    if (completion) completion(YES, nil);
+                    return;
+                }
+            }
+            // Older API
+            if ([ws respondsToSelector:@selector(uninstallApplication:)]) {
+                BOOL ok = (BOOL)[ws performSelector:@selector(uninstallApplication:) withObject:bundleID];
+                if (ok) {
+                    [self runRoot:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
+                    if (completion) completion(YES, nil);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ─── PHASE 2: Find app path via allApplications ───
+    NSString *appPath = nil;
+    if (LS) {
+        id ws = [LS performSelector:@selector(defaultWorkspace)];
+        if (ws && [ws respondsToSelector:@selector(allApplications)]) {
+            NSArray *apps = [ws performSelector:@selector(allApplications)];
+            for (id app in apps) {
+                NSString *bid = nil;
+                if ([app respondsToSelector:@selector(bundleIdentifier)]) {
+                    bid = [app performSelector:@selector(bundleIdentifier)];
+                }
+                if ([bid isEqualToString:bundleID]) {
+                    if ([app respondsToSelector:@selector(bundleURL)]) {
+                        appPath = [[app performSelector:@selector(bundleURL)] path];
+                    } else if ([app respondsToSelector:@selector(containerURL)]) {
+                        appPath = [[app performSelector:@selector(containerURL)] path];
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // ─── PHASE 3: Fallback — search known paths ───
+    if (!appPath || appPath.length == 0) {
+        NSArray *searchPaths = @[
+            [NSString stringWithFormat:@"/var/jb/Applications/%@.app", bundleID],
+            [NSString stringWithFormat:@"/Applications/%@.app", bundleID],
+            [NSString stringWithFormat:@"/var/mobile/Applications/%@", bundleID],
+        ];
+        for (NSString *p in searchPaths) {
+            if ([[NSFileManager defaultManager] fileExistsAtPath:p]) {
+                appPath = p;
+                break;
+            }
+        }
+    }
+
+    if (!appPath || appPath.length == 0) {
+        if (completion) completion(NO, @"App path not found — cannot uninstall");
+        return;
+    }
+
+    // ─── PHASE 4: Remove files ───
+    BOOL removed = NO;
+    if ([self hasRootHelper]) {
+        removed = [self runRoot:self.rmPath args:@[@"-rf", appPath] opLog:nil recordID:nil];
+    } else {
+        NSError *err = nil;
+        removed = [[NSFileManager defaultManager] removeItemAtPath:appPath error:&err];
+        if (!removed) {
+            removed = [self runRoot:self.rmPath args:@[@"-rf", appPath] opLog:nil recordID:nil];
+        }
+    }
+
+    if (removed) {
+        if ([self hasRootHelper]) {
+            [self runRoot:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
+        } else {
+            [self runCmd:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
+        }
+        if (completion) completion(YES, nil);
+    } else {
+        if (completion) completion(NO, @"Failed to remove application files");
+    }
+}
