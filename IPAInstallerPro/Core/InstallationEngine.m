@@ -16,6 +16,7 @@
 @property (nonatomic, assign) BOOL isInstalling;
 @property (nonatomic, strong, readwrite) NSString *activeTxnID;
 @property (nonatomic, strong, readwrite) OperationLog *operationLog;
+@property (nonatomic, assign) InstallationStage currentStage;
 @end
 
 @implementation InstallationEngine
