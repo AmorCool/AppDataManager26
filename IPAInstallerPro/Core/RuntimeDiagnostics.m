@@ -200,25 +200,64 @@
                                                                exitStatus:exitStatus
                                                                 signalNum:signalNum];
         result.terminationReason = terminationReason;
-
-        // A crash is: signal (SIGKILL from jetsam is NOT a crash, SIGABRT/SIGSEGV/SIGBUS IS)
-        BOOL isCrash = (signalNum != 0 && signalNum != SIGKILL && signalNum != SIGTERM);
-        result.crashDetected = isCrash;
-        result.state = isCrash ? @"CRASHED" : @"EXITED";
+        // ─── STATE CLASSIFICATION ───
+        // RUNNING: stayed alive for full window
+        // EXITED_NORMAL: exited with status 0 (no crash signal)
+        // CRASHED: terminated by crash signal (SIGABRT, SIGSEGV, SIGBUS, SIGILL, SIGTRAP)
+        // KILLED_JETSAM: terminated by SIGKILL (OOM or system kill)
+        // UNKNOWN: cannot determine reason
+        
+        NSString *state;
+        NSString *terminationType;
+        BOOL crashDetected = NO;
+        int exitCodeForLog = 1;
+        
+        if (signalNum == SIGKILL) {
+            state = @"KILLED_JETSAM";
+            terminationType = @"Killed by SIGKILL";
+            exitCodeForLog = 3;
+            NSString *jetsam = [self findJetsamEventForProcessName:proc.name bundleID:bundleID];
+            if (jetsam) {
+                terminationType = @"Killed by Jetsam (out-of-memory)";
+            }
+        } else if (signalNum == SIGTERM) {
+            state = @"KILLED";
+            terminationType = @"Terminated by SIGTERM";
+            exitCodeForLog = 3;
+        } else if (signalNum != 0) {
+            state = @"CRASHED";
+            terminationType = [NSString stringWithFormat:@"Crashed by %@ (%d)", [self signalName:signalNum], signalNum];
+            crashDetected = YES;
+            exitCodeForLog = 2;
+        } else if (exitStatus == 0) {
+            state = @"EXITED_NORMAL";
+            terminationType = @"Exited normally (status 0)";
+            exitCodeForLog = 1;
+        } else if (exitStatus > 0) {
+            state = @"EXITED_WITH_ERROR";
+            terminationType = [NSString stringWithFormat:@"Exited with error status %d", exitStatus];
+            exitCodeForLog = 1;
+        } else {
+            state = @"EXITED_NORMAL";
+            terminationType = @"Exited (no crash signal detected)";
+            exitCodeForLog = 1;
+        }
+        
+        result.crashDetected = crashDetected;
+        result.state = state;
+        result.terminationReason = terminationType;
         result.success = NO;
-        result.summary = [NSString stringWithFormat:@"%@ after %.0f ms — %@",
-                          isCrash ? @"Crashed" : @"Exited", monitorDuration, terminationReason];
-
+        result.summary = [NSString stringWithFormat:@"%@ after %.0f ms", terminationType, monitorDuration];
+        
         [opLog endPhase:recMonitor
-               exitCode:isCrash ? 2 : 1
-              rawOutput:[NSString stringWithFormat:@"lifetime=%.0fms exitStatus=%d signal=%d", monitorDuration, exitStatus, signalNum]
-               rawError:terminationReason
-           verification:[NSString stringWithFormat:@"Process %@ after %.0f ms — %@",
-                          isCrash ? @"crashed" : @"exited", monitorDuration, terminationReason]
+               exitCode:exitCodeForLog
+              rawOutput:[NSString stringWithFormat:@"lifetime=%.0fms exitStatus=%d signal=%d state=%@", monitorDuration, exitStatus, signalNum, state]
+               rawError:terminationType
+           verification:[NSString stringWithFormat:@"Process %@ after %.0f ms", state, monitorDuration]
                verified:NO
                duration:monitorDuration / 1000.0];
-
-        NSLog(@"[RuntimeDiagnostics] Process %@ after %.0f ms — %@", 
+        
+        NSLog(@"[RuntimeDiagnostics] Process %@ after %.0f ms (exit=%d signal=%d)", state, monitorDuration, exitStatus, signalNum);
               isCrash ? @"crashed" : @"exited", monitorDuration, terminationReason);
 
         // ─── PHASE 4: COMPREHENSIVE CRASH DIAGNOSTICS ───
