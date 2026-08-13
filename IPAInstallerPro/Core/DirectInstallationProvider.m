@@ -48,7 +48,7 @@ extern char **environ;
         RootlessManager *rm = [RootlessManager sharedManager];
         self.ldidPath = [rm resolvePath:@"/usr/bin/ldid"];
         self.uicachePath = [rm resolvePath:@"/usr/bin/uicache"];
-        self.chmodPath = @"/var/jb/bin/chmod";
+        self.chmodPath = [rm resolvePath:@"/bin/chmod"];
         self.chownPath = [rm resolvePath:@"/usr/sbin/chown"];
         self.rmPath = [rm resolvePath:@"/bin/rm"];
         self.cpPath = [rm resolvePath:@"/bin/cp"];
@@ -165,17 +165,14 @@ extern char **environ;
 }
 
 - (NSString *)runCmdOutput:(NSString *)cmd args:(NSArray *)args {
-    int outPipe[2], errPipe[2];
-    if (pipe(outPipe) != 0 || pipe(errPipe) != 0) return nil;
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return nil;
     pid_t pid;
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
-    posix_spawn_file_actions_adddup2(&actions, errPipe[1], STDERR_FILENO);
-    posix_spawn_file_actions_addclose(&actions, outPipe[0]);
-    posix_spawn_file_actions_addclose(&actions, errPipe[0]);
-    posix_spawn_file_actions_addclose(&actions, outPipe[1]);
-    posix_spawn_file_actions_addclose(&actions, errPipe[1]);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
     const char *c = [cmd UTF8String];
     char **argv = malloc((args.count + 2) * sizeof(char*));
     argv[0] = (char*)c;
@@ -184,19 +181,14 @@ extern char **environ;
     int st = posix_spawn(&pid, c, &actions, NULL, argv, environ);
     free(argv);
     posix_spawn_file_actions_destroy(&actions);
-    close(outPipe[1]); close(errPipe[1]);
-    if (st != 0) { close(outPipe[0]); close(errPipe[0]); return nil; }
+    close(pipefd[1]);
+    if (st != 0) { close(pipefd[0]); return nil; }
     NSMutableString *output = [NSMutableString string];
     char buf[4096];
     ssize_t n;
-    while ((n = read(outPipe[0], buf, sizeof(buf) - 1)) > 0) { buf[n] = '\0'; [output appendString:[NSString stringWithUTF8String:buf]]; }
-    close(outPipe[0]);
-    NSMutableString *errOutput = [NSMutableString string];
-    while ((n = read(errPipe[0], buf, sizeof(buf) - 1)) > 0) { buf[n] = '\0'; [errOutput appendString:[NSString stringWithUTF8String:buf]]; }
-    close(errPipe[0]);
-    int ws; waitpid(pid, &ws, 0);
-    int exitCode = WIFEXITED(ws) ? WEXITSTATUS(ws) : -1;
-    NSLog(@"[IPAInstallerPro] runCmdOutput: cmd=%@ exit=%d stdout=%@ stderr=%@", cmd, exitCode, output, errOutput);
+    while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) { buf[n] = '\0'; [output appendString:[NSString stringWithUTF8String:buf]]; }
+    close(pipefd[0]);
+    waitpid(pid, NULL, 0);
     return output;
 }
 
@@ -307,21 +299,13 @@ extern char **environ;
 }
 
 - (BOOL)verifySignature:(NSString *)path opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
-    NSLog(@"[IPAInstallerPro] ==========================================");
-    NSLog(@"[IPAInstallerPro] VERIFY TARGET: %@", path);
-    NSLog(@"[IPAInstallerPro] VERIFY CMD: %@ -d %@", self.ldidPath, path);
-
+    NSLog(@"[IPAInstallerPro] verifySignature: path=%@ ldid=%@", path, self.ldidPath);
     NSString *output = [self runCmdOutput:self.ldidPath args:@[@"-d", path]];
     BOOL hasSig = (output && output.length > 0);
-
-    NSLog(@"[IPAInstallerPro] VERIFY EXIT: output=%@ hasSig=%d", output, hasSig);
-    NSLog(@"[IPAInstallerPro] VERIFY SHA256: %@", [self sha256OfFile:path]);
-    NSLog(@"[IPAInstallerPro] VERIFY SIZE: %lld", [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] fileSize]);
-    NSLog(@"[IPAInstallerPro] ==========================================");
-
     NSString *rec = [opLog beginPhase:OperationPhaseSign operation:@"ldid -d signature check" target:path input:@"" transactionID:txnID];
     [opLog endPhase:rec exitCode:hasSig ? 0 : 1 rawOutput:output ?: @"" rawError:hasSig ? @"" : @"No signature detected"
      verification:hasSig ? @"Signature present" : @"No signature" verified:hasSig duration:0];
+    NSLog(@"[IPAInstallerPro] verifySignature result: hasSig=%d output=%@", hasSig, output);
     return hasSig;
 }
 
@@ -741,44 +725,26 @@ extern char **environ;
     }
 }
 
-
 - (void)signExe:(NSString *)path hasHelper:(BOOL)hasH opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        NSLog(@"[IPAInstallerPro] signExe: file does not exist: %@", path);
-        return;
-    }
-
-
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) return;
     NSString *rec = [opLog beginPhase:OperationPhaseSign operation:@"signExe (main)" target:path input:@"" transactionID:txnID];
     NSString *ep = [NSTemporaryDirectory() stringByAppendingPathComponent:@"orig.ent"];
     NSString *entOutput = [self runCmdOutput:self.ldidPath args:@[@"-e", path]];
-    NSLog(@"[IPAInstallerPro] ldid -e %@ output=%@", path, entOutput);
-
-    if (entOutput && entOutput.length > 0) {
+    if (entOutput && entOutput.length > 10) {
         [entOutput writeToFile:ep atomically:YES encoding:NSUTF8StringEncoding error:nil];
         NSString *sf = [NSString stringWithFormat:@"-S%@", ep];
         BOOL ok = hasH ? [self runRoot:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec]
                        : [self runCmd:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec];
-        if (ok) {
-            return;
-        }
+        if (ok) return;
     }
-
-    NSLog(@"[IPAInstallerPro] FALLBACK SIGN CMD: %@ -S %@", self.ldidPath, path);
     BOOL ok = hasH ? [self runRoot:self.ldidPath args:@[@"-S", path] opLog:opLog recordID:rec]
                    : [self runCmd:self.ldidPath args:@[@"-S", path] opLog:opLog recordID:rec];
-    NSLog(@"[IPAInstallerPro] FALLBACK SIGN RESULT: ok=%d", ok);
-
     if (!ok) {
         NSString *ep2 = [NSTemporaryDirectory() stringByAppendingPathComponent:@"min.ent"];
         [@{@"get-task-allow":@YES, @"platform-application":@YES} writeToFile:ep2 atomically:YES];
         NSString *sf = [NSString stringWithFormat:@"-S%@", ep2];
-        NSLog(@"[IPAInstallerPro] MIN ENT SIGN CMD: %@ %@ %@", self.ldidPath, sf, path);
         [self runCmd:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec];
     }
-
-    NSLog(@"[IPAInstallerPro] AFTER SIGN: sha256=%@ size=%lld", [self sha256OfFile:path], [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] fileSize]);
-    NSLog(@"[IPAInstallerPro] ==========================================");
 }
 
 - (void)signExeWithExplicitEntitlements:(NSString *)path hasHelper:(BOOL)hasH opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
