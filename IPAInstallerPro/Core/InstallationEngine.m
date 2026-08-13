@@ -89,6 +89,10 @@
     return self.activeTxnID;
 }
 
+- (void)prepareTransactionWithID:(NSString *)txnID {
+    self.activeTxnID = txnID;
+}
+
 - (NSString *)transactionReport:(NSString *)txnID {
     if (!txnID) return @"";
     NSArray *records = [self.operationLog recordsForTransaction:txnID];
@@ -159,7 +163,9 @@
     id<InstallationProvider> provider = available.firstObject;
     NSLog(@"[IPAInstallerPro] Using provider: %@", [provider providerName]);
 
-    self.activeTxnID = [[NSUUID UUID] UUIDString];
+    if (!self.activeTxnID || self.activeTxnID.length == 0) {
+        self.activeTxnID = [[NSUUID UUID] UUIDString];
+    }
 
     self.currentStage = InstallationStageInstalling;
     if (progressBlock) progressBlock(self.currentStage, @"Installing files...", 0.3);
