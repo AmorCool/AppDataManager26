@@ -48,7 +48,7 @@ extern char **environ;
         RootlessManager *rm = [RootlessManager sharedManager];
         self.ldidPath = [rm resolvePath:@"/usr/bin/ldid"];
         self.uicachePath = [rm resolvePath:@"/usr/bin/uicache"];
-        self.chmodPath = [rm resolvePath:@"/bin/chmod"];
+        self.chmodPath = [rm resolvePath:@"/usr/bin/chmod"];
         self.chownPath = [rm resolvePath:@"/usr/sbin/chown"];
         self.rmPath = [rm resolvePath:@"/bin/rm"];
         self.cpPath = [rm resolvePath:@"/bin/cp"];
