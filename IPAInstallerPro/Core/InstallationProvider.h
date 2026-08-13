@@ -26,6 +26,8 @@
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID
                       completion:(void (^)(BOOL success, NSString *error))completion;
+- (void)uninstallAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID
+                      completion:(void (^)(BOOL success, NSString *error))completion;
 @end
 
 // ============================================================
