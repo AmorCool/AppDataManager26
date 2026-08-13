@@ -193,4 +193,18 @@
     if (completion) completion(NO, @"No provider available for uninstall");
 }
 
+- (void)uninstallAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
+    if (!bundleID || bundleID.length == 0) {
+        if (completion) completion(NO, @"Bundle ID is empty");
+        return;
+    }
+    for (id<InstallationProvider> p in self.providers) {
+        if ([p isAvailable] && [p respondsToSelector:@selector(uninstallAppAtPath:bundleID:completion:)]) {
+            [p uninstallAppAtPath:appPath bundleID:bundleID completion:completion];
+            return;
+        }
+    }
+    [self uninstallAppWithBundleID:bundleID completion:completion];
+}
+
 @end

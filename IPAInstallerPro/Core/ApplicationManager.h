@@ -6,6 +6,7 @@
 @property (nonatomic, strong) NSString *name;
 @property (nonatomic, strong) NSString *version;
 @property (nonatomic, strong) NSString *appType;
+@property (nonatomic, strong) NSString *bundlePath;
 @property (nonatomic, strong) UIImage *icon;
 @property (nonatomic, assign) BOOL isSystemApp;
 @property (nonatomic, assign) BOOL isProtected;

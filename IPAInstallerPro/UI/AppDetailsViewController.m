@@ -127,17 +127,30 @@
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"حذف" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
-        [[InstallationEngine sharedEngine] uninstallAppWithBundleID:self.appInfo.bundleID completion:^(BOOL success, NSString *error) {
+        NSString *appPath = self.appInfo.bundlePath;
+        void (^done)(BOOL, NSString *) = ^(BOOL success, NSString *error) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (success) { [self.navigationController popViewControllerAnimated:YES]; }
-                else {
+                if (success) {
+                    UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"تم الحذف"
+                        message:[NSString stringWithFormat:@"تم حذف %@ بنجاح", self.appInfo.name]
+                        preferredStyle:UIAlertControllerStyleAlert];
+                    [ok addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+                        [self.navigationController popViewControllerAnimated:YES];
+                    }]];
+                    [self presentViewController:ok animated:YES completion:nil];
+                } else {
                     UIAlertController *err = [UIAlertController alertControllerWithTitle:@"فشل الحذف"
                         message:error preferredStyle:UIAlertControllerStyleAlert];
                     [err addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
                     [self presentViewController:err animated:YES completion:nil];
                 }
             });
-        }];
+        };
+        if (appPath && appPath.length > 0) {
+            [[InstallationEngine sharedEngine] uninstallAppAtPath:appPath bundleID:self.appInfo.bundleID completion:done];
+        } else {
+            [[InstallationEngine sharedEngine] uninstallAppWithBundleID:self.appInfo.bundleID completion:done];
+        }
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }

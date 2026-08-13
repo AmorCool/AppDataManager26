@@ -78,6 +78,12 @@
 
             info.isSystemApp = [self isSystemApp:info.bundleID];
             info.isProtected = [self isProtectedApp:info.bundleID];
+            if ([app respondsToSelector:@selector(bundleURL)]) {
+                info.bundlePath = [[app performSelector:@selector(bundleURL)] path];
+            } else if ([app respondsToSelector:@selector(containerURL)]) {
+                info.bundlePath = [[app performSelector:@selector(containerURL)] path];
+            }
+
             info.icon = [self iconForBundleID:info.bundleID];
 
             [apps addObject:info];

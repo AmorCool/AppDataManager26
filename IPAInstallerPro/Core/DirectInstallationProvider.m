@@ -978,4 +978,25 @@ extern char **environ;
     }
 }
 
+- (void)uninstallAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
+    if (!appPath || appPath.length == 0 || !bundleID || bundleID.length == 0) {
+        [self uninstallAppWithBundleID:bundleID completion:completion];
+        return;
+    }
+    
+    // Unregister from SpringBoard first
+    [self runRoot:self.uicachePath args:@[@"-p", appPath] opLog:nil recordID:nil];
+    
+    // Delete via root helper
+    BOOL removed = [self runRoot:self.rmPath args:@[@"-rf", appPath] opLog:nil recordID:nil];
+    
+    // Verify actually gone
+    if (removed && ![[NSFileManager defaultManager] fileExistsAtPath:appPath]) {
+        [self runRoot:self.uicachePath args:@[@"-a"] opLog:nil recordID:nil];
+        if (completion) completion(YES, nil);
+    } else {
+        if (completion) completion(NO, @"Failed to remove application files");
+    }
+}
+
 @end
