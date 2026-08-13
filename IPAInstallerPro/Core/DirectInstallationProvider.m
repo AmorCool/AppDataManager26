@@ -979,3 +979,5 @@ extern char **environ;
         if (completion) completion(NO, @"Failed to remove application files");
     }
 }
+
+@end
