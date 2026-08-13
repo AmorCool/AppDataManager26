@@ -1,6 +1,6 @@
 //
-// OperationRecord.m
-// IPA Installer Pro
+//  OperationRecord.m
+//  IPAInstallerPro
 //
 
 #import "OperationLog.h"
@@ -22,6 +22,9 @@
         case OperationPhaseVerify: return @"VERIFY";
         case OperationPhaseCleanup: return @"CLEANUP";
         case OperationPhaseComplete: return @"COMPLETE";
+        case OperationPhaseLaunch: return @"LAUNCH";
+        case OperationPhaseRuntimeMonitor: return @"RUNTIME_MONITOR";
+        case OperationPhaseCrashDiagnostics: return @"CRASH_DIAGNOSTICS";
         default: return @"UNKNOWN";
     }
 }
@@ -52,7 +55,17 @@
 }
 
 - (NSString *)detailDump {
-    return [NSString stringWithFormat:@"Phase: %@\nOperation: %@\nTarget: %@\nInput: %@\nExit: %d\nOutput: %@\nError: %@\nVerification: %@\nVerified: %@\nResult: %@\nDuration: %.3fs",
+    return [NSString stringWithFormat:@"Phase: %@
+Operation: %@
+Target: %@
+Input: %@
+Exit: %d
+Output: %@
+Error: %@
+Verification: %@
+Verified: %@
+Result: %@
+Duration: %.3fs",
             [self phaseName], self.operation, self.target, self.input, self.exitCode,
             self.rawOutput, self.rawError, self.verification,
             self.verified ? @"YES" : @"NO", [self resultName], self.duration];
