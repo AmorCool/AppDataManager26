@@ -2,7 +2,7 @@
 // SettingsViewController.m
 // IPA Installer Pro
 //
-// v2.1 — Standalone mode environment display
+// v2.2 — Fixed layout with Auto Layout
 //
 
 #import "SettingsViewController.h"
@@ -14,10 +14,12 @@
 #import <UIKit/UIKit.h>
 
 @interface SettingsViewController ()
-@property (nonatomic, strong) UITextView *environmentTextView;
-@property (nonatomic, strong) UISwitch *darkModeSwitch;
-@property (nonatomic, strong) UISwitch *autoCleanSwitch;
-@property (nonatomic, strong) UISwitch *verboseLogSwitch;
+@property (nonatomic, strong) UIScrollView *scrollView;
+@property (nonatomic, strong) UIView *contentView;
+@property (nonatomic, strong) UILabel *envHeader;
+@property (nonatomic, strong) UITextView *envTextView;
+@property (nonatomic, strong) UILabel *capHeader;
+@property (nonatomic, strong) UITextView *capTextView;
 @end
 
 @implementation SettingsViewController
@@ -25,103 +27,125 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"الإعدادات";
-    self.view.backgroundColor = [UIColor systemBackgroundColor];
+    self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
     [self setupUI];
-    [self refreshEnvironment];
+    [self refreshData];
 }
 
 - (void)setupUI {
-    CGFloat w = self.view.bounds.size.width;
-    CGFloat margin = 20;
+    // ScrollView for content
+    self.scrollView = [[UIScrollView alloc] init];
+    self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.scrollView];
 
-    UILabel *envHeader = [[UILabel alloc] initWithFrame:CGRectMake(margin, 100, w - margin * 2, 24)];
-    envHeader.text = @"🔧 بيئة التشغيل";
-    envHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
-    envHeader.textColor = [UIColor labelColor];
-    [self.view addSubview:envHeader];
+    self.contentView = [[UIView alloc] init];
+    self.contentView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.scrollView addSubview:self.contentView];
 
-    self.environmentTextView = [[UITextView alloc] initWithFrame:CGRectMake(margin, 130, w - margin * 2, 280)];
-    self.environmentTextView.backgroundColor = [UIColor secondarySystemBackgroundColor];
-    self.environmentTextView.textColor = [UIColor labelColor];
-    self.environmentTextView.font = [UIFont systemFontOfSize:13];
-    self.environmentTextView.editable = NO;
-    self.environmentTextView.layer.cornerRadius = 10;
-    self.environmentTextView.textAlignment = NSTextAlignmentRight;
-    [self.view addSubview:self.environmentTextView];
+    // Environment Header
+    self.envHeader = [[UILabel alloc] init];
+    self.envHeader.text = @"🔧 بيئة التشغيل";
+    self.envHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
+    self.envHeader.textColor = [UIColor whiteColor];
+    self.envHeader.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.envHeader];
 
-    UILabel *optionsHeader = [[UILabel alloc] initWithFrame:CGRectMake(margin, 430, w - margin * 2, 24)];
-    optionsHeader.text = @"⚙️ الخيارات";
-    optionsHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
-    optionsHeader.textColor = [UIColor labelColor];
-    [self.view addSubview:optionsHeader];
+    // Environment TextView
+    self.envTextView = [[UITextView alloc] init];
+    self.envTextView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
+    self.envTextView.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+    self.envTextView.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+    self.envTextView.editable = NO;
+    self.envTextView.selectable = YES;
+    self.envTextView.layer.cornerRadius = 10;
+    self.envTextView.textAlignment = NSTextAlignmentRight;
+    self.envTextView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.envTextView];
 
-    [self addOptionAtY:470 label:@"الوضع الداكن" switchTag:1];
-    [self addOptionAtY:520 label:@"تنظيف تلقائي" switchTag:2];
-    [self addOptionAtY:570 label:@"تسجيل مفصل" switchTag:3];
+    // Capabilities Header
+    self.capHeader = [[UILabel alloc] init];
+    self.capHeader.text = @"⚙️ القدرات";
+    self.capHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
+    self.capHeader.textColor = [UIColor whiteColor];
+    self.capHeader.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.capHeader];
+
+    // Capabilities TextView
+    self.capTextView = [[UITextView alloc] init];
+    self.capTextView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
+    self.capTextView.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+    self.capTextView.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+    self.capTextView.editable = NO;
+    self.capTextView.selectable = YES;
+    self.capTextView.layer.cornerRadius = 10;
+    self.capTextView.textAlignment = NSTextAlignmentRight;
+    self.capTextView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.capTextView];
+
+    // Layout Constraints
+    [NSLayoutConstraint activateConstraints:@[
+        // ScrollView
+        [self.scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        // ContentView
+        [self.contentView.topAnchor constraintEqualToAnchor:self.scrollView.topAnchor constant:16],
+        [self.contentView.leadingAnchor constraintEqualToAnchor:self.scrollView.leadingAnchor constant:16],
+        [self.contentView.trailingAnchor constraintEqualToAnchor:self.scrollView.trailingAnchor constant:-16],
+        [self.contentView.bottomAnchor constraintEqualToAnchor:self.scrollView.bottomAnchor constant:-16],
+        [self.contentView.widthAnchor constraintEqualToAnchor:self.scrollView.widthAnchor constant:-32],
+
+        // Environment Header
+        [self.envHeader.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
+        [self.envHeader.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+        [self.envHeader.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+
+        // Environment TextView
+        [self.envTextView.topAnchor constraintEqualToAnchor:self.envHeader.bottomAnchor constant:8],
+        [self.envTextView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+        [self.envTextView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+        [self.envTextView.heightAnchor constraintEqualToConstant:200],
+
+        // Capabilities Header
+        [self.capHeader.topAnchor constraintEqualToAnchor:self.envTextView.bottomAnchor constant:24],
+        [self.capHeader.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+        [self.capHeader.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+
+        // Capabilities TextView
+        [self.capTextView.topAnchor constraintEqualToAnchor:self.capHeader.bottomAnchor constant:8],
+        [self.capTextView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+        [self.capTextView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+        [self.capTextView.heightAnchor constraintEqualToConstant:250],
+        [self.capTextView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
+    ]];
 }
 
-- (void)addOptionAtY:(CGFloat)y label:(NSString *)label switchTag:(NSInteger)tag {
-    CGFloat w = self.view.bounds.size.width;
-    CGFloat margin = 20;
+- (void)refreshData {
+    JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
+    RootlessManager *rm = [RootlessManager sharedManager];
+    CapabilityManager *cap = [CapabilityManager sharedManager];
 
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(margin, y, w - margin * 2 - 60, 30)];
-    l.text = label;
-    l.font = [UIFont systemFontOfSize:15];
-    l.textColor = [UIColor labelColor];
-    l.textAlignment = NSTextAlignmentRight;
-    [self.view addSubview:l];
+    NSMutableString *envStr = [NSMutableString string];
+    [envStr appendFormat:@"Jailbreak: %@\n", env.jailbreakName ?: @"Unknown"];
+    [envStr appendFormat:@"Version: %@\n", env.jailbreakVersion ?: @"Unknown"];
+    [envStr appendFormat:@"Rootless: %@\n", env.isRootless ? @"Yes" : @"No"];
+    [envStr appendFormat:@"Root Path: %@\n", rm.rootPath ?: @"N/A"];
+    [envStr appendFormat:@"Apps Path: %@\n", rm.appsPath ?: @"N/A"];
+    [envStr appendFormat:@"Prefix: %@\n", rm.prefixPath ?: @"N/A"];
 
-    UISwitch *s = [[UISwitch alloc] initWithFrame:CGRectMake(w - margin - 55, y, 51, 31)];
-    s.tag = tag;
-    s.on = (tag == 3);
-    [s addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
-    [self.view addSubview:s];
+    self.envTextView.text = envStr;
 
-    if (tag == 1) self.darkModeSwitch = s;
-    if (tag == 2) self.autoCleanSwitch = s;
-    if (tag == 3) self.verboseLogSwitch = s;
-}
-
-- (void)switchChanged:(UISwitch *)sender {
-    switch (sender.tag) {
-        case 1:
-            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Dark mode: %@", sender.isOn ? @"ON" : @"OFF"]];
-            break;
-        case 2:
-            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Auto clean: %@", sender.isOn ? @"ON" : @"OFF"]];
-            break;
-        case 3:
-            [[Logger sharedLogger] info:[NSString stringWithFormat:@"Verbose log: %@", sender.isOn ? @"ON" : @"OFF"]];
-            break;
+    NSMutableString *capStr = [NSMutableString string];
+    [capStr appendFormat:@"%@\n", [cap installationReadinessStatus]];
+    [capStr appendString:@"\n=== Tools ===\n"];
+    for (Capability *c in [cap allCapabilities]) {
+        NSString *icon = c.isAvailable ? @"✅" : @"❌";
+        [capStr appendFormat:@"%@ %@: %@\n", icon, c.name, c.statusMessage];
     }
-}
 
-- (void)refreshEnvironment {
-    [[CapabilityManager sharedManager] scanCapabilities];
-    NSMutableString *info = [NSMutableString string];
-    [info appendString:@"🔧 IPA Installer Pro v2.1 (Standalone Mode)\n\n"];
-    [info appendString:@"Required System Tools:\n"];
-
-    // Use actual CapabilityManager methods
-    BOOL hasLDID = [[CapabilityManager sharedManager] isLDIDAvailable];
-    BOOL hasUICache = [[CapabilityManager sharedManager] isUICacheAvailable];
-    BOOL hasUnzip = [[CapabilityManager sharedManager] isUnzipAvailable];
-    BOOL hasDirect = [[CapabilityManager sharedManager] isDirectInstallationAvailable];
-    BOOL hasSystem = [[CapabilityManager sharedManager] isSystemInstallationAvailable];
-    BOOL hasHelper = [[CapabilityManager sharedManager] isRootHelperAvailable];
-
-    [info appendFormat:@"%@ ldid (code signing)\n", hasLDID ? @"✅" : @"❌"];
-    [info appendFormat:@"%@ uicache (app registration)\n", hasUICache ? @"✅" : @"❌"];
-    [info appendFormat:@"%@ unzip (archive extraction)\n", hasUnzip ? @"✅" : @"❌"];
-    [info appendFormat:@"%@ Direct Install (standalone)\n", hasDirect ? @"✅" : @"❌"];
-    [info appendFormat:@"%@ System Install (fallback)\n", hasSystem ? @"✅" : @"⚠️"];
-    [info appendFormat:@"%@ Root Helper (privilege elevation)\n", hasHelper ? @"✅" : @"⚠️"];
-
-    [info appendString:@"\n📝 Note: This tool works independently without AppSync or appinst.\n"];
-    [info appendFormat:@"\nInstallation Status: %@\n", [[CapabilityManager sharedManager] installationReadinessStatus]];
-    [info appendFormat:@"%@\n", [[CapabilityManager sharedManager] capabilityStatusString]];
-
-    self.environmentTextView.text = info;
+    self.capTextView.text = capStr;
 }
 
 @end
