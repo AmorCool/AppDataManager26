@@ -1,23 +1,21 @@
 //
-// InstallationEngine.m
-// IPA Installer Pro
+//  InstallationEngine.m
+//  IPAInstallerPro
 //
-// v2.2 — STANDALONE with concurrent install protection and NSLock
+//  v2.1 — Standalone engine with OperationLog as source of truth
 //
 
 #import "InstallationEngine.h"
 #import "DirectInstallationProvider.h"
 #import "OperationLog.h"
-#import "Logger.h"
-#import <Foundation/Foundation.h>
+#import "RuntimeDiagnostics.h"
 
 @interface InstallationEngine ()
 @property (nonatomic, strong) NSMutableArray<id<InstallationProvider>> *providers;
-@property (nonatomic, strong) OperationLog *operationLog;
-@property (nonatomic, strong) NSString *activeTxnID;
-@property (nonatomic, assign) InstallationStage currentStage;
 @property (nonatomic, strong) NSLock *installLock;
 @property (nonatomic, assign) BOOL isInstalling;
+@property (nonatomic, strong, readwrite) NSString *activeTxnID;
+@property (nonatomic, strong, readwrite) OperationLog *operationLog;
 @end
 
 @implementation InstallationEngine
@@ -25,46 +23,38 @@
 + (instancetype)sharedEngine {
     static InstallationEngine *shared = nil;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        shared = [[self alloc] init];
-    });
+    dispatch_once(&once, ^{ shared = [[self alloc] init]; });
     return shared;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _operationLog = [[OperationLog alloc] init];
         _providers = [NSMutableArray array];
-        _currentStage = InstallationStageIdle;
         _installLock = [[NSLock alloc] init];
-        _isInstalling = NO;
-        // Only Direct Install — our standalone signature
-        [self registerProvider:[[DirectInstallationProvider alloc] init]];
+        _operationLog = [OperationLog sharedLog];
+        DirectInstallationProvider *direct = [[DirectInstallationProvider alloc] init];
+        [_providers addObject:direct];
     }
     return self;
 }
 
-- (void)registerProvider:(id<InstallationProvider>)provider {
-    if (!provider) return;
-    [_providers addObject:provider];
-    [_providers sortUsingComparator:^NSComparisonResult(id<InstallationProvider> a, id<InstallationProvider> b) {
-        return [@(b.priority) compare:@(a.priority)];
-    }];
-    NSLog(@"[IPAInstallerPro] Registered provider: %@ (priority=%ld)", [provider providerName], (long)provider.priority);
-}
-
 - (NSArray<id<InstallationProvider>> *)availableProviders {
-    NSMutableArray *available = [NSMutableArray array];
+    NSMutableArray *a = [NSMutableArray array];
     for (id<InstallationProvider> p in self.providers) {
-        if ([p isAvailable]) [available addObject:p];
+        if ([p isAvailable]) [a addObject:p];
     }
-    return available;
+    return a;
 }
 
 - (id<InstallationProvider>)bestProvider {
-    NSArray *available = [self availableProviders];
-    return available.firstObject;
+    NSArray *a = [self availableProviders];
+    if (a.count == 0) return nil;
+    id<InstallationProvider> best = a.firstObject;
+    for (id<InstallationProvider> p in a) {
+        if ([p priority] > [best priority]) best = p;
+    }
+    return best;
 }
 
 - (NSString *)currentProviderName {
@@ -76,52 +66,27 @@
     switch (stage) {
         case InstallationStageIdle: return @"Idle";
         case InstallationStagePreparing: return @"Preparing";
-        case InstallationStageValidating: return @"Validating IPA";
-        case InstallationStageInstalling: return @"Installing files";
-        case InstallationStageRegistering: return @"Registering with system";
+        case InstallationStageValidating: return @"Validating";
+        case InstallationStageInstalling: return @"Installing";
+        case InstallationStageRegistering: return @"Registering";
         case InstallationStageCompleted: return @"Completed";
         case InstallationStageFailed: return @"Failed";
         default: return @"Unknown";
     }
 }
 
-- (NSString *)activeTransactionID {
-    return self.activeTxnID;
-}
+- (NSString *)activeTransactionID { return self.activeTxnID; }
+- (NSString *)transactionReport:(NSString *)txnID { return [self.operationLog transactionReport:txnID]; }
+- (OperationLog *)operationLog { return _operationLog; }
 
 - (void)prepareTransactionWithID:(NSString *)txnID {
     self.activeTxnID = txnID;
-}
-
-- (NSString *)transactionReport:(NSString *)txnID {
-    if (!txnID) return @"";
-    NSArray *records = [self.operationLog recordsForTransaction:txnID];
-    NSMutableString *report = [NSMutableString string];
-    [report appendFormat:@"Transaction Report: %@\n", txnID];
-    [report appendFormat:@"Total records: %lu\n\n", (unsigned long)records.count];
-    for (NSDictionary *rec in records) {
-        NSString *phase = rec[@"phase"] ?: @"???";
-        NSString *op = rec[@"operation"] ?: @"???";
-        NSString *target = rec[@"target"] ?: @"???";
-        NSNumber *exitCode = rec[@"exitCode"] ?: @(-1);
-        NSNumber *verified = rec[@"verified"] ?: @NO;
-        NSString *status = [verified boolValue] ? @"✅" : @"❌";
-        [report appendFormat:@"%@ [%@] %@ — %@ (exit=%@)\n", status, phase, op, target, exitCode];
-        NSString *err = rec[@"rawError"];
-        if (err && err.length > 0) [report appendFormat:@"   ⚠️ %@\n", err];
-    }
-    return report;
-}
-
-- (OperationLog *)operationLog {
-    return _operationLog;
 }
 
 - (void)installIPA:(NSString *)ipaPath
      progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
         completion:(void (^)(InstallationResult *result))completion {
 
-    // Concurrent install protection
     [self.installLock lock];
     if (self.isInstalling) {
         [self.installLock unlock];
@@ -159,7 +124,6 @@
     self.currentStage = InstallationStageValidating;
     if (progressBlock) progressBlock(self.currentStage, @"Validating IPA...", 0.15);
 
-    // Always use DirectInstallationProvider (the only one)
     id<InstallationProvider> provider = available.firstObject;
     NSLog(@"[IPAInstallerPro] Using provider: %@", [provider providerName]);
 
@@ -182,6 +146,22 @@
             strongSelf.currentStage = InstallationStageCompleted;
             if (progressBlock) progressBlock(strongSelf.currentStage, @"Installation complete!", 1.0);
             NSLog(@"[IPAInstallerPro] Installation succeeded via %@", [provider providerName]);
+
+            // ─── RUNTIME DIAGNOSTICS ───
+            NSString *bundleID = result.bundleID;
+            if (bundleID && bundleID.length > 0) {
+                NSLog(@"[IPAInstallerPro] Starting RuntimeDiagnostics for %@", bundleID);
+                [[RuntimeDiagnostics sharedDiagnostics] diagnoseAppLaunch:bundleID
+                                                            transactionID:strongSelf.activeTxnID
+                                                             operationLog:strongSelf.operationLog
+                                                               completion:^(RuntimeDiagnosticsResult *runtimeResult) {
+                    NSLog(@"[IPAInstallerPro] RuntimeDiagnostics complete: %@", runtimeResult.state);
+                    NSLog(@"[IPAInstallerPro] %@", [runtimeResult detailedReport]);
+                }];
+            } else {
+                NSLog(@"[IPAInstallerPro] No bundleID in result, skipping RuntimeDiagnostics");
+            }
+
         } else {
             strongSelf.currentStage = InstallationStageFailed;
             if (progressBlock) progressBlock(strongSelf.currentStage, result ? result.message : @"Unknown error", 1.0);
