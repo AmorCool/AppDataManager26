@@ -260,12 +260,14 @@
         return;
     }
 
+    // Generate txnID HERE in VC, then pass to engine so OperationLog uses the SAME ID
+    self.currentTxnID = [[NSUUID UUID] UUIDString];
+    [engine prepareTransactionWithID:self.currentTxnID];
+
     [self appendLog:@"🚀 بدء عملية التثبيت..."];
+    [self appendLog:[NSString stringWithFormat:@"📋 Transaction ID: %@", self.currentTxnID]];
 
-    // Set txnID BEFORE starting install so notifications match
-    self.currentTxnID = [[InstallationEngine sharedEngine] activeTransactionID];
-
-    [[InstallationEngine sharedEngine] installIPA:self.ipaPath
+    [engine installIPA:self.ipaPath
      progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
         self.stageLabel.text = statusMessage;
         self.statusLabel.text = [[InstallationEngine sharedEngine] stageDescription:stage];
