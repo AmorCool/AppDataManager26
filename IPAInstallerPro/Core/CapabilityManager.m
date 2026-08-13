@@ -10,6 +10,9 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
+@implementation Capability
+@end
+
 @interface CapabilityManager ()
 @property (nonatomic, strong) NSMutableArray<Capability *> *capabilities;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, Capability *> *capabilityMap;
