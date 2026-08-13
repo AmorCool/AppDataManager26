@@ -250,7 +250,7 @@
 
 - (BOOL)launchAppWithBundleID:(NSString *)bundleID {
     @try {
-        Class LSClass = objc_getClass(@"LSApplicationWorkspace");
+        Class LSClass = objc_getClass([@"LSApplicationWorkspace" UTF8String]);
         if (!LSClass) return NO;
         id workspace = ((id (*)(Class, SEL))objc_msgSend)(LSClass, NSSelectorFromString(@"defaultWorkspace"));
         if (!workspace) return NO;
