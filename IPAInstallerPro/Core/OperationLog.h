@@ -38,35 +38,35 @@ typedef NS_ENUM(NSInteger, OperationPhase) {
 // Immutable fact. Every field represents something that actually happened.
 @interface OperationRecord : NSObject
 
-@property (nonatomic, strong, readonly) NSString *recordID;
-@property (nonatomic, strong, readonly) NSString *transactionID;
-@property (nonatomic, strong, readonly) NSDate *timestamp;
+@property (nonatomic, strong, readwrite) NSString *recordID;
+@property (nonatomic, strong, readwrite) NSString *transactionID;
+@property (nonatomic, strong, readwrite) NSDate *timestamp;
 
 // What
-@property (nonatomic, assign, readonly) OperationPhase phase;
-@property (nonatomic, strong, readonly) NSString *operation;
-@property (nonatomic, strong, readonly) NSString *target;
+@property (nonatomic, assign, readwrite) OperationPhase phase;
+@property (nonatomic, strong, readwrite) NSString *operation;
+@property (nonatomic, strong, readwrite) NSString *target;
 
 // Input
-@property (nonatomic, strong, readonly) NSString *input;
+@property (nonatomic, strong, readwrite) NSString *input;
 
 // Execution result
-@property (nonatomic, assign, readonly) int exitCode;
-@property (nonatomic, strong, readonly) NSString *rawOutput;
-@property (nonatomic, strong, readonly) NSString *rawError;
+@property (nonatomic, assign, readwrite) int exitCode;
+@property (nonatomic, strong, readwrite) NSString *rawOutput;
+@property (nonatomic, strong, readwrite) NSString *rawError;
 
 // Verification (the critical part)
-@property (nonatomic, strong, readonly) NSString *verification;  // What was checked
-@property (nonatomic, assign, readonly) BOOL verified;           // Did the check pass?
+@property (nonatomic, strong, readwrite) NSString *verification;  // What was checked
+@property (nonatomic, assign, readwrite) BOOL verified;           // Did the check pass?
 
 // Final result — derived from execution + verification
-@property (nonatomic, assign, readonly) OperationResult result;
+@property (nonatomic, assign, readwrite) OperationResult result;
 
 // Timing
-@property (nonatomic, assign, readonly) NSTimeInterval duration;
+@property (nonatomic, assign, readwrite) NSTimeInterval duration;
 
 // Extra context
-@property (nonatomic, strong, readonly) NSDictionary *context;
+@property (nonatomic, strong, readwrite) NSDictionary *context;
 
 - (NSString *)phaseName;
 - (NSString *)resultSymbol;
