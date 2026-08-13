@@ -1,24 +1,41 @@
-export TARGET = iphone:clang:latest:15.0
-export ARCHS = arm64 arm64e
+# AppDataManager + IPAInstallerPro — Root Makefile
+# Usage: make [all|appdatamanager|ipainstallerpro|repo|repo-dev|clean]
 
-THEOS_PACKAGE_SCHEME = rootless
-INSTALL_TARGET_PROCESSES = AppDataManager
+.PHONY: all appdatamanager ipainstallerpro repo repo-dev clean install test
 
-include $(THEOS)/makefiles/common.mk
+all: appdatamanager ipainstallerpro repo repo-dev
 
-APPLICATION_NAME = AppDataManager
+appdatamanager:
+	@echo "🔨 Building AppData Manager..."
+	$(MAKE) -C AppDataManager package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+	@mkdir -p repo/pool/main/iphoneos-arm64/
+	@cp AppDataManager/packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
 
-AppDataManager_FILES = main.m AppDelegate.m MainViewController.m AppDetailViewController.m BackupManagerViewController.m SettingsViewController.m AppDataManager.m
-AppDataManager_FRAMEWORKS = UIKit CoreGraphics
-AppDataManager_PRIVATE_FRAMEWORKS = MobileCoreServices
-AppDataManager_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable
-AppDataManager_CODESIGN_FLAGS = -Sentitlements.plist
+ipainstallerpro:
+	@echo "🔨 Building IPA Installer Pro..."
+	$(MAKE) -C IPAInstallerPro package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+	@mkdir -p repo-dev/pool/main/iphoneos-arm64/
+	@cp IPAInstallerPro/packages/*.deb repo-dev/pool/main/iphoneos-arm64/ 2>/dev/null || true
 
-include $(THEOS_MAKE_PATH)/application.mk
+repo:
+	@echo "📝 Generating production repo..."
+	@python3 scripts/generate-repo.py repo --prod
+	@python3 scripts/validate-repo.py repo
 
-# Dopamine 3.0 / Rootless specific
-after-install::
-	install.exec "uicache -p /var/jb/Applications/AppDataManager.app || uicache -p /Applications/AppDataManager.app || true"
+repo-dev:
+	@echo "📝 Generating dev repo..."
+	@python3 scripts/generate-repo.py repo-dev --dev
+	@python3 scripts/validate-repo.py repo-dev
 
-# Force dpkg-deb to use xz compression (lzma may not be supported on iOS dpkg)
-export THEOS_PLATFORM_DEB_COMPRESSION_TYPE = xz
+clean:
+	@echo "🧹 Cleaning..."
+	$(MAKE) -C AppDataManager clean 2>/dev/null || true
+	$(MAKE) -C IPAInstallerPro clean 2>/dev/null || true
+
+install:
+	@echo "📱 Installing latest packages to device..."
+	@./build.sh all
+
+test:
+	@echo "🧪 Running validation tests..."
+	@python3 scripts/validate-repo.py repo-dev
