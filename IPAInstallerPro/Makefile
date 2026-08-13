@@ -1,6 +1,3 @@
-# IPAInstallerPro Makefile
-# Version: 1.1.0
-
 TARGET := iphone:clang:latest:15.0
 ARCHS := arm64
 
@@ -8,7 +5,7 @@ include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = IPAInstallerPro
 
-IPAInstallerPro_FILES =     AppDelegate.m     MainViewController.m     IPAFileBrowserViewController.m     IPAInstallViewController.m     InstallationProgressViewController.m     SettingsViewController.m     Core/DirectInstallationProvider.m     Core/SystemInstallationProvider.m     Core/AppInstInstallationProvider.m     Core/InstallationEngine.m     Core/IPAValidator.m     Core/IPAExtractor.m     Core/CapabilityManager.m     Core/RootlessManager.m     Core/CrashReporter.m     Core/DiagnosticPipeline.m     Core/ProcessMonitor.m     Core/LogCollector.m     Core/TransactionLogger.m     Core/LiveInstallationLogger.m
+IPAInstallerPro_FILES =     AppDelegate.m     MainViewController.m     IPAFileBrowserViewController.m     IPAInstallViewController.m     InstallationProgressViewController.m     SettingsViewController.m     Core/DirectInstallationProvider.m     Core/SystemInstallationProvider.m     Core/AppInstInstallationProvider.m     Core/InstallationEngine.m     Core/InstallationProvider.m     Core/IPAValidator.m     Core/IPAExtractor.m     Core/CapabilityManager.m     Core/RootlessManager.m     Core/CrashReporter.m     Core/DiagnosticPipeline.m     Core/ProcessMonitor.m     Core/LogCollector.m     Core/TransactionLogger.m     Core/OperationLog.m     Core/InstallationLogger.m     Core/Logger.m
 
 IPAInstallerPro_FRAMEWORKS = UIKit Foundation
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
@@ -17,7 +14,6 @@ IPAInstallerPro_CODESIGN_FLAGS = -Sentitlements.plist
 
 include $(THEOS_MAKE_PATH)/application.mk
 
-# Helper binary
 TOOL_NAME = ipainstallerpro_helper
 
 ipainstallerpro_helper_FILES = helper.c
