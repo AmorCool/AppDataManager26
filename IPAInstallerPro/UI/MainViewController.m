@@ -1,5 +1,4 @@
 #import "MainViewController.h"
-#import "CrashReporterViewController.h"
 #import "IPAFileBrowserViewController.h"
 #import "IPAInstallViewController.h"
 #import "Core/IPAExtractor.h"
@@ -335,14 +334,6 @@
     deleteAction.backgroundColor = [UIColor colorWithRed:0.8 green:0.25 blue:0.2 alpha:1.0];
 
     return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction]];
-}
-
-
-- (void)openCrashReporter:(id)sender {
-    CrashReporterViewController *vc = [[CrashReporterViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFormSheet;
-    [self presentViewController:nav animated:YES completion:nil];
 }
 
 @end
