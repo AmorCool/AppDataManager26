@@ -13,7 +13,6 @@
 #import <UIKit/UIKit.h>
 
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource>
-@property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray *sections;
 @property (nonatomic, strong) CapabilityManager *capManager;
 @end
@@ -44,13 +43,13 @@
             @"items": @[
                 @{@"title": @"الإصدار", @"detail": @"2.0.0", @"icon": @"info.circle.fill", @"color": @[@(0.35), @(0.65), @(0.95)]},
                 @{@"title": @"الإصدار المتوافق", @"detail": @"iOS 15.0+", @"icon": @"iphone", @"color": @[@(0.35), @(0.65), @(0.95)]},
-                @{@"title": @"نوع الجيلبريك", @"detail": [self.capManager isRootless] ? @"Rootless" : @"Rootful", @"icon": @"lock.shield.fill", @"color": @[@(0.35), @(0.65), @(0.95)]}
+                @{@"title": @"نوع الجيلبريك", @"detail": [self.capManager isRootHelperAvailable] ? @"Rootless" : @"Rootful", @"icon": @"lock.shield.fill", @"color": @[@(0.35), @(0.65), @(0.95)]}
             ]
         },
         @{
             @"title": @"البيئة",
             @"items": @[
-                @{@"title": @"Dopamine 3.0", @"detail": [self.capManager isDopamine3] ? @"✅ متوفر" : @"❌ غير متوفر", @"icon": @"bolt.fill", @"color": @[@(0.9), @(0.6), @(0.2)]},
+                @{@"title": @"Dopamine 3.0", @"detail": NO ? @"✅ متوفر" : @"❌ غير متوفر", @"icon": @"bolt.fill", @"color": @[@(0.9), @(0.6), @(0.2)]},
                 @{@"title": @"Root Helper", @"detail": [self.capManager hasRootHelper] ? @"✅ متوفر" : @"⚠️ غير متوفر", @"icon": @"person.badge.key.fill", @"color": @[@(0.9), @(0.6), @(0.2)]},
                 @{@"title": @"ldid", @"detail": [self.capManager hasLDID] ? @"✅ متوفر" : @"❌ غير متوفر", @"icon": @"signature", @"color": @[@(0.9), @(0.6), @(0.2)]},
                 @{@"title": @"uicache", @"detail": [self.capManager hasUICache] ? @"✅ متوفر" : @"❌ غير متوفر", @"icon": @"arrow.clockwise.circle.fill", @"color": @[@(0.9), @(0.6), @(0.2)]},
@@ -113,13 +112,13 @@
     CapabilityManager *cm = [CapabilityManager sharedManager];
     NSMutableString *report = [NSMutableString string];
     [report appendString:@"📊 تقرير البيئة\n\n"];
-    [report appendFormat:@"Dopamine 3.0: %@\n", [cm isDopamine3] ? @"✅" : @"❌"];
-    [report appendFormat:@"Root Helper: %@\n", [cm hasRootHelper] ? @"✅" : @"⚠️"];
-    [report appendFormat:@"ldid: %@\n", [cm hasLDID] ? @"✅" : @"❌"];
-    [report appendFormat:@"uicache: %@\n", [cm hasUICache] ? @"✅" : @"❌"];
-    [report appendFormat:@"unzip: %@\n", [cm hasUnzip] ? @"✅" : @"❌"];
-    [report appendFormat:@"AppSync: %@\n", [cm hasAppSync] ? @"✅" : @"⚠️"];
-    [report appendFormat:@"appinst: %@\n", [cm hasAppInst] ? @"✅" : @"⚠️"];
+    [report appendFormat:@"Dopamine 3.0: %@\n", NO ? @"✅" : @"❌"];
+    [report appendFormat:@"Root Helper: %@\n", [cm isRootHelperAvailable] ? @"✅" : @"⚠️"];
+    [report appendFormat:@"ldid: %@\n", [cm isLDIDAvailable] ? @"✅" : @"❌"];
+    [report appendFormat:@"uicache: %@\n", [cm isUICacheAvailable] ? @"✅" : @"❌"];
+    [report appendFormat:@"unzip: %@\n", [cm isUnzipAvailable] ? @"✅" : @"❌"];
+    [report appendFormat:@"AppSync: %@\n", [cm isAppSyncAvailable] ? @"✅" : @"⚠️"];
+    [report appendFormat:@"appinst: %@\n", [cm isAppInstAvailable] ? @"✅" : @"⚠️"];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"التحقق من البيئة" message:report preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"موافق" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
