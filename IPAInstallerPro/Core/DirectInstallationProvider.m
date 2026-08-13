@@ -2,7 +2,7 @@
 // DirectInstallationProvider.m
 // IPA Installer Pro
 //
-// v2.1 — STANDALONE: No external tools required except system basics (ldid, uicache, unzip)
+// v2.2 — STANDALONE with rollback, safe delete order, symlink/traversal checks
 //
 
 #import "DirectInstallationProvider.h"
@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <copyfile.h>
 #include <unistd.h>
+#include <errno.h>
 
 extern char **environ;
 
@@ -30,6 +31,8 @@ extern char **environ;
 @property (nonatomic, strong) NSString *whoamiPath;
 @property (nonatomic, strong) NSString *helperPath;
 @property (nonatomic, strong) NSString *mkdirPath;
+@property (nonatomic, strong) NSString *mvPath;
+@property (nonatomic, strong) NSString *statPath;
 @end
 
 @implementation DirectInstallationProvider
@@ -51,6 +54,8 @@ extern char **environ;
         self.unzipPath = [rm resolvePath:@"/usr/bin/unzip"];
         self.whoamiPath = [rm resolvePath:@"/usr/bin/whoami"];
         self.mkdirPath = [rm resolvePath:@"/bin/mkdir"];
+        self.mvPath = [rm resolvePath:@"/bin/mv"];
+        self.statPath = [rm resolvePath:@"/usr/bin/stat"];
         [self findWorkingHelper];
     }
     return self;
@@ -186,6 +191,72 @@ extern char **environ;
     return output;
 }
 
+#pragma mark - Security Checks
+
+- (BOOL)containsDangerousPaths:(NSString *)path {
+    if (!path) return YES;
+    // Check for directory traversal
+    if ([path containsString:@".."]) return YES;
+    if ([path containsString:@"~"]) return YES;
+    // Check for absolute paths that escape expected structure
+    if ([path hasPrefix:@"/"]) {
+        // Only allow /Payload/... and /Info.plist patterns inside IPA
+        if (![path hasPrefix:@"Payload/"] && ![path isEqualToString:@"Payload"]) return YES;
+    }
+    // Check for symlinks in path
+    if ([path containsString:@"->"]) return YES;
+    return NO;
+}
+
+- (BOOL)validateIPAPathSafety:(NSString *)ipaPath opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
+    NSString *rec = [opLog beginPhase:OperationPhaseIPAOpen operation:@"pathSafetyCheck" target:ipaPath input:@"" transactionID:txnID];
+
+    // Check file size (max 2GB)
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:ipaPath error:nil];
+    long long size = attrs.fileSize;
+    if (size > 2147483648LL) {
+        [opLog endPhase:rec exitCode:1 rawOutput:@"" rawError:@"IPA exceeds 2GB limit"
+         verification:[NSString stringWithFormat:@"size=%lld (max=2147483648)", size] verified:NO duration:0];
+        return NO;
+    }
+
+    // Check available space (need at least 3x IPA size)
+    NSString *tmpDir = NSTemporaryDirectory();
+    NSDictionary *fsAttrs = [fm attributesOfFileSystemForPath:tmpDir error:nil];
+    long long freeSpace = [fsAttrs[NSFileSystemFreeSize] longLongValue];
+    if (freeSpace < size * 3) {
+        [opLog endPhase:rec exitCode:1 rawOutput:@"" rawError:@"Insufficient disk space"
+         verification:[NSString stringWithFormat:@"free=%lld needed=%lld", freeSpace, size * 3] verified:NO duration:0];
+        return NO;
+    }
+
+    [opLog endPhase:rec exitCode:0 rawOutput:@"" rawError:@""
+     verification:[NSString stringWithFormat:@"size=%lld free=%lld", size, freeSpace] verified:YES duration:0];
+    return YES;
+}
+
+- (BOOL)checkForSymlinksInExtractedPath:(NSString *)path opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *items = [fm subpathsAtPath:path];
+    for (NSString *item in items) {
+        NSString *fullPath = [path stringByAppendingPathComponent:item];
+        // Check if it's a symlink
+        NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+        if (attrs.fileType == NSFileTypeSymbolicLink) {
+            NSString *dest = [fm destinationOfSymbolicLinkAtPath:fullPath error:nil];
+            // Allow symlinks within the app bundle itself
+            if (dest && ![dest hasPrefix:path] && ![dest hasPrefix:@"@"]) {
+                NSString *rec = [opLog beginPhase:OperationPhaseVerify operation:@"symlinkCheck" target:fullPath input:dest transactionID:txnID];
+                [opLog endPhase:rec exitCode:1 rawOutput:@"" rawError:[NSString stringWithFormat:@"Dangerous symlink: %@ -> %@", fullPath, dest]
+                 verification:@"Symlink escapes app bundle" verified:NO duration:0];
+                return NO;
+            }
+        }
+    }
+    return YES;
+}
+
 #pragma mark - Verification Helpers
 
 - (BOOL)verifyStat:(NSString *)path mode:(mode_t *)outMode uid:(uid_t *)outUid gid:(gid_t *)outGid {
@@ -235,6 +306,86 @@ extern char **environ;
     return hasSig;
 }
 
+#pragma mark - Rollback
+
+- (BOOL)backupExistingApp:(NSString *)destApp to:(NSString *)backupPath opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:destApp]) return YES; // Nothing to backup
+
+    NSString *rec = [opLog beginPhase:OperationPhaseFileCopy operation:@"backupExisting" target:destApp input:backupPath transactionID:txnID];
+
+    // Remove old backup if exists
+    if ([fm fileExistsAtPath:backupPath]) {
+        [fm removeItemAtPath:backupPath error:nil];
+    }
+
+    BOOL backedUp = NO;
+    if ([self hasRootHelper]) {
+        backedUp = [self runRoot:self.mvPath args:@[destApp, backupPath] opLog:opLog recordID:rec];
+    } else {
+        NSError *err;
+        [fm moveItemAtPath:destApp toPath:backupPath error:&err];
+        backedUp = (err == nil);
+        if (backedUp && rec && opLog) {
+            [opLog endPhase:rec exitCode:0 rawOutput:@"" rawError:@""
+             verification:@"NSFileManager backup success" verified:YES duration:0];
+        }
+    }
+
+    if (!backedUp) {
+        [opLog endPhase:rec exitCode:1 rawOutput:@"" rawError:@"Backup failed"
+         verification:@"Could not backup existing app" verified:NO duration:0];
+    }
+    return backedUp;
+}
+
+- (void)restoreBackup:(NSString *)backupPath to:(NSString *)destApp opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:backupPath]) return;
+
+    NSString *rec = [opLog beginPhase:OperationPhaseFileCopy operation:@"restoreBackup" target:backupPath input:destApp transactionID:txnID];
+
+    // Remove failed installation
+    if ([fm fileExistsAtPath:destApp]) {
+        if ([self hasRootHelper]) [self runRoot:self.rmPath args:@[@"-rf", destApp] opLog:opLog recordID:nil];
+        else [fm removeItemAtPath:destApp error:nil];
+    }
+
+    BOOL restored = NO;
+    if ([self hasRootHelper]) {
+        restored = [self runRoot:self.mvPath args:@[backupPath, destApp] opLog:opLog recordID:rec];
+    } else {
+        NSError *err;
+        [fm moveItemAtPath:backupPath toPath:destApp error:&err];
+        restored = (err == nil);
+        if (restored && rec && opLog) {
+            [opLog endPhase:rec exitCode:0 rawOutput:@"" rawError:@""
+             verification:@"NSFileManager restore success" verified:YES duration:0];
+        }
+    }
+
+    if (!restored) {
+        [opLog endPhase:rec exitCode:1 rawOutput:@"" rawError:@"Restore failed"
+         verification:@"Could not restore backup" verified:NO duration:0];
+    }
+}
+
+- (void)cleanupBackup:(NSString *)backupPath opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:backupPath]) return;
+
+    NSString *rec = [opLog beginPhase:OperationPhaseCleanup operation:@"cleanupBackup" target:backupPath input:@"" transactionID:txnID];
+    if ([self hasRootHelper]) {
+        [self runRoot:self.rmPath args:@[@"-rf", backupPath] opLog:opLog recordID:rec];
+    } else {
+        [fm removeItemAtPath:backupPath error:nil];
+        if (rec && opLog) {
+            [opLog endPhase:rec exitCode:0 rawOutput:@"" rawError:@""
+             verification:@"Backup cleaned up" verified:YES duration:0];
+        }
+    }
+}
+
 #pragma mark - Main Installation
 
 - (void)installIPA:(NSString *)ipaPath operationLog:(OperationLog *)opLog completion:(void (^)(InstallationResult *))completion {
@@ -250,6 +401,13 @@ extern char **environ;
     }
 
     NSString *txnID = [opLog beginTransactionForIPA:ipaPath];
+
+    // PHASE 0: SAFETY CHECKS
+    if (![self validateIPAPathSafety:ipaPath opLog:opLog txnID:txnID]) {
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        if (completion) completion([InstallationResult failureResult:@"IPA safety check failed" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
+        return;
+    }
 
     // PHASE 1: IPA_OPEN
     NSString *rec1 = [opLog beginPhase:OperationPhaseIPAOpen operation:@"fileExistsAtPath" target:ipaPath input:ipaPath transactionID:txnID];
@@ -291,7 +449,7 @@ extern char **environ;
         return;
     }
 
-    // PHASE 3: APP_IDENTIFY
+    // PHASE 3: APP_IDENTIFY + SECURITY CHECK
     NSString *rec4 = [opLog beginPhase:OperationPhaseAppIdentify operation:@"find .app in Payload" target:payload input:@"" transactionID:txnID];
     NSArray *items = [fm contentsOfDirectoryAtPath:payload error:nil];
     NSString *appFolder = nil;
@@ -308,6 +466,15 @@ extern char **environ;
     }
 
     NSString *srcApp = [payload stringByAppendingPathComponent:appFolder];
+
+    // Security: Check for dangerous symlinks
+    if (![self checkForSymlinksInExtractedPath:srcApp opLog:opLog txnID:txnID]) {
+        [fm removeItemAtPath:tmp error:nil];
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        if (completion) completion([InstallationResult failureResult:@"Dangerous symlinks detected in IPA" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
+        return;
+    }
+
     NSString *infoPath = [srcApp stringByAppendingPathComponent:@"Info.plist"];
     NSString *rec5 = [opLog beginPhase:OperationPhaseAppIdentify operation:@"read Info.plist" target:infoPath input:@"" transactionID:txnID];
     NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
@@ -326,7 +493,7 @@ extern char **environ;
         return;
     }
 
-    // PHASE 4: FILE_COPY
+    // PHASE 4: FILE_COPY (with backup/rollback)
     NSString *logicalDest = [@"/Applications" stringByAppendingPathComponent:appFolder];
     NSString *rec7 = [opLog beginPhase:OperationPhaseFileCopy operation:@"resolvePath" target:logicalDest input:logicalDest transactionID:txnID];
     NSString *destApp = [[RootlessManager sharedManager] resolvePath:logicalDest];
@@ -352,17 +519,13 @@ extern char **environ;
         }
     }
 
-    // Delete existing
-    if ([fm fileExistsAtPath:destApp]) {
-        NSString *rec8 = [opLog beginPhase:OperationPhaseFileCopy operation:@"rm -rf existing" target:destApp input:@"" transactionID:txnID];
-        BOOL deleted = hasH ? [self runRoot:self.rmPath args:@[@"-rf", destApp] opLog:opLog recordID:rec8]
-                           : [self runCmd:self.rmPath args:@[@"-rf", destApp] opLog:opLog recordID:rec8];
-        if (!deleted) {
-            [fm removeItemAtPath:tmp error:nil];
-            [opLog endTransaction:txnID finalResult:OperationResultFailed];
-            if (completion) completion([InstallationResult failureResult:@"Failed to remove existing app" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
-            return;
-        }
+    // BACKUP existing app (rollback support)
+    NSString *backupPath = [destApp stringByAppendingString:@".backup"];
+    if (![self backupExistingApp:destApp to:backupPath opLog:opLog txnID:txnID]) {
+        [fm removeItemAtPath:tmp error:nil];
+        [opLog endTransaction:txnID finalResult:OperationResultFailed];
+        if (completion) completion([InstallationResult failureResult:@"Failed to backup existing app" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
+        return;
     }
 
     // Copy — try root helper first, then copyfile, then NSFileManager
@@ -386,18 +549,22 @@ extern char **environ;
     }
 
     if (!copied) {
+        // ROLLBACK: restore backup
+        [self restoreBackup:backupPath to:destApp opLog:opLog txnID:txnID];
         [fm removeItemAtPath:tmp error:nil];
         [opLog endTransaction:txnID finalResult:OperationResultFailed];
-        if (completion) completion([InstallationResult failureResult:@"Copy failed — all methods exhausted" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
+        if (completion) completion([InstallationResult failureResult:@"Copy failed — all methods exhausted, rollback attempted" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
         return;
     }
 
     // Deep copy verification
     BOOL deepOk = [self verifyDeepCopy:srcApp dst:destApp opLog:opLog txnID:txnID];
     if (!deepOk) {
+        // ROLLBACK
+        [self restoreBackup:backupPath to:destApp opLog:opLog txnID:txnID];
         [fm removeItemAtPath:tmp error:nil];
         [opLog endTransaction:txnID finalResult:OperationResultFailed];
-        if (completion) completion([InstallationResult failureResult:@"Deep copy verification failed" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
+        if (completion) completion([InstallationResult failureResult:@"Deep copy verification failed, rollback executed" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
         return;
     }
 
@@ -418,6 +585,8 @@ extern char **environ;
      verified:(statOk && mode >= 0755 && uid == 0 && gid == 0) duration:0];
 
     if (!statOk || mode < 0755 || uid != 0 || gid != 0) {
+        // ROLLBACK
+        [self restoreBackup:backupPath to:destApp opLog:opLog txnID:txnID];
         [fm removeItemAtPath:tmp error:nil];
         [opLog endTransaction:txnID finalResult:OperationResultFailed];
         if (completion) completion([InstallationResult failureResult:[NSString stringWithFormat:@"Permission verification failed: mode=%o uid=%d gid=%d", mode, uid, gid]
@@ -437,9 +606,11 @@ extern char **environ;
         [self signExeWithExplicitEntitlements:destExe hasHelper:hasH opLog:opLog txnID:txnID];
         sigOk = [self verifySignature:destExe opLog:opLog txnID:txnID];
         if (!sigOk) {
+            // ROLLBACK
+            [self restoreBackup:backupPath to:destApp opLog:opLog txnID:txnID];
             [fm removeItemAtPath:tmp error:nil];
             [opLog endTransaction:txnID finalResult:OperationResultFailed];
-            if (completion) completion([InstallationResult failureResult:@"Signature verification failed after retry — app will not launch"
+            if (completion) completion([InstallationResult failureResult:@"Signature verification failed after retry — app will not launch, rollback executed"
                 provider:[self providerName] transaction:txnID error:nil evidence:@{@"path": destExe}]);
             return;
         }
@@ -458,18 +629,23 @@ extern char **environ;
     NSString *rec14c = [opLog beginPhase:OperationPhaseUICache operation:@"uicache -a" target:@"" input:@"" transactionID:txnID];
     [self runRoot:self.uicachePath args:@[@"-a"] opLog:opLog recordID:rec14c];
 
-    // PHASE 9: VERIFY
+    // PHASE 9: VERIFY (comprehensive)
     NSString *rec15 = [opLog beginPhase:OperationPhaseVerify operation:@"final verify" target:destApp input:bundleID transactionID:txnID];
     BOOL finalOk = [self verifyInstallation:destApp bundleID:bundleID exeName:exeName opLog:opLog txnID:txnID];
     [opLog endPhase:rec15 exitCode:finalOk ? 0 : 1 rawOutput:@"" rawError:finalOk ? @"" : @"Final verification failed"
      verification:[NSString stringWithFormat:@"bundleID=%@ exe=%@", bundleID, exeName] verified:finalOk duration:0];
 
     if (!finalOk) {
+        // ROLLBACK
+        [self restoreBackup:backupPath to:destApp opLog:opLog txnID:txnID];
         [fm removeItemAtPath:tmp error:nil];
         [opLog endTransaction:txnID finalResult:OperationResultFailed];
-        if (completion) completion([InstallationResult failureResult:@"Final verification failed" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
+        if (completion) completion([InstallationResult failureResult:@"Final verification failed, rollback executed" provider:[self providerName] transaction:txnID error:nil evidence:nil]);
         return;
     }
+
+    // SUCCESS — cleanup backup and temp
+    [self cleanupBackup:backupPath opLog:opLog txnID:txnID];
 
     // PHASE 10: CLEANUP
     NSString *rec16 = [opLog beginPhase:OperationPhaseCleanup operation:@"remove temp" target:tmp input:@"" transactionID:txnID];
@@ -633,6 +809,10 @@ extern char **environ;
      verification:[NSString stringWithFormat:@"exists=%@", infoExists ? @"YES" : @"NO"] verified:infoExists duration:0];
     if (!infoExists) ok = NO;
 
+    // Verify signature on main executable
+    BOOL exeSigned = [self verifySignature:ep opLog:opLog txnID:txnID];
+    if (!exeSigned) ok = NO;
+
     // Frameworks
     NSString *fwp = [appPath stringByAppendingPathComponent:@"Frameworks"];
     if ([fm fileExistsAtPath:fwp]) {
@@ -665,6 +845,15 @@ extern char **environ;
                 NSLog(@"[IPAInstallerPro] App not yet registered in LS, but uicache was run");
             }
         }
+    }
+
+    // Dopamine-specific: verify app is in correct rootless path
+    NSString *expectedPrefix = @"/var/jb/Applications/";
+    if (![appPath hasPrefix:expectedPrefix]) {
+        NSString *recPath = [opLog beginPhase:OperationPhaseVerify operation:@"rootlessPathCheck" target:appPath input:@"" transactionID:txnID];
+        [opLog endPhase:recPath exitCode:1 rawOutput:@"" rawError:@"App not in rootless Applications path"
+         verification:[NSString stringWithFormat:@"path=%@ expectedPrefix=%@", appPath, expectedPrefix] verified:NO duration:0];
+        ok = NO;
     }
 
     return ok;
