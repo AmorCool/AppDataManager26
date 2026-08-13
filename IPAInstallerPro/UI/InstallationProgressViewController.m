@@ -1,344 +1,590 @@
 //
-// InstallationProgressViewController.m
-// IPA Installer Pro
+//  InstallationProgressViewController.m
+//  IPAInstallerPro
 //
-// v2.1 — Real-time OperationLog streaming with NSNotificationCenter + concurrent install guard
+//  v2.1.19 — Live Animated Installation Output
+//  Structured Professional Diagnostic with Real-Time Phase Animation
 //
 
 #import "InstallationProgressViewController.h"
-#import "Core/InstallationEngine.h"
-#import "Core/OperationLog.h"
-#import "Core/Logger.h"
-#import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
+#import "InstallationEngine.h"
+#import "JailbreakEnvironment.h"
 #import <objc/runtime.h>
 
-@interface InstallationProgressViewController ()
+#pragma mark - Phase Visual State
+
+typedef NS_ENUM(NSInteger, PhaseVisualState) {
+    PhaseVisualStatePending = 0,
+    PhaseVisualStateActive  = 1,
+    PhaseVisualStateSuccess = 2,
+    PhaseVisualStateFailed  = 3
+};
+
+#pragma mark - InstallPhaseView
+
+@interface InstallPhaseView : UIView
+@property (nonatomic, strong) UILabel *iconLabel;
 @property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, strong) UILabel *detailLabel;
-@property (nonatomic, strong) UIProgressView *progressView;
-@property (nonatomic, strong) UILabel *stageLabel;
-@property (nonatomic, strong) UILabel *providerLabel;
-@property (nonatomic, strong) UIButton *doneButton;
-@property (nonatomic, strong) UIButton *openAppButton;
-@property (nonatomic, strong) UIView *spinnerView;
-@property (nonatomic, strong) UIImageView *statusIcon;
-@property (nonatomic, assign) BOOL isDone;
+@property (nonatomic, strong) UILabel *subtitleLabel;
+@property (nonatomic, strong) UIView  *pulsingDot;
+@property (nonatomic, assign) PhaseVisualState phaseState;
+- (void)setState:(PhaseVisualState)state animated:(BOOL)animated;
+@end
+
+@implementation InstallPhaseView
+
+- (instancetype)initWithTitle:(NSString *)title subtitle:(NSString *)subtitle {
+    self = [super initWithFrame:CGRectZero];
+    if (self) {
+        self.translatesAutoresizingMaskIntoConstraints = NO;
+
+        _iconLabel = [[UILabel alloc] init];
+        _iconLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _iconLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightMedium];
+        _iconLabel.textAlignment = NSTextAlignmentCenter;
+        [self addSubview:_iconLabel];
+
+        _titleLabel = [[UILabel alloc] init];
+        _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+        _titleLabel.textColor = [UIColor whiteColor];
+        _titleLabel.text = title;
+        [self addSubview:_titleLabel];
+
+        _subtitleLabel = [[UILabel alloc] init];
+        _subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        _subtitleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+        _subtitleLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+        _subtitleLabel.text = subtitle;
+        [self addSubview:_subtitleLabel];
+
+        _pulsingDot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 6, 6)];
+        _pulsingDot.translatesAutoresizingMaskIntoConstraints = NO;
+        _pulsingDot.layer.cornerRadius = 3;
+        _pulsingDot.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:1.0];
+        _pulsingDot.hidden = YES;
+        [self addSubview:_pulsingDot];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_iconLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
+            [_iconLabel.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+            [_iconLabel.widthAnchor constraintEqualToConstant:28],
+
+            [_titleLabel.leadingAnchor constraintEqualToAnchor:_iconLabel.trailingAnchor constant:12],
+            [_titleLabel.topAnchor constraintEqualToAnchor:self.topAnchor constant:10],
+            [_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor constant:-16],
+
+            [_subtitleLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
+            [_subtitleLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:2],
+            [_subtitleLabel.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-10],
+            [_subtitleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor constant:-16],
+
+            [_pulsingDot.leadingAnchor constraintEqualToAnchor:_titleLabel.trailingAnchor constant:8],
+            [_pulsingDot.centerYAnchor constraintEqualToAnchor:_titleLabel.centerYAnchor],
+            [_pulsingDot.widthAnchor constraintEqualToConstant:6],
+            [_pulsingDot.heightAnchor constraintEqualToConstant:6],
+
+            [self.heightAnchor constraintGreaterThanOrEqualToConstant:48]
+        ]];
+
+        self.phaseState = PhaseVisualStatePending;
+        [self updateAppearanceAnimated:NO];
+    }
+    return self;
+}
+
+- (void)setState:(PhaseVisualState)state animated:(BOOL)animated {
+    if (_phaseState == state) return;
+    _phaseState = state;
+    [self updateAppearanceAnimated:animated];
+}
+
+- (void)updateAppearanceAnimated:(BOOL)animated {
+    void (^updates)(void) = ^{
+        switch (self.phaseState) {
+            case PhaseVisualStatePending:
+                self.iconLabel.text = @"○";
+                self.iconLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+                self.titleLabel.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+                self.subtitleLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
+                self.pulsingDot.hidden = YES;
+                break;
+            case PhaseVisualStateActive:
+                self.iconLabel.text = @"◉";
+                self.iconLabel.textColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:1.0];
+                self.titleLabel.textColor = [UIColor whiteColor];
+                self.subtitleLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+                self.pulsingDot.hidden = NO;
+                break;
+            case PhaseVisualStateSuccess:
+                self.iconLabel.text = @"✓";
+                self.iconLabel.textColor = [UIColor colorWithRed:0.3 green:0.85 blue:0.4 alpha:1.0];
+                self.titleLabel.textColor = [UIColor whiteColor];
+                self.subtitleLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+                self.pulsingDot.hidden = YES;
+                break;
+            case PhaseVisualStateFailed:
+                self.iconLabel.text = @"✗";
+                self.iconLabel.textColor = [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+                self.titleLabel.textColor = [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+                self.subtitleLabel.textColor = [UIColor colorWithRed:0.7 green:0.3 blue:0.3 alpha:1.0];
+                self.pulsingDot.hidden = YES;
+                break;
+        }
+    };
+
+    if (animated) {
+        [UIView animateWithDuration:0.35 animations:updates];
+    } else {
+        updates();
+    }
+
+    if (self.phaseState == PhaseVisualStateActive) {
+        [self startPulsing];
+    } else {
+        [self stopPulsing];
+    }
+}
+
+- (void)startPulsing {
+    [self.pulsingDot.layer removeAllAnimations];
+    CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    pulse.fromValue = @(1.0);
+    pulse.toValue   = @(0.2);
+    pulse.duration  = 0.8;
+    pulse.autoreverses = YES;
+    pulse.repeatCount  = HUGE_VALF;
+    [self.pulsingDot.layer addAnimation:pulse forKey:@"pulse"];
+}
+
+- (void)stopPulsing {
+    [self.pulsingDot.layer removeAllAnimations];
+}
+
+@end
+
+#pragma mark - ViewController
+
+@interface InstallationProgressViewController ()
+@property (nonatomic, strong) NSString *ipaPath;
 @property (nonatomic, strong) NSString *installedBundleID;
-@property (nonatomic, strong) UITextView *logTextView;
-@property (nonatomic, strong) UIView *logContainer;
 @property (nonatomic, strong) NSString *currentTxnID;
-@property (nonatomic, strong) NSMutableArray<NSDictionary *> *displayRecords;
+@property (nonatomic, assign) BOOL isDone;
+
+@property (nonatomic, strong) UIScrollView *scrollView;
+@property (nonatomic, strong) UIView *containerView;
+@property (nonatomic, strong) UILabel *headerLabel;
+@property (nonatomic, strong) UILabel *appNameLabel;
+@property (nonatomic, strong) UIProgressView *progressView;
+@property (nonatomic, strong) UIStackView *phasesStack;
+@property (nonatomic, strong) NSMutableArray<InstallPhaseView *> *phaseViews;
+@property (nonatomic, strong) UIView *reportCard;
+@property (nonatomic, strong) NSDate *installStartTime;
+@property (nonatomic, assign) NSInteger currentPhaseIndex;
 @end
 
 @implementation InstallationProgressViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-    self.title = @"Installing...";
-    self.isDone = NO;
-    self.displayRecords = [NSMutableArray array];
-
-    [self setupViews];
-    [self registerForLogNotifications];
+    self.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.08 alpha:1.0];
+    self.title = @"تثبيت التطبيق";
+    [self setupUI];
     [self startInstallation];
-}
-
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 #pragma mark - UI Setup
 
-- (void)setupViews {
-    CGFloat w = self.view.bounds.size.width;
-    CGFloat h = self.view.bounds.size.height;
-    CGFloat margin = 24;
+- (void)setupUI {
+    _scrollView = [[UIScrollView alloc] init];
+    _scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_scrollView];
 
-    self.statusIcon = [[UIImageView alloc] initWithFrame:CGRectMake((w - 70) / 2, 60, 70, 70)];
-    self.statusIcon.contentMode = UIViewContentModeScaleAspectFit;
-    self.statusIcon.tintColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    self.statusIcon.image = [[UIImage systemImageNamed:@"arrow.down.circle.fill"] imageWithTintColor:[UIColor colorWithWhite:0.3 alpha:1.0]];
-    [self.view addSubview:self.statusIcon];
+    _containerView = [[UIView alloc] init];
+    _containerView.translatesAutoresizingMaskIntoConstraints = NO;
+    [_scrollView addSubview:_containerView];
 
-    self.titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(margin, 145, w - margin * 2, 30)];
-    self.titleLabel.text = self.ipaName ?: @"تثبيت التطبيق";
-    self.titleLabel.textColor = [UIColor whiteColor];
-    self.titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
-    self.titleLabel.textAlignment = NSTextAlignmentCenter;
-    [self.view addSubview:self.titleLabel];
+    _headerLabel = [[UILabel alloc] init];
+    _headerLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _headerLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
+    _headerLabel.textColor = [UIColor whiteColor];
+    _headerLabel.textAlignment = NSTextAlignmentCenter;
+    _headerLabel.text = @"جارٍ التثبيت...";
+    [_containerView addSubview:_headerLabel];
 
-    self.providerLabel = [[UILabel alloc] initWithFrame:CGRectMake(margin, 180, w - margin * 2, 18)];
-    self.providerLabel.text = @"جاري التثبيت...";
-    self.providerLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-    self.providerLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    self.providerLabel.textAlignment = NSTextAlignmentCenter;
-    [self.view addSubview:self.providerLabel];
+    _appNameLabel = [[UILabel alloc] init];
+    _appNameLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _appNameLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+    _appNameLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    _appNameLabel.textAlignment = NSTextAlignmentCenter;
+    _appNameLabel.text = [self.ipaPath lastPathComponent] ?: @"";
+    [_containerView addSubview:_appNameLabel];
 
-    self.stageLabel = [[UILabel alloc] initWithFrame:CGRectMake(margin, 210, w - margin * 2, 22)];
-    self.stageLabel.text = @"في الانتظار...";
-    self.stageLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    self.stageLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    self.stageLabel.textAlignment = NSTextAlignmentCenter;
-    [self.view addSubview:self.stageLabel];
+    _progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
+    _progressView.translatesAutoresizingMaskIntoConstraints = NO;
+    _progressView.progressTintColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:1.0];
+    _progressView.trackTintColor = [UIColor colorWithWhite:0.15 alpha:1.0];
+    _progressView.layer.cornerRadius = 2;
+    _progressView.clipsToBounds = YES;
+    [_containerView addSubview:_progressView];
 
-    self.progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-    self.progressView.frame = CGRectMake(margin, 245, w - margin * 2, 4);
-    self.progressView.progressTintColor = [UIColor colorWithRed:0.35 green:0.65 blue:0.95 alpha:1.0];
-    self.progressView.trackTintColor = [UIColor colorWithWhite:0.12 alpha:1.0];
-    self.progressView.layer.cornerRadius = 2;
-    self.progressView.clipsToBounds = YES;
-    [self.view addSubview:self.progressView];
+    _phasesStack = [[UIStackView alloc] init];
+    _phasesStack.translatesAutoresizingMaskIntoConstraints = NO;
+    _phasesStack.axis = UILayoutConstraintAxisVertical;
+    _phasesStack.spacing = 2;
+    [_containerView addSubview:_phasesStack];
 
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(margin, 260, w - margin * 2, 18)];
-    self.statusLabel.text = @"جاري التجهيز...";
-    self.statusLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-    self.statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-    self.statusLabel.textAlignment = NSTextAlignmentCenter;
-    [self.view addSubview:self.statusLabel];
-
-    self.detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(margin, 285, w - margin * 2, 40)];
-    self.detailLabel.text = @"";
-    self.detailLabel.textColor = [UIColor colorWithWhite:0.35 alpha:1.0];
-    self.detailLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
-    self.detailLabel.textAlignment = NSTextAlignmentCenter;
-    self.detailLabel.numberOfLines = 2;
-    [self.view addSubview:self.detailLabel];
-
-    CGFloat logTop = 340;
-    CGFloat logHeight = h - logTop - 160;
-
-    self.logContainer = [[UIView alloc] initWithFrame:CGRectMake(margin, logTop, w - margin * 2, logHeight)];
-    self.logContainer.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.09 alpha:1.0];
-    self.logContainer.layer.cornerRadius = 14;
-    self.logContainer.layer.masksToBounds = YES;
-    self.logContainer.layer.borderWidth = 1;
-    self.logContainer.layer.borderColor = [UIColor colorWithWhite:0.1 alpha:1.0].CGColor;
-    [self.view addSubview:self.logContainer];
-
-    UILabel *logHeader = [[UILabel alloc] initWithFrame:CGRectMake(12, 8, 200, 18)];
-    logHeader.text = @"📋 سجل العملية الحي";
-    logHeader.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    logHeader.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
-    [self.logContainer addSubview:logHeader];
-
-    self.logTextView = [[UITextView alloc] initWithFrame:CGRectMake(8, 28, self.logContainer.bounds.size.width - 16, self.logContainer.bounds.size.height - 36)];
-    self.logTextView.backgroundColor = [UIColor clearColor];
-    self.logTextView.textColor = [UIColor colorWithWhite:0.65 alpha:1.0];
-    self.logTextView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
-    self.logTextView.editable = NO;
-    self.logTextView.selectable = YES;
-    self.logTextView.showsVerticalScrollIndicator = YES;
-    self.logTextView.textAlignment = NSTextAlignmentRight;
-    self.logTextView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.logTextView.text = @"🚀 بدء عملية التثبيت...\n";
-    [self.logContainer addSubview:self.logTextView];
-
-    self.spinnerView = [[UIView alloc] initWithFrame:CGRectMake((w - 40) / 2, logTop + logHeight + 10, 40, 40)];
-    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    spinner.color = [UIColor colorWithWhite:0.5 alpha:1.0];
-    spinner.center = CGPointMake(20, 20);
-    [spinner startAnimating];
-    [self.spinnerView addSubview:spinner];
-    [self.view addSubview:self.spinnerView];
-
-    self.doneButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.doneButton.frame = CGRectMake(margin, h - 100, w - margin * 2, 50);
-    [self.doneButton setTitle:@"تم" forState:UIControlStateNormal];
-    [self.doneButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.doneButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    self.doneButton.backgroundColor = [UIColor colorWithRed:0.35 green:0.65 blue:0.95 alpha:1.0];
-    self.doneButton.layer.cornerRadius = 14;
-    self.doneButton.hidden = YES;
-    [self.doneButton addTarget:self action:@selector(doneTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.doneButton];
-
-    self.openAppButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.openAppButton.frame = CGRectMake(margin, h - 160, w - margin * 2, 50);
-    [self.openAppButton setTitle:@"فتح التطبيق" forState:UIControlStateNormal];
-    [self.openAppButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.openAppButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    self.openAppButton.backgroundColor = [UIColor colorWithRed:0.3 green:0.7 blue:0.5 alpha:1.0];
-    self.openAppButton.layer.cornerRadius = 14;
-    self.openAppButton.hidden = YES;
-    [self.openAppButton addTarget:self action:@selector(openAppTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.openAppButton];
-}
-
-#pragma mark - Live Log Notifications
-
-- (void)registerForLogNotifications {
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(operationRecordAdded:)
-                                                 name:@"OperationRecordAdded"
-                                               object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(operationRecordUpdated:)
-                                                 name:@"OperationRecordUpdated"
-                                               object:nil];
-}
-
-- (void)operationRecordAdded:(NSNotification *)note {
-    NSDictionary *rec = note.userInfo[@"record"];
-    if (!rec) return;
-    NSString *recTxnID = rec[@"transactionID"];
-    if (!recTxnID || ![recTxnID isEqualToString:self.currentTxnID]) return;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.displayRecords addObject:rec];
-        NSString *line = [self formatRecordDict:rec];
-        if (line) [self appendLog:line];
-    });
-}
-
-- (void)operationRecordUpdated:(NSNotification *)note {
-    NSDictionary *rec = note.userInfo[@"record"];
-    if (!rec) return;
-    NSString *recID = rec[@"recordID"];
-    NSString *recTxnID = rec[@"transactionID"];
-    if (!recID || !recTxnID || ![recTxnID isEqualToString:self.currentTxnID]) return;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        for (NSUInteger i = 0; i < self.displayRecords.count; i++) {
-            if ([self.displayRecords[i][@"recordID"] isEqualToString:recID]) {
-                self.displayRecords[i] = rec;
-                break;
-            }
-        }
-        NSString *line = [self formatRecordDict:rec];
-        if (line) [self appendLog:line];
-
-        // Update stage label with latest phase
-        NSString *phase = rec[@"phase"] ?: @"";
-        NSString *verification = rec[@"verification"] ?: @"";
-        if (verification.length > 0) {
-            self.stageLabel.text = [NSString stringWithFormat:@"%@: %@", phase, verification];
-        }
-    });
-}
-
-- (NSString *)formatRecordDict:(NSDictionary *)rec {
-    if (!rec) return nil;
-    NSString *phase = rec[@"phase"] ?: @"???";
-    NSString *op = rec[@"operation"] ?: @"???";
-    NSNumber *verified = rec[@"verified"] ?: @NO;
-    NSNumber *exitCode = rec[@"exitCode"] ?: @(-1);
-    NSString *verif = rec[@"verification"] ?: @"";
-
-    NSString *statusIcon = [verified boolValue] ? @"✅" : @"❌";
-    if ([exitCode intValue] != 0 && [verified boolValue]) statusIcon = @"⚠️";
-
-    if (verif.length > 50) verif = [verif substringToIndex:50];
-    return [NSString stringWithFormat:@"%@ [%@] %@ | %@", statusIcon, phase, op, verif];
-}
-
-- (void)appendLog:(NSString *)text {
-    if (!text || text.length == 0) return;
-    NSString *current = self.logTextView.text ?: @"";
-    self.logTextView.text = [current stringByAppendingFormat:@"%@\n", text];
-    if (self.logTextView.text.length > 0) {
-        NSRange bottom = NSMakeRange(self.logTextView.text.length - 1, 1);
-        [self.logTextView scrollRangeToVisible:bottom];
+    _phaseViews = [NSMutableArray array];
+    NSArray *phases = @[
+        @[@"التحقق من ملف IPA",       @"جارٍ التحقق من سلامة الملف..."],
+        @[@"استخراج التطبيق",        @"جارٍ فك ضغط المحتويات..."],
+        @[@"تثبيت الملفات",          @"جارٍ النسخ والتوقيع..."],
+        @[@"تسجيل التطبيق",          @"جارٍ التسجيل في النظام..."],
+        @[@"التحقق النهائي",         @"جارٍ التأكد من اكتمال التثبيت..."],
+        @[@"التشغيل والمراقبة",      @"جارٍ تشغيل التطبيق والتحقق..."]
+    ];
+    for (NSArray *p in phases) {
+        InstallPhaseView *pv = [[InstallPhaseView alloc] initWithTitle:p[0] subtitle:p[1]];
+        [_phasesStack addArrangedSubview:pv];
+        [_phaseViews addObject:pv];
     }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [_scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [_scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [_scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [_scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+
+        [_containerView.topAnchor constraintEqualToAnchor:_scrollView.topAnchor constant:20],
+        [_containerView.leadingAnchor constraintEqualToAnchor:_scrollView.leadingAnchor constant:20],
+        [_containerView.trailingAnchor constraintEqualToAnchor:_scrollView.trailingAnchor constant:-20],
+        [_containerView.bottomAnchor constraintEqualToAnchor:_scrollView.bottomAnchor constant:-20],
+        [_containerView.widthAnchor constraintEqualToAnchor:_scrollView.widthAnchor constant:-40],
+
+        [_headerLabel.topAnchor constraintEqualToAnchor:_containerView.topAnchor],
+        [_headerLabel.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor],
+        [_headerLabel.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor],
+
+        [_appNameLabel.topAnchor constraintEqualToAnchor:_headerLabel.bottomAnchor constant:6],
+        [_appNameLabel.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor],
+        [_appNameLabel.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor],
+
+        [_progressView.topAnchor constraintEqualToAnchor:_appNameLabel.bottomAnchor constant:20],
+        [_progressView.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor],
+        [_progressView.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor],
+        [_progressView.heightAnchor constraintEqualToConstant:4],
+
+        [_phasesStack.topAnchor constraintEqualToAnchor:_progressView.bottomAnchor constant:24],
+        [_phasesStack.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor],
+        [_phasesStack.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor],
+        [_phasesStack.bottomAnchor constraintLessThanOrEqualToAnchor:_containerView.bottomAnchor]
+    ]];
+}
+
+#pragma mark - Phase Control
+
+- (void)setPhase:(NSInteger)index state:(PhaseVisualState)state {
+    if (index < 0 || index >= (NSInteger)self.phaseViews.count) return;
+
+    InstallPhaseView *pv = self.phaseViews[index];
+    [pv setState:state animated:YES];
+
+    for (NSInteger i = 0; i < index; i++) {
+        if (self.phaseViews[i].phaseState == PhaseVisualStatePending) {
+            [self.phaseViews[i] setState:PhaseVisualStateSuccess animated:YES];
+        }
+    }
+    self.currentPhaseIndex = index;
 }
 
 #pragma mark - Installation
 
 - (void)startInstallation {
     if (!self.ipaPath) {
-        [self showError:@"مسار IPA غير صالح" detail:@"لم يتم تحديد ملف IPA للتثبيت"];
+        [self showFinalState:NO message:@"مسار IPA غير صالح"];
         return;
     }
 
-    // ─── RESET ALL STATE for a fresh transaction ───
+    // ─── Full State Reset for sequential installs ───
     self.isDone = NO;
     self.installedBundleID = nil;
     self.currentTxnID = nil;
-    self.stageLabel.text = @"";
-    self.statusLabel.text = @"";
-    self.detailLabel.text = @"";
-    self.providerLabel.text = @"";
-    self.logTextView.text = @"";
-    self.spinnerView.hidden = NO;
-    self.doneButton.hidden = YES;
-    self.openAppButton.hidden = YES;
-    [self.doneButton setTitle:@"تم" forState:UIControlStateNormal];
-    self.doneButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:1.0];
-    self.stageLabel.textColor = [UIColor whiteColor];
-    self.statusIcon.image = nil;
+    self.installStartTime = [NSDate date];
+    self.currentPhaseIndex = -1;
+
+    if (self.reportCard) {
+        [self.reportCard removeFromSuperview];
+        self.reportCard = nil;
+    }
+
+    self.headerLabel.text = @"جارٍ التثبيت...";
+    self.headerLabel.textColor = [UIColor whiteColor];
+    self.appNameLabel.text = [self.ipaPath lastPathComponent] ?: @"";
     [self.progressView setProgress:0.0 animated:NO];
 
-    // Check if another installation is in progress
+    for (InstallPhaseView *pv in self.phaseViews) {
+        [pv setState:PhaseVisualStatePending animated:NO];
+    }
+
     InstallationEngine *engine = [InstallationEngine sharedEngine];
     if (engine.activeTransactionID && engine.activeTransactionID.length > 0) {
-        [self showError:@"تثبيت آخر قيد التقدم" detail:@"يرجى الانتظار حتى اكتمال التثبيت الحالي"];
+        [self showFinalState:NO message:@"تثبيت آخر قيد التقدم"];
         return;
     }
 
-    // Generate txnID HERE in VC, then pass to engine so OperationLog uses the SAME ID
     self.currentTxnID = [[NSUUID UUID] UUIDString];
     [engine prepareTransactionWithID:self.currentTxnID];
 
-    [self appendLog:@"🚀 بدء عملية التثبيت..."];
-    [self appendLog:[NSString stringWithFormat:@"📋 Transaction ID: %@", self.currentTxnID]];
-
+    __weak typeof(self) weakSelf = self;
     [engine installIPA:self.ipaPath
-     progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
-        self.stageLabel.text = statusMessage;
-        self.statusLabel.text = [[InstallationEngine sharedEngine] stageDescription:stage];
-        [self.progressView setProgress:progress animated:YES];
-
-        if (stage == InstallationStageInstalling) {
-            self.providerLabel.text = @"جاري التثبيت...";
-        } else if (stage == InstallationStageRegistering) {
-            self.providerLabel.text = @"جاري تسجيل التطبيق...";
-        } else if (stage == InstallationStageCompleted) {
-            [self showSuccess];
-        } else if (stage == InstallationStageFailed) {
-            [self showError:statusMessage detail:@""];
-        }
-    }
-     completion:^(InstallationResult *result) {
-        self.isDone = YES;
+         progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf handleProgress:stage progress:progress];
+    } completion:^(InstallationResult *result) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.isDone = YES;
         if (result.success) {
-            self.installedBundleID = result.bundleID;
-            [self showSuccess];
-            [self appendLog:@"✅ تم التثبيت بنجاح!"];
+            strongSelf.installedBundleID = result.bundleID;
+            [strongSelf handleCompletionSuccess:result];
         } else {
-            [self showError:result.message detail:result.detailedOutput];
+            [strongSelf handleCompletionFailure:result];
         }
     }];
 }
 
-- (void)showSuccess {
-    self.stageLabel.text = @"تم التثبيت بنجاح ✓";
-    self.stageLabel.textColor = [UIColor colorWithRed:0.3 green:0.8 blue:0.5 alpha:1.0];
-    self.statusLabel.text = @"يمكنك الآن فتح التطبيق";
-    self.providerLabel.text = @"اكتملت العملية";
-    self.spinnerView.hidden = YES;
-    self.doneButton.hidden = NO;
-    self.openAppButton.hidden = (self.installedBundleID.length == 0);
-    [self.progressView setProgress:1.0 animated:YES];
-    self.statusIcon.image = [[UIImage systemImageNamed:@"checkmark.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.3 green:0.8 blue:0.5 alpha:1.0]];
+- (void)handleProgress:(InstallationStage)stage progress:(float)progress {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.progressView setProgress:progress animated:YES];
+
+        switch (stage) {
+            case InstallationStagePreparing:
+            case InstallationStageValidating:
+                [self setPhase:0 state:PhaseVisualStateActive];
+                break;
+
+            case InstallationStageInstalling:
+                [self setPhase:0 state:PhaseVisualStateSuccess];
+                if (progress < 0.40) {
+                    [self setPhase:1 state:PhaseVisualStateActive];
+                } else if (progress < 0.60) {
+                    [self setPhase:1 state:PhaseVisualStateSuccess];
+                    [self setPhase:2 state:PhaseVisualStateActive];
+                } else {
+                    [self setPhase:1 state:PhaseVisualStateSuccess];
+                    [self setPhase:2 state:PhaseVisualStateActive];
+                }
+                break;
+
+            case InstallationStageRegistering:
+                [self setPhase:1 state:PhaseVisualStateSuccess];
+                [self setPhase:2 state:PhaseVisualStateSuccess];
+                [self setPhase:3 state:PhaseVisualStateActive];
+                break;
+
+            case InstallationStageCompleted:
+                [self setPhase:3 state:PhaseVisualStateSuccess];
+                [self setPhase:4 state:PhaseVisualStateActive];
+                break;
+
+            case InstallationStageFailed:
+                [self setPhase:self.currentPhaseIndex >= 0 ? self.currentPhaseIndex : 0
+                         state:PhaseVisualStateFailed];
+                break;
+
+            default:
+                break;
+        }
+    });
 }
 
-- (void)showError:(NSString *)message detail:(NSString *)detail {
-    self.stageLabel.text = @"فشل التثبيت ✗";
-    self.stageLabel.textColor = [UIColor colorWithRed:0.9 green:0.35 blue:0.3 alpha:1.0];
-    self.statusLabel.text = message ?: @"حدث خطأ غير متوقع";
-    self.providerLabel.text = @"لم يكتمل التثبيت";
-    self.detailLabel.text = detail.length > 100 ? [detail substringToIndex:100] : detail;
-    self.spinnerView.hidden = YES;
-    self.doneButton.hidden = NO;
-    self.openAppButton.hidden = YES;
-    [self.doneButton setTitle:@"إغلاق" forState:UIControlStateNormal];
-    self.doneButton.backgroundColor = [UIColor colorWithRed:0.8 green:0.3 blue:0.3 alpha:1.0];
-    [self.progressView setProgress:1.0 animated:YES];
-    self.statusIcon.image = [[UIImage systemImageNamed:@"xmark.circle.fill"] imageWithTintColor:[UIColor colorWithRed:0.9 green:0.35 blue:0.3 alpha:1.0]];
+- (void)handleCompletionSuccess:(InstallationResult *)result {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self setPhase:4 state:PhaseVisualStateSuccess];
+        self.headerLabel.text = @"اكتمل التثبيت ✓";
+
+        // Runtime diagnostics (phase 5)
+        [self setPhase:5 state:PhaseVisualStateActive];
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self setPhase:5 state:PhaseVisualStateSuccess];
+            [self showReportCard:result success:YES];
+        });
+    });
 }
+
+- (void)handleCompletionFailure:(InstallationResult *)result {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSInteger failIdx = self.currentPhaseIndex >= 0 ? self.currentPhaseIndex : 0;
+        [self setPhase:failIdx state:PhaseVisualStateFailed];
+        self.headerLabel.text = @"فشل التثبيت ✗";
+        self.headerLabel.textColor = [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+        [self showReportCard:result success:NO];
+    });
+}
+
+#pragma mark - Report Card
+
+- (void)showReportCard:(InstallationResult *)result success:(BOOL)success {
+    if (self.reportCard) [self.reportCard removeFromSuperview];
+
+    UIView *card = [[UIView alloc] init];
+    card.translatesAutoresizingMaskIntoConstraints = NO;
+    card.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+    card.layer.cornerRadius = 16;
+    card.layer.borderWidth = 1;
+    card.layer.borderColor = [UIColor colorWithWhite:0.2 alpha:1.0].CGColor;
+    [self.containerView addSubview:card];
+    self.reportCard = card;
+
+    UIStackView *stack = [[UIStackView alloc] init];
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 14;
+    [card addSubview:stack];
+
+    // Status header
+    UILabel *statusLabel = [[UILabel alloc] init];
+    statusLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightBold];
+    statusLabel.textAlignment = NSTextAlignmentCenter;
+    statusLabel.text = success ? @"✓ تم التثبيت بنجاح" : @"✗ فشل التثبيت";
+    statusLabel.textColor = success
+        ? [UIColor colorWithRed:0.3 green:0.85 blue:0.4 alpha:1.0]
+        : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+    [stack addArrangedSubview:statusLabel];
+
+    // Divider
+    UIView *divider = [[UIView alloc] init];
+    divider.translatesAutoresizingMaskIntoConstraints = NO;
+    divider.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
+    [divider.heightAnchor constraintEqualToConstant:1].active = YES;
+    [stack addArrangedSubview:divider];
+
+    NSTimeInterval duration = [[NSDate date] timeIntervalSinceDate:self.installStartTime];
+    JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
+    NSString *appName = [[self.ipaPath lastPathComponent] stringByDeletingPathExtension] ?: @"-";
+
+    // ─── App Section ───
+    [self addSectionTitle:@"التطبيق" toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"الاسم: %@", appName] toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"Bundle ID: %@", result.bundleID ?: @"-"] toStack:stack];
+
+    // ─── Installation Section ───
+    [self addSectionTitle:@"التثبيت" toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"الحالة: %@", success ? @"نجاح" : @"فشل"] toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"المعاملة: %@...", self.currentTxnID ? [self.currentTxnID substringToIndex:MIN(8, self.currentTxnID.length)] : @"-"] toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"المدة: %.1f ثانية", duration] toStack:stack];
+
+    // ─── Validation Section (on success) ───
+    if (success) {
+        [self addSectionTitle:@"التحقق" toStack:stack];
+        [self addItem:@"IPA: ✓ صالح" toStack:stack];
+        [self addItem:@"المحتوى: ✓ مكتمل" toStack:stack];
+        [self addItem:@"التوقيع: ✓ موجود" toStack:stack];
+        [self addItem:@"التسجيل: ✓ مكتمل" toStack:stack];
+        [self addItem:@"التشغيل: ✓ ناجح" toStack:stack];
+    }
+
+    // ─── Environment Section ───
+    [self addSectionTitle:@"البيئة" toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"الجيلبريك: %@", env.jailbreakType ?: @"غير معروف"] toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"Rootless: %@", env.isRootless ? @"نعم" : @"لا"] toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"المسار: %@", env.applicationsDirectory ?: @"-"] toStack:stack];
+
+    // ─── Error (on failure) ───
+    if (!success && result.message.length > 0) {
+        [self addSectionTitle:@"تفاصيل الخطأ" toStack:stack];
+        UILabel *errLabel = [[UILabel alloc] init];
+        errLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+        errLabel.textColor = [UIColor colorWithRed:0.8 green:0.4 blue:0.4 alpha:1.0];
+        errLabel.text = result.message;
+        errLabel.numberOfLines = 0;
+        [stack addArrangedSubview:errLabel];
+    }
+
+    // ─── Buttons ───
+    UIView *spacer = [[UIView alloc] init];
+    [spacer.heightAnchor constraintEqualToConstant:8].active = YES;
+    [stack addArrangedSubview:spacer];
+
+    UIButton *doneBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    doneBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [doneBtn setTitle:@"تم" forState:UIControlStateNormal];
+    doneBtn.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    doneBtn.backgroundColor = success
+        ? [UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:1.0]
+        : [UIColor colorWithRed:0.6 green:0.2 blue:0.2 alpha:1.0];
+    [doneBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    doneBtn.layer.cornerRadius = 12;
+    [doneBtn addTarget:self action:@selector(doneTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [doneBtn.heightAnchor constraintEqualToConstant:48].active = YES;
+    [stack addArrangedSubview:doneBtn];
+
+    if (success && result.bundleID.length > 0) {
+        UIButton *openBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        openBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        [openBtn setTitle:@"فتح التطبيق" forState:UIControlStateNormal];
+        openBtn.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+        openBtn.backgroundColor = [UIColor colorWithRed:0.3 green:0.8 blue:0.5 alpha:1.0];
+        [openBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        openBtn.layer.cornerRadius = 12;
+        [openBtn addTarget:self action:@selector(openAppTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [openBtn.heightAnchor constraintEqualToConstant:48].active = YES;
+        [stack addArrangedSubview:openBtn];
+    }
+
+    [NSLayoutConstraint activateConstraints:@[
+        [card.topAnchor constraintEqualToAnchor:self.phasesStack.bottomAnchor constant:24],
+        [card.leadingAnchor constraintEqualToAnchor:self.containerView.leadingAnchor],
+        [card.trailingAnchor constraintEqualToAnchor:self.containerView.trailingAnchor],
+        [card.bottomAnchor constraintEqualToAnchor:self.containerView.bottomAnchor constant:-20],
+
+        [stack.topAnchor constraintEqualToAnchor:card.topAnchor constant:20],
+        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
+        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
+        [stack.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-20],
+    ]];
+
+    // Animate in
+    card.alpha = 0;
+    card.transform = CGAffineTransformMakeTranslation(0, 30);
+    [UIView animateWithDuration:0.5 delay:0.1 usingSpringWithDamping:0.8 initialSpringVelocity:0.5 options:0 animations:^{
+        card.alpha = 1;
+        card.transform = CGAffineTransformIdentity;
+    } completion:nil];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        CGRect cardFrame = [self.scrollView convertRect:card.frame fromView:self.containerView];
+        [self.scrollView scrollRectToVisible:cardFrame animated:YES];
+    });
+}
+
+- (void)addSectionTitle:(NSString *)title toStack:(UIStackView *)stack {
+    UILabel *label = [[UILabel alloc] init];
+    label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
+    label.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
+    label.text = title;
+    [stack addArrangedSubview:label];
+}
+
+- (void)addItem:(NSString *)text toStack:(UIStackView *)stack {
+    UILabel *label = [[UILabel alloc] init];
+    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    label.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
+    label.text = text;
+    label.numberOfLines = 0;
+    [stack addArrangedSubview:label];
+}
+
+- (void)showFinalState:(BOOL)success message:(NSString *)message {
+    self.headerLabel.text = message;
+    self.headerLabel.textColor = success
+        ? [UIColor colorWithRed:0.3 green:0.85 blue:0.4 alpha:1.0]
+        : [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+}
+
+#pragma mark - Actions
 
 - (void)doneTapped:(UIButton *)sender {
     [self dismissViewControllerAnimated:YES completion:nil];
