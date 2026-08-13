@@ -58,6 +58,12 @@
         NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:payloadDir error:nil];
         for (NSString *item in contents) {
             if ([item.pathExtension.lowercaseString isEqualToString:@"app"]) {
+                // SECURITY: Reject paths with traversal
+                if ([self containsDangerousPath:item]) {
+                    [[Logger sharedLogger] error:[NSString stringWithFormat:@"Dangerous path in IPA: %@", item]];
+                    info.bundleID = @"INVALID_PATH";
+                    break;
+                }
                 NSString *appDir = [payloadDir stringByAppendingPathComponent:item];
                 info.appDirectoryPath = appDir;
                 NSString *plistPath = [appDir stringByAppendingPathComponent:@"Info.plist"];
@@ -90,6 +96,14 @@
     // Cleanup
     [[NSFileManager defaultManager] removeItemAtPath:tempDir error:nil];
     return info;
+}
+
+- (BOOL)containsDangerousPath:(NSString *)path {
+    if (!path) return YES;
+    if ([path containsString:@".."]) return YES;
+    if ([path containsString:@"~"]) return YES;
+    if ([path hasPrefix:@"/"]) return YES;
+    return NO;
 }
 
 - (UIImage *)extractIconFromAppDirectory:(NSString *)appDir infoPlist:(NSDictionary *)plist {
@@ -128,15 +142,14 @@
     // Try Assets.car (simplified - just check existence)
     NSString *assetsPath = [appDir stringByAppendingPathComponent:@"Assets.car"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:assetsPath]) {
-        // Full Assets.car parsing is complex; skip for now
         [[Logger sharedLogger] debug:@"Assets.car found but parsing not implemented"];
     }
 
     return nil;
 }
 
-- (NSArray<NSString *> *)extractArchitectures:(NSString *)executablePath {
-    NSMutableArray<NSString *> *archs = [NSMutableArray array];
+- (NSArray *)extractArchitectures:(NSString *)executablePath {
+    NSMutableArray *archs = [NSMutableArray array];
     NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:executablePath];
     if (!fh) return archs;
 
@@ -148,7 +161,6 @@
     uint32_t magic = *(uint32_t *)bytes;
 
     if (magic == 0xfeedfacf) { // MH_MAGIC_64
-        // Single architecture 64-bit
         uint32_t cputype = *(uint32_t *)(bytes + 4);
         if (cputype == 0x0100000c) { // CPU_TYPE_ARM64
             [archs addObject:@"arm64"];
@@ -156,7 +168,6 @@
             [archs addObject:@"arm64e"];
         }
     } else if (magic == 0xcafebabe || magic == 0xbebafeca) { // FAT binary
-        // Would need full FAT parsing - simplified
         [archs addObject:@"universal"];
     }
 
