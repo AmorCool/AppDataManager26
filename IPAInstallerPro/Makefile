@@ -9,7 +9,7 @@ IPAInstallerPro_FILES = AppDelegate.m main.m UI/MainViewController.m UI/AppDetai
 
 IPAInstallerPro_FRAMEWORKS = UIKit Foundation
 IPAInstallerPro_PRIVATE_FRAMEWORKS = MobileCoreServices
-IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+IPAInstallerPro_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -I./Core
 IPAInstallerPro_CODESIGN_FLAGS = -Sentitlements.plist
 
 include $(THEOS_MAKE_PATH)/application.mk
