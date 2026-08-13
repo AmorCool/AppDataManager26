@@ -7,7 +7,7 @@ This repository contains **two** independent tools:
 | Tool | Path | Status | Version |
 |------|------|--------|---------|
 | **AppData Manager** | `AppDataManager/` | ✅ Stable | 1.4.0 |
-| **IPA Installer Pro** | `IPAInstallerPro/` | 🔄 Active Dev | 1.1.0 |
+| **IPA Installer Pro** | `IPAInstallerPro/` | 🔄 Active Dev | 2.0.0 |
 
 Both share the same repository but are **separate packages** in Sileo.
 
@@ -15,64 +15,120 @@ Both share the same repository but are **separate packages** in Sileo.
 
 ## Dual Repository System
 
-| Repository | URL | Purpose | Update Method |
-|------------|-----|---------|---------------|
-| **Production** | `https://aosaid3224-ops.github.io/repo/` | Public releases | Manual only |
-| **Development** | `https://aosaid3224-ops.github.io/repo-dev/` | Testing & beta | Automatic via CI/CD |
+| Repository | GitHub Repo | URL | Purpose |
+|------------|-------------|-----|---------|
+| **Production** | `aosaid3224-ops/repo` | `https://aosaid3224-ops.github.io/repo/` | Public releases |
+| **Development** | `aosaid3224-ops/repo-dev` | `https://aosaid3224-ops.github.io/repo-dev/` | Testing & beta |
 
-> **End users** see only AppData Manager in the production repo.
-> **Developers** add the dev repo to Sileo to see and test IPA Installer Pro.
+> **Note:** `repo/` and `repo-dev/` are **separate GitHub repositories**, NOT folders in this repo.
+> CI/CD workflows push built packages to them automatically.
 
 ---
 
-## IPA Installer Pro v1.1.0 — Architecture
+## CI/CD Workflows
+
+### 1. Auto-Sync to Dev Repo (`.github/workflows/sync-to-repo.yml`)
+
+**Triggers:**
+- Automatically on every `push` to `main` that changes `IPAInstallerPro/**` or `scripts/**`
+- Manually via `workflow_dispatch`
+
+**What it does:**
+1. Checks out this repo (source code)
+2. Checks out `aosaid3224-ops/repo-dev` (separate repo)
+3. Sets up Theos + dependencies on macOS runner
+4. Builds IPA Installer Pro: `make clean && make package`
+5. Copies `.deb` to `repo-dev/pool/main/iphoneos-arm64/`
+6. Runs `scripts/generate-repo.py . --dev`
+7. Commits and pushes `repo-dev`
+
+**Requirements:**
+- `secrets.PAT` must be set in repo Settings → Secrets → Actions
+- PAT needs `repo` scope to push to `aosaid3224-ops/repo-dev`
+
+### 2. Release to Production (`.github/workflows/release-to-production.yml`)
+
+**Triggers:**
+- Manual only (`workflow_dispatch`)
+
+**What it does:**
+1. Same build process as dev
+2. Deploys to `aosaid3224-ops/repo` (production)
+3. Requires typing `YES` to confirm
+
+---
+
+## Local Development Workflow
+
+### Option A: Let CI/CD Handle Everything (Recommended)
+
+```bash
+# 1. Edit source files
+# 2. Bump version in IPAInstallerPro/control
+# 3. Commit and push
+git add .
+git commit -m "feat: description"
+git push origin main
+
+# 4. CI/CD automatically builds and deploys to repo-dev
+# 5. Refresh Sileo to see the update
+```
+
+### Option B: Local Build (Advanced)
+
+```bash
+# Requires: macOS + Theos + dpkg + ldid
+cd IPAInstallerPro
+make clean
+make package
+
+# Manual deploy to local repo-dev folder for testing
+cp packages/*.deb ../repo-dev/pool/main/iphoneos-arm64/
+cd ../repo-dev
+python3 ../scripts/generate-repo.py . --dev
+```
+
+---
+
+## IPA Installer Pro v2.0.0 — Architecture
 
 ### Core Philosophy
 > **Precision > Speed** | **Evidence > Assumption** | **Verification > Exit Code** | **Root Cause > Patch**
 
-### Installation Pipeline (11 Phases)
+### Unified Provider Contract
+
+Every installation provider MUST:
+1. Accept `OperationLog` as parameter
+2. Record every real operation to `OperationLog`
+3. Return `InstallationResult` with evidence dictionary
+4. Perform verification at each phase, not just check exit codes
+
+### Provider Chain
 
 ```
-[IPA_OPEN] → [IPA_EXTRACT] → [APP_IDENTIFY] → [FILE_COPY] → [PERMISSION_chmod]
-     → [PERMISSION_chown] → [SIGN_signAllAt] → [SIGN_signExe] → [FRAMEWORK]
-     → [UICACHE] → [VERIFY] → [CLEANUP] → [COMPLETE]
+1. Direct Install (priority: 100) — preferred
+   └─ Root helper + ldid + deep verification
+2. appinst (priority: 100) — fallback
+3. System Install (priority: 10) — last resort
 ```
 
-### Zero-Gap Verification System
+If primary fails, engine tries next automatically with full audit trail.
 
-Every phase performs **deep verification** before proceeding:
+### OperationLog — Source of Truth
 
-| Phase | Verification Checks |
-|-------|---------------------|
-| **FILE_COPY** | File count match, size match, symlink preservation, deep copy verification via `copyfile()` |
-| **PERMISSION_chmod** | `stat()` mode bits ≥ 755 |
-| **PERMISSION_chown** | `stat()` uid=0 (root), gid=0 (wheel) |
-| **SIGN_signAllAt** | `ldid -d` signature detection |
-| **SIGN_signExe** | File exists + readable + signed |
-| **FRAMEWORK** | Per-dylib: `stat()` mode/uid/gid + `access(X_OK)` + `ldid -d` |
-| **VERIFY** | `access(X_OK)` on executable + `otool -L` dependency resolution + LSApplicationWorkspace registration |
+Every installation creates a transaction in `OperationLog`:
+- Timestamped records for each phase
+- Real file paths (not placeholders)
+- Verification results (PASS/FAIL with detail)
+- Evidence: stat results, access checks, signatures
+- Transaction report accessible via UI
 
-### Live Installation Logging
+### Live Log Display
 
-Real-time structured logging with:
-- **Timestamped entries** (HH:mm:ss.SSS)
-- **Phase indicators** (visual dots in UI)
-- **Structured verification** (PASS/FAIL with detail)
-- **Command execution tracking** (exit codes + output)
-- **File operation tracking** (path + result + errno)
-- **Stat results** (mode, uid, gid)
-- **Access checks** (R_OK, W_OK, X_OK, F_OK)
-
-### Provider Selection (Fallback Chain)
-
-```
-1. Direct Install (score: 100) — preferred
-   └─ Deep verification + live logging
-2. appinst (score: 100) — fallback
-3. System Install (score: 10) — last resort
-```
-
-If the primary provider fails, the engine automatically tries the next provider.
+`InstallationProgressViewController` displays OperationLog in real-time:
+- NSNotificationCenter broadcasts record updates
+- UI receives updates without polling
+- Each line shows: status icon + phase + operation + verification
 
 ---
 
@@ -84,89 +140,30 @@ IPAInstallerPro/
 │   ├── DirectInstallationProvider.m    ← Main provider (zero-gap verification)
 │   ├── SystemInstallationProvider.m    ← LSApplicationWorkspace fallback
 │   ├── AppInstInstallationProvider.m   ← appinst CLI fallback
-│   ├── InstallationEngine.m            ← Provider orchestrator
-│   ├── LiveInstallationLogger.h/m      ← Real-time logging system
+│   ├── InstallationEngine.m            ← Provider orchestrator + OperationLog integration
+│   ├── InstallationProvider.h/m        ← Unified contract + Result with evidence
+│   ├── OperationLog.m                  ← Transaction logging (source of truth)
 │   ├── IPAValidator.m                  ← IPA integrity checks
 │   ├── IPAExtractor.m                  ← Metadata extraction
 │   ├── CapabilityManager.m             ← Environment detection
 │   ├── RootlessManager.m               ← Rootless path resolution
-│   ├── CrashReporter.m                 ← Crash log collection
-│   ├── DiagnosticPipeline.m            ← System diagnostics
+│   ├── CrashReporter.m                 ← Crash log collection (separate from install)
+│   ├── DiagnosticPipeline.m            ← System diagnostics (separate from install)
 │   ├── ProcessMonitor.m                ← Process monitoring
 │   ├── LogCollector.m                  ← Log aggregation
-│   └── TransactionLogger.m             ← Operation journaling
+│   ├── TransactionLogger.m             ← Operation journaling
+│   └── InstallationLogger.m            ← Legacy history logger
 ├── UI/
 │   ├── MainViewController.m            ← IPA file browser
 │   ├── IPAFileBrowserViewController.m  ← File picker
 │   ├── IPAInstallViewController.m      ← Install confirmation
-│   ├── InstallationProgressViewController.m ← Live log viewer
-│   └── SettingsViewController.m        ← Preferences
+│   ├── InstallationProgressViewController.m ← Live OperationLog viewer
+│   └── SettingsViewController.m        ← Environment info (no diagnostics)
 ├── helper.c                            ← setuid root helper
 ├── entitlements.plist                  ← Wide entitlements
 ├── Makefile                            ← Build configuration
 └── control                             ← Package metadata
 ```
-
----
-
-## Development Workflow
-
-### 1. Make Changes
-Edit source files in `IPAInstallerPro/`.
-
-### 2. Bump Version
-Update `IPAInstallerPro/control`:
-```
-Version: X.Y.Z
-```
-
-### 3. Commit & Push
-```bash
-git add .
-git commit -m "feat: description"
-git push origin main
-```
-
-### 4. Automatic CI/CD
-- `.github/workflows/sync-to-repo.yml` triggers on push
-- Builds the package
-- Generates `Packages` and `Release`
-- Pushes to `repo-dev/` branch
-
-### 5. Test in Sileo
-Add `https://aosaid3224-ops.github.io/repo-dev/` to Sileo.
-Refresh sources. Install/update IPA Installer Pro.
-
-### 6. Promote to Production
-When stable, run the manual release workflow:
-- `.github/workflows/release-to-production.yml`
-- This copies from `repo-dev/` to `repo/`
-
----
-
-## Testing Checklist
-
-Before any release, verify:
-
-- [ ] Build succeeds (`make clean && make`)
-- [ ] Package installs without errors
-- [ ] Live log displays correctly
-- [ ] All 11 phases complete with `verified=YES`
-- [ ] `access(X_OK)` passes on executable
-- [ ] `otool -L` shows all dependencies resolved
-- [ ] App appears on SpringBoard after `uicache`
-- [ ] App launches without crash
-- [ ] Log can be copied/saved
-- [ ] Works on Dopamine 3.x rootless
-
----
-
-## Security Notes
-
-- **Never commit GitHub tokens** to the repository
-- **Never share Personal Access Tokens** in chat or issues
-- Helper binary (`ipainstallerpro_helper`) runs as root via setuid
-- Always verify entitlements before signing
 
 ---
 
@@ -176,4 +173,4 @@ Before any release, verify:
 |---------|------|---------|
 | 1.0.0 | 2026-08-11 | Initial release |
 | 1.0.32 | 2026-08-12 | Operation logging, transaction system |
-| **1.1.0** | **2026-08-13** | **Live logging, zero-gap verification, deep copy checks, stat() verification, access(X_OK), otool -L, fallback chain** |
+| **2.0.0** | **2026-08-13** | **Architecture rewrite: unified provider contract, OperationLog integration, zero-gap verification, live log display, evidence-based results** |
