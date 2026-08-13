@@ -6,6 +6,7 @@
 //
 
 #import "InstallationProgressViewController.h"
+#import <objc/runtime.h>
 #import <UIKit/UIKit.h>
 #import "Core/InstallationEngine.h"
 #import "Core/OperationLog.h"
