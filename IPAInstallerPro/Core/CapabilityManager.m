@@ -48,7 +48,7 @@
     [self scanTool:@"ldid" identifier:@"ldid" path:[rm resolvePath:@"/usr/bin/ldid"] required:YES];
     [self scanTool:@"uicache" identifier:@"uicache" path:[rm resolvePath:@"/usr/bin/uicache"] required:YES];
     [self scanTool:@"unzip" identifier:@"unzip" path:[rm resolvePath:@"/usr/bin/unzip"] required:YES];
-    [self scanTool:@"chmod" identifier:@"chmod" path:[rm resolvePath:@"/bin/chmod"] required:YES];
+    [self scanTool:@"chmod" identifier:@"chmod" path:[rm resolvePath:@"/usr/bin/chmod"] required:YES];
     [self scanTool:@"chown" identifier:@"chown" path:[rm resolvePath:@"/usr/sbin/chown"] required:YES];
     [self scanTool:@"cp" identifier:@"cp" path:[rm resolvePath:@"/bin/cp"] required:YES];
     [self scanTool:@"rm" identifier:@"rm" path:[rm resolvePath:@"/bin/rm"] required:YES];
