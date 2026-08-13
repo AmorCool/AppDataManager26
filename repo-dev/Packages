@@ -1,17 +1,17 @@
 Package: com.appdatamanager.ipainstallerpro
 Name: IPA Installer Pro
-Version: 1.1.0
+Version: 2.0.0
 Architecture: iphoneos-arm64
-Description: Advanced IPA installation tool with live logging and zero-gap verification. Supports direct install, system install, and appinst methods with deep file verification.
+Description: Advanced IPA installation tool with live OperationLog, zero-gap verification, and unified provider architecture.
 Maintainer: AppDataManager Team <support@appdatamanager.com>
 Author: AppDataManager Team
 Section: Utilities
 Depends: firmware (>= 15.0), ldid, uicache, unzip
-Conflicts: com.appdatamanager.ipainstallerpro (<< 1.1.0)
-Replaces: com.appdatamanager.ipainstallerpro (<< 1.1.0)
+Conflicts: com.appdatamanager.ipainstallerpro (<< 2.0.0)
+Replaces: com.appdatamanager.ipainstallerpro (<< 2.0.0)
 Tag: role::hacker
-Filename: ./com.appdatamanager.ipainstallerpro_1.1.0_iphoneos-arm64.deb
+Filename: ./com.appdatamanager.ipainstallerpro_2.0.0_iphoneos-arm64.deb
 Size: 0
-MD5sum: 4322a340ca1a56a57ee1b0b39d1bf6a9
-SHA1: ca2741b757d1993c1d6a7d724adaec3e5823b57f
-SHA256: bc5af89f8289d2ecb7e10821bbf340a3377d0e1d465ae06ac1c47e23d44bf67c
+MD5sum: d41d8cd98f00b204e9800998ecf8427e
+SHA1: da39a3ee5e6b4b0d3255bfef95601890afd80709
+SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
