@@ -15,6 +15,7 @@
 #import <copyfile.h>
 #import <errno.h>
 #import <objc/runtime.h>
+#include <spawn.h>
 
 extern char **environ;
 
