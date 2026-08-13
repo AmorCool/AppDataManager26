@@ -11,6 +11,7 @@
 #import "Core/Logger.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 @interface InstallationProgressViewController ()
 @property (nonatomic, strong) UILabel *titleLabel;
