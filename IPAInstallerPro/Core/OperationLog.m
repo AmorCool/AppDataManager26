@@ -2,7 +2,7 @@
 // OperationLog.m
 // IPA Installer Pro
 //
-// v2.1 — Added NSNotificationCenter broadcasts for real-time UI updates
+// v2.1 — Complete implementation matching header
 //
 
 #import "OperationLog.h"
@@ -17,6 +17,13 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
 @end
 
 @implementation OperationLog
+
++ (instancetype)sharedLog {
+    static OperationLog *shared = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ shared = [[self alloc] init]; });
+    return shared;
+}
 
 - (instancetype)init {
     self = [super init];
@@ -48,7 +55,8 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
         @"rawError": @"",
         @"verification": @"Transaction started",
         @"verified": @YES,
-        @"duration": @0
+        @"duration": @0,
+        @"context": @""
     };
     [self addRecord:txn];
     return txnID;
@@ -68,7 +76,8 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
         @"rawError": @"",
         @"verification": [NSString stringWithFormat:@"Transaction ended with result: %@", result ?: @"UNKNOWN"],
         @"verified": [result isEqualToString:OperationResultSuccess] ? @YES : @NO,
-        @"duration": @0
+        @"duration": @0,
+        @"context": @""
     };
     [self addRecord:rec];
 }
@@ -90,13 +99,18 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
         @"rawError": @"",
         @"verification": @"Phase started",
         @"verified": @NO,
-        @"duration": @0
+        @"duration": @0,
+        @"context": @""
     };
     [self addRecord:rec];
     return recID;
 }
 
 - (void)endPhase:(NSString *)recordID exitCode:(int)exitCode rawOutput:(NSString *)rawOutput rawError:(NSString *)rawError verification:(NSString *)verification verified:(BOOL)verified duration:(NSTimeInterval)duration {
+    [self endPhase:recordID exitCode:exitCode rawOutput:rawOutput rawError:rawError verification:verification verified:verified duration:duration context:@""];
+}
+
+- (void)endPhase:(NSString *)recordID exitCode:(int)exitCode rawOutput:(NSString *)rawOutput rawError:(NSString *)rawError verification:(NSString *)verification verified:(BOOL)verified duration:(NSTimeInterval)duration context:(NSString *)context {
     dispatch_async(self.logQueue, ^{
         for (NSUInteger i = 0; i < self.records.count; i++) {
             NSMutableDictionary *rec = [self.records[i] mutableCopy];
@@ -107,6 +121,7 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
                 rec[@"verification"] = verification ?: @"";
                 rec[@"verified"] = @(verified);
                 rec[@"duration"] = @(duration);
+                rec[@"context"] = context ?: @"";
                 self.records[i] = rec;
                 [self saveLog];
                 [self broadcastRecordUpdated:rec];
@@ -126,6 +141,19 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
     });
 }
 
+- (NSDictionary *)recordByID:(NSString *)recordID {
+    __block NSDictionary *result = nil;
+    dispatch_sync(self.logQueue, ^{
+        for (NSDictionary *rec in self.records) {
+            if ([rec[@"recordID"] isEqualToString:recordID]) {
+                result = rec;
+                break;
+            }
+        }
+    });
+    return result;
+}
+
 - (NSArray<NSDictionary *> *)recordsForTransaction:(NSString *)transactionID {
     __block NSArray *result = nil;
     dispatch_sync(self.logQueue, ^{
@@ -138,13 +166,99 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
     return result;
 }
 
+- (NSArray<NSDictionary *> *)failedRecordsInTransaction:(NSString *)transactionID {
+    NSMutableArray *failed = [NSMutableArray array];
+    for (NSDictionary *rec in [self recordsForTransaction:transactionID]) {
+        if (![rec[@"verified"] boolValue]) [failed addObject:rec];
+    }
+    return failed;
+}
+
+- (NSDictionary *)firstFailureInTransaction:(NSString *)transactionID {
+    for (NSDictionary *rec in [self recordsForTransaction:transactionID]) {
+        if (![rec[@"verified"] boolValue]) return rec;
+    }
+    return nil;
+}
+
+- (BOOL)transactionHasFailures:(NSString *)transactionID {
+    return [self firstFailureInTransaction:transactionID] != nil;
+}
+
+- (NSString *)transactionReport:(NSString *)txnID {
+    if (!txnID) return @"";
+    NSArray *records = [self recordsForTransaction:txnID];
+    NSMutableString *report = [NSMutableString string];
+    [report appendFormat:@"Transaction Report: %@\n", txnID];
+    [report appendFormat:@"Total records: %lu\n\n", (unsigned long)records.count];
+    for (NSDictionary *rec in records) {
+        NSString *phase = rec[@"phase"] ?: @"???";
+        NSString *op = rec[@"operation"] ?: @"???";
+        NSString *target = rec[@"target"] ?: @"???";
+        NSNumber *exitCode = rec[@"exitCode"] ?: @(-1);
+        NSNumber *verified = rec[@"verified"] ?: @NO;
+        NSString *status = [verified boolValue] ? @"✅" : @"❌";
+        [report appendFormat:@"%@ [%@] %@ — %@ (exit=%@)\n", status, phase, op, target, exitCode];
+        NSString *err = rec[@"rawError"];
+        if (err && err.length > 0) [report appendFormat:@"   ⚠️ %@\n", err];
+    }
+    return report;
+}
+
+- (NSString *)transactionSummary:(NSString *)txnID {
+    NSArray *records = [self recordsForTransaction:txnID];
+    NSUInteger total = records.count;
+    NSUInteger failed = 0;
+    for (NSDictionary *rec in records) {
+        if (![rec[@"verified"] boolValue]) failed++;
+    }
+    return [NSString stringWithFormat:@"%lu phases, %lu failed", (unsigned long)total, (unsigned long)failed];
+}
+
+- (NSDictionary *)transactionStats:(NSString *)txnID {
+    NSArray *records = [self recordsForTransaction:txnID];
+    NSUInteger total = records.count;
+    NSUInteger failed = 0;
+    NSTimeInterval totalDuration = 0;
+    for (NSDictionary *rec in records) {
+        if (![rec[@"verified"] boolValue]) failed++;
+        totalDuration += [rec[@"duration"] doubleValue];
+    }
+    return @{
+        @"totalRecords": @(total),
+        @"failedRecords": @(failed),
+        @"successRate": @(total > 0 ? (total - failed) / (double)total : 0),
+        @"totalDuration": @(totalDuration)
+    };
+}
+
+- (NSString *)exportTransactionAsJSON:(NSString *)txnID {
+    NSArray *records = [self recordsForTransaction:txnID];
+    NSError *error;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:records options:NSJSONWritingPrettyPrinted error:&error];
+    return jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
+}
+
 - (NSArray<NSDictionary *> *)allRecords {
     __block NSArray *result = nil;
     dispatch_sync(self.logQueue, ^{ result = [self.records copy]; });
     return result;
 }
 
-- (void)clearLog {
+- (void)clearTransaction:(NSString *)transactionID {
+    dispatch_async(self.logQueue, ^{
+        NSMutableIndexSet *toRemove = [NSMutableIndexSet indexSet];
+        for (NSUInteger i = 0; i < self.records.count; i++) {
+            if ([self.records[i][@"transactionID"] isEqualToString:transactionID]) {
+                [toRemove addIndex:i];
+            }
+        }
+        [self.records removeObjectsAtIndexes:toRemove];
+        [self saveLog];
+    });
+}
+
+- (void)clearAll {
     dispatch_async(self.logQueue, ^{
         [self.records removeAllObjects];
         [self saveLog];
