@@ -253,9 +253,27 @@
         return;
     }
 
+    // ─── RESET ALL STATE for a fresh transaction ───
+    self.isDone = NO;
+    self.installedBundleID = nil;
+    self.currentTxnID = nil;
+    self.stageLabel.text = @"";
+    self.statusLabel.text = @"";
+    self.detailLabel.text = @"";
+    self.providerLabel.text = @"";
+    self.logTextView.text = @"";
+    self.spinnerView.hidden = NO;
+    self.doneButton.hidden = YES;
+    self.openAppButton.hidden = YES;
+    [self.doneButton setTitle:@"تم" forState:UIControlStateNormal];
+    self.doneButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:1.0];
+    self.stageLabel.textColor = [UIColor whiteColor];
+    self.statusIcon.image = nil;
+    [self.progressView setProgress:0.0 animated:NO];
+
     // Check if another installation is in progress
     InstallationEngine *engine = [InstallationEngine sharedEngine];
-    if (engine.activeTransactionID && engine.activeTransactionID.length > 0) {
+    if (engine.isInstalling) {
         [self showError:@"تثبيت آخر قيد التقدم" detail:@"يرجى الانتظار حتى اكتمال التثبيت الحالي"];
         return;
     }

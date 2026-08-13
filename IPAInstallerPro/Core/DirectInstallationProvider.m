@@ -405,9 +405,8 @@ extern char **environ;
 
     if (!txnID || txnID.length == 0) {
         txnID = [opLog beginTransactionForIPA:ipaPath];
-    } else {
-        [opLog beginTransactionForIPA:ipaPath];
     }
+    // If txnID is provided by the engine, use it directly without creating a duplicate OperationLog entry
 
     // PHASE 0: SAFETY CHECKS
     if (![self validateIPAPathSafety:ipaPath opLog:opLog txnID:txnID]) {

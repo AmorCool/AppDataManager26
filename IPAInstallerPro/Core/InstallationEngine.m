@@ -176,6 +176,8 @@
 - (void)finishInstallation {
     [self.installLock lock];
     self.isInstalling = NO;
+    self.activeTxnID = nil;
+    self.currentStage = InstallationStageIdle;
     [self.installLock unlock];
 }
 
