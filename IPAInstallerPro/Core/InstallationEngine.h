@@ -1,8 +1,8 @@
 //
-//  InstallationEngine.h
-//  IPAInstallerPro
+// InstallationEngine.h
+// IPA Installer Pro
 //
-//  v2.0 — Unified engine with OperationLog as source of truth
+// v2.1 — Standalone engine with OperationLog as source of truth
 //
 
 #import <Foundation/Foundation.h>
@@ -38,4 +38,5 @@ typedef NS_ENUM(NSInteger, InstallationStage) {
 // Transaction access for UI
 - (NSString *)activeTransactionID;
 - (NSString *)transactionReport:(NSString *)txnID;
+- (OperationLog *)operationLog;
 @end
