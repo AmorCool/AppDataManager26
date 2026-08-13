@@ -8,7 +8,6 @@
 #import "DirectInstallationProvider.h"
 #import "RootlessManager.h"
 #import "OperationLog.h"
-#import "InstallationResult.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <sys/stat.h>
