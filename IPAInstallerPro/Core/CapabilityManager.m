@@ -8,6 +8,7 @@
 #import "CapabilityManager.h"
 #import "RootlessManager.h"
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 
 @interface CapabilityManager ()
 @property (nonatomic, strong) NSMutableArray<Capability *> *capabilities;
