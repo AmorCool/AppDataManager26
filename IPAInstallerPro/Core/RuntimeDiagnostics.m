@@ -10,8 +10,11 @@
 #import "OperationLog.h"
 #import "RootlessManager.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <sys/types.h>
 #import <signal.h>
+#import <spawn.h>
+#import <UIKit/UIKit.h>
 
 @implementation ProcessInfo
 @end
