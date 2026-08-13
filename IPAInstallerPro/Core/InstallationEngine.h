@@ -1,3 +1,10 @@
+//
+//  InstallationEngine.h
+//  IPAInstallerPro
+//
+//  v2.0 — Unified engine with OperationLog as source of truth
+//
+
 #import <Foundation/Foundation.h>
 #import "InstallationProvider.h"
 
@@ -13,13 +20,22 @@ typedef NS_ENUM(NSInteger, InstallationStage) {
 
 @interface InstallationEngine : NSObject
 + (instancetype)sharedEngine;
+
+// Provider management
 - (NSArray<id<InstallationProvider>> *)availableProviders;
 - (id<InstallationProvider>)bestProvider;
+- (NSString *)currentProviderName;
+- (NSString *)stageDescription:(InstallationStage)stage;
+
+// Main install — OperationLog is created internally, exposed via delegate
 - (void)installIPA:(NSString *)ipaPath
      progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
         completion:(void (^)(InstallationResult *result))completion;
+
 - (void)uninstallAppWithBundleID:(NSString *)bundleID
-        completion:(void (^)(BOOL success, NSString *error))completion;
-- (NSString *)currentProviderName;
-- (NSString *)stageDescription:(InstallationStage)stage;
+                      completion:(void (^)(BOOL success, NSString *error))completion;
+
+// Transaction access for UI
+- (NSString *)activeTransactionID;
+- (NSString *)transactionReport:(NSString *)txnID;
 @end
