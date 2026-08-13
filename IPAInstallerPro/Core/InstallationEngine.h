@@ -38,6 +38,9 @@ typedef NS_ENUM(NSInteger, InstallationStage) {
                     completion:(void (^)(BOOL success, NSString *error))completion;
 
 
+// Transaction state
+@property (nonatomic, readonly, assign) BOOL isInstalling;
+
 // Transaction access for UI
 - (NSString *)activeTransactionID;
 - (NSString *)transactionReport:(NSString *)txnID;

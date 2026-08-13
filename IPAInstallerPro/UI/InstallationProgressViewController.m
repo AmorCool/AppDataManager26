@@ -273,7 +273,7 @@
 
     // Check if another installation is in progress
     InstallationEngine *engine = [InstallationEngine sharedEngine];
-    if (engine.isInstalling) {
+    if (engine.activeTransactionID && engine.activeTransactionID.length > 0) {
         [self showError:@"تثبيت آخر قيد التقدم" detail:@"يرجى الانتظار حتى اكتمال التثبيت الحالي"];
         return;
     }
