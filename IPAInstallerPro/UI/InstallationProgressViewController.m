@@ -166,7 +166,6 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
 #pragma mark - ViewController
 
 @interface InstallationProgressViewController ()
-@property (nonatomic, strong) NSString *ipaPath;
 @property (nonatomic, strong) NSString *installedBundleID;
 @property (nonatomic, strong) NSString *currentTxnID;
 @property (nonatomic, assign) BOOL isDone;
@@ -490,7 +489,7 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
     [self addSectionTitle:@"البيئة" toStack:stack];
     [self addItem:[NSString stringWithFormat:@"الجيلبريك: %@", env.jailbreakType ?: @"غير معروف"] toStack:stack];
     [self addItem:[NSString stringWithFormat:@"Rootless: %@", env.isRootless ? @"نعم" : @"لا"] toStack:stack];
-    [self addItem:[NSString stringWithFormat:@"المسار: %@", env.applicationsDirectory ?: @"-"] toStack:stack];
+    [self addItem:[NSString stringWithFormat:@"المسار: %@", env.applicationsPath ?: @"-"] toStack:stack];
 
     // ─── Error (on failure) ───
     if (!success && result.message.length > 0) {
