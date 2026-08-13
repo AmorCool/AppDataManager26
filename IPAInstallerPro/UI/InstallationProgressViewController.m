@@ -262,6 +262,9 @@
 
     [self appendLog:@"🚀 بدء عملية التثبيت..."];
 
+    // Set txnID BEFORE starting install so notifications match
+    self.currentTxnID = [[InstallationEngine sharedEngine] activeTransactionID];
+
     [[InstallationEngine sharedEngine] installIPA:self.ipaPath
      progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
         self.stageLabel.text = statusMessage;
@@ -288,8 +291,6 @@
             [self showError:result.message detail:result.detailedOutput];
         }
     }];
-
-    self.currentTxnID = engine.activeTransactionID;
 }
 
 - (void)showSuccess {
