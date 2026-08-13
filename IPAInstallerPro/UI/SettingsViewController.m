@@ -112,7 +112,6 @@
 
 - (void)refreshData {
     JailbreakEnvironment *env = [JailbreakEnvironment sharedEnvironment];
-    RootlessManager *rm = [RootlessManager sharedManager];
     CapabilityManager *cap = [CapabilityManager sharedManager];
 
     NSMutableString *envStr = [NSMutableString string];
