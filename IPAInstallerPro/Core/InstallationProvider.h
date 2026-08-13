@@ -20,8 +20,9 @@
 
 // Unified install: provider receives OperationLog to record every real operation
 - (void)installIPA:(NSString *)ipaPath
-         operationLog:(OperationLog *)opLog
-           completion:(void (^)(InstallationResult *result))completion;
+      transactionID:(NSString *)txnID
+       operationLog:(OperationLog *)opLog
+         completion:(void (^)(InstallationResult *result))completion;
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID
                       completion:(void (^)(BOOL success, NSString *error))completion;
