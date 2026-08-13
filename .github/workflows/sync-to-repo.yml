@@ -4,11 +4,6 @@ permissions:
   contents: write
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'IPAInstallerPro/**'
-      - 'scripts/**'
   workflow_dispatch:
 
 jobs:
@@ -65,5 +60,5 @@ jobs:
           python3 scripts/generate-repo.py . --dev
 
           git add -A
-          git commit -m "Auto-sync: IPA Installer Pro $(date +%Y-%m-%d-%H:%M)" || true
+          git commit -m "Add IPA Installer Pro (dev build)" || true
           git push origin main
