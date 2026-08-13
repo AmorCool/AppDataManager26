@@ -2,7 +2,7 @@
 // SettingsViewController.m
 // IPA Installer Pro
 //
-// v2.2 — Fixed layout with Auto Layout
+// v2.3 — Fixed with correct property names
 //
 
 #import "SettingsViewController.h"
@@ -33,7 +33,6 @@
 }
 
 - (void)setupUI {
-    // ScrollView for content
     self.scrollView = [[UIScrollView alloc] init];
     self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.scrollView];
@@ -42,7 +41,6 @@
     self.contentView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.scrollView addSubview:self.contentView];
 
-    // Environment Header
     self.envHeader = [[UILabel alloc] init];
     self.envHeader.text = @"🔧 بيئة التشغيل";
     self.envHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
@@ -50,7 +48,6 @@
     self.envHeader.translatesAutoresizingMaskIntoConstraints = NO;
     [self.contentView addSubview:self.envHeader];
 
-    // Environment TextView
     self.envTextView = [[UITextView alloc] init];
     self.envTextView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
     self.envTextView.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
@@ -62,7 +59,6 @@
     self.envTextView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.contentView addSubview:self.envTextView];
 
-    // Capabilities Header
     self.capHeader = [[UILabel alloc] init];
     self.capHeader.text = @"⚙️ القدرات";
     self.capHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
@@ -70,7 +66,6 @@
     self.capHeader.translatesAutoresizingMaskIntoConstraints = NO;
     [self.contentView addSubview:self.capHeader];
 
-    // Capabilities TextView
     self.capTextView = [[UITextView alloc] init];
     self.capTextView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
     self.capTextView.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
@@ -82,38 +77,31 @@
     self.capTextView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.contentView addSubview:self.capTextView];
 
-    // Layout Constraints
     [NSLayoutConstraint activateConstraints:@[
-        // ScrollView
         [self.scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
         [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
-        // ContentView
         [self.contentView.topAnchor constraintEqualToAnchor:self.scrollView.topAnchor constant:16],
         [self.contentView.leadingAnchor constraintEqualToAnchor:self.scrollView.leadingAnchor constant:16],
         [self.contentView.trailingAnchor constraintEqualToAnchor:self.scrollView.trailingAnchor constant:-16],
         [self.contentView.bottomAnchor constraintEqualToAnchor:self.scrollView.bottomAnchor constant:-16],
         [self.contentView.widthAnchor constraintEqualToAnchor:self.scrollView.widthAnchor constant:-32],
 
-        // Environment Header
         [self.envHeader.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
         [self.envHeader.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
         [self.envHeader.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
 
-        // Environment TextView
         [self.envTextView.topAnchor constraintEqualToAnchor:self.envHeader.bottomAnchor constant:8],
         [self.envTextView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
         [self.envTextView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
         [self.envTextView.heightAnchor constraintEqualToConstant:200],
 
-        // Capabilities Header
         [self.capHeader.topAnchor constraintEqualToAnchor:self.envTextView.bottomAnchor constant:24],
         [self.capHeader.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
         [self.capHeader.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
 
-        // Capabilities TextView
         [self.capTextView.topAnchor constraintEqualToAnchor:self.capHeader.bottomAnchor constant:8],
         [self.capTextView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
         [self.capTextView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
@@ -128,12 +116,14 @@
     CapabilityManager *cap = [CapabilityManager sharedManager];
 
     NSMutableString *envStr = [NSMutableString string];
-    [envStr appendFormat:@"Jailbreak: %@\n", env.jailbreakName ?: @"Unknown"];
-    [envStr appendFormat:@"Version: %@\n", env.jailbreakVersion ?: @"Unknown"];
+    [envStr appendFormat:@"Jailbreak: %@\n", env.jailbreakType ?: @"Unknown"];
     [envStr appendFormat:@"Rootless: %@\n", env.isRootless ? @"Yes" : @"No"];
-    [envStr appendFormat:@"Root Path: %@\n", rm.rootPath ?: @"N/A"];
-    [envStr appendFormat:@"Apps Path: %@\n", rm.appsPath ?: @"N/A"];
-    [envStr appendFormat:@"Prefix: %@\n", rm.prefixPath ?: @"N/A"];
+    [envStr appendFormat:@"OS Version: %@\n", env.osVersion ?: @"Unknown"];
+    [envStr appendFormat:@"Device: %@\n", env.deviceModel ?: @"Unknown"];
+    [envStr appendFormat:@"Applications: %@\n", env.applicationsPath ?: @"N/A"];
+    [envStr appendFormat:@"usr/bin: %@\n", env.usrBinPath ?: @"N/A"];
+    [envStr appendFormat:@"Documents: %@\n", env.mobileDocumentsPath ?: @"N/A"];
+    [envStr appendFormat:@"Root Path: %@\n", env.rootPath ?: @"N/A"];
 
     self.envTextView.text = envStr;
 
