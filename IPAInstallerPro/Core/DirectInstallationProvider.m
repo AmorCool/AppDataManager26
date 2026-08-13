@@ -389,7 +389,7 @@ extern char **environ;
 
 #pragma mark - Main Installation
 
-- (void)installIPA:(NSString *)ipaPath operationLog:(OperationLog *)opLog completion:(void (^)(InstallationResult *))completion {
+- (void)installIPA:(NSString *)ipaPath transactionID:(NSString *)txnID operationLog:(OperationLog *)opLog completion:(void (^)(InstallationResult *))completion {
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL hasH = [self hasRootHelper];
 
@@ -401,7 +401,11 @@ extern char **environ;
         return;
     }
 
-    NSString *txnID = [opLog beginTransactionForIPA:ipaPath];
+    if (!txnID || txnID.length == 0) {
+        txnID = [opLog beginTransactionForIPA:ipaPath];
+    } else {
+        [opLog beginTransactionForIPA:ipaPath];
+    }
 
     // PHASE 0: SAFETY CHECKS
     if (![self validateIPAPathSafety:ipaPath opLog:opLog txnID:txnID]) {
