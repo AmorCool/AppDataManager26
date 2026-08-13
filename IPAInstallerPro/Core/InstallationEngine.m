@@ -2,7 +2,7 @@
 // InstallationEngine.m
 // IPA Installer Pro
 //
-// v2.1 — STANDALONE: Only DirectInstallationProvider with full progress tracking
+// v2.2 — STANDALONE with concurrent install protection and NSLock
 //
 
 #import "InstallationEngine.h"
@@ -16,6 +16,8 @@
 @property (nonatomic, strong) OperationLog *operationLog;
 @property (nonatomic, strong) NSString *activeTxnID;
 @property (nonatomic, assign) InstallationStage currentStage;
+@property (nonatomic, strong) NSLock *installLock;
+@property (nonatomic, assign) BOOL isInstalling;
 @end
 
 @implementation InstallationEngine
@@ -35,6 +37,8 @@
         _operationLog = [[OperationLog alloc] init];
         _providers = [NSMutableArray array];
         _currentStage = InstallationStageIdle;
+        _installLock = [[NSLock alloc] init];
+        _isInstalling = NO;
         // Only Direct Install — our standalone signature
         [self registerProvider:[[DirectInstallationProvider alloc] init]];
     }
@@ -113,10 +117,23 @@
      progressBlock:(void (^)(InstallationStage stage, NSString *statusMessage, float progress))progressBlock
         completion:(void (^)(InstallationResult *result))completion {
 
+    // Concurrent install protection
+    [self.installLock lock];
+    if (self.isInstalling) {
+        [self.installLock unlock];
+        NSString *err = @"Another installation is already in progress. Please wait.";
+        if (progressBlock) progressBlock(InstallationStageFailed, err, 1.0);
+        if (completion) completion([InstallationResult failureResult:err provider:@"Engine" transaction:@"" error:nil evidence:nil]);
+        return;
+    }
+    self.isInstalling = YES;
+    [self.installLock unlock];
+
     self.currentStage = InstallationStagePreparing;
     if (progressBlock) progressBlock(self.currentStage, @"Preparing installation...", 0.05);
 
     if (!ipaPath || ipaPath.length == 0) {
+        [self finishInstallation];
         self.currentStage = InstallationStageFailed;
         if (progressBlock) progressBlock(self.currentStage, @"IPA path is empty", 1.0);
         if (completion) completion([InstallationResult failureResult:@"IPA path is empty" provider:@"Engine" transaction:@"" error:nil evidence:nil]);
@@ -127,6 +144,7 @@
 
     NSArray *available = [self availableProviders];
     if (available.count == 0) {
+        [self finishInstallation];
         self.currentStage = InstallationStageFailed;
         NSString *err = @"No installation provider available. Ensure ldid, uicache, and unzip are installed.";
         if (progressBlock) progressBlock(self.currentStage, err, 1.0);
@@ -146,21 +164,32 @@
     self.currentStage = InstallationStageInstalling;
     if (progressBlock) progressBlock(self.currentStage, @"Installing files...", 0.3);
 
+    __weak typeof(self) weakSelf = self;
     [provider installIPA:ipaPath operationLog:self.operationLog completion:^(InstallationResult *result) {
-        if (result && result.success) {
-            self.currentStage = InstallationStageRegistering;
-            if (progressBlock) progressBlock(self.currentStage, @"Registering app...", 0.8);
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
 
-            self.currentStage = InstallationStageCompleted;
-            if (progressBlock) progressBlock(self.currentStage, @"Installation complete!", 1.0);
+        if (result && result.success) {
+            strongSelf.currentStage = InstallationStageRegistering;
+            if (progressBlock) progressBlock(strongSelf.currentStage, @"Registering app...", 0.8);
+
+            strongSelf.currentStage = InstallationStageCompleted;
+            if (progressBlock) progressBlock(strongSelf.currentStage, @"Installation complete!", 1.0);
             NSLog(@"[IPAInstallerPro] Installation succeeded via %@", [provider providerName]);
         } else {
-            self.currentStage = InstallationStageFailed;
-            if (progressBlock) progressBlock(self.currentStage, result ? result.message : @"Unknown error", 1.0);
+            strongSelf.currentStage = InstallationStageFailed;
+            if (progressBlock) progressBlock(strongSelf.currentStage, result ? result.message : @"Unknown error", 1.0);
             NSLog(@"[IPAInstallerPro] Installation failed via %@: %@", [provider providerName], result ? result.message : @"Unknown error");
         }
+        [strongSelf finishInstallation];
         if (completion) completion(result);
     }];
+}
+
+- (void)finishInstallation {
+    [self.installLock lock];
+    self.isInstalling = NO;
+    [self.installLock unlock];
 }
 
 - (void)uninstallAppWithBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSString *))completion {
