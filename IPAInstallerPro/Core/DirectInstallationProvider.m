@@ -18,7 +18,6 @@
 #include <copyfile.h>
 #include <unistd.h>
 #include <errno.h>
-#import <CommonCrypto/CommonDigest.h>
 
 extern char **environ;
 
@@ -742,23 +741,6 @@ extern char **environ;
     }
 }
 
-- (NSString *)sha256OfFile:(NSString *)path {
-    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:path];
-    if (!fh) return @"N/A";
-    CC_SHA256_CTX ctx;
-    CC_SHA256_Init(&ctx);
-    while (YES) {
-        NSData *d = [fh readDataOfLength:4096];
-        if (!d || d.length == 0) break;
-        CC_SHA256_Update(&ctx, d.bytes, (CC_LONG)d.length);
-    }
-    [fh closeFile];
-    unsigned char md[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256_Final(md, &ctx);
-    NSMutableString *s = [NSMutableString string];
-    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [s appendFormat:@"%02x", md[i]];
-    return s;
-}
 
 - (void)signExe:(NSString *)path hasHelper:(BOOL)hasH opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
@@ -766,9 +748,6 @@ extern char **environ;
         return;
     }
 
-    NSLog(@"[IPAInstallerPro] ==========================================");
-    NSLog(@"[IPAInstallerPro] SIGN TARGET: %@", path);
-    NSLog(@"[IPAInstallerPro] BEFORE SIGN: sha256=%@ size=%lld", [self sha256OfFile:path], [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] fileSize]);
 
     NSString *rec = [opLog beginPhase:OperationPhaseSign operation:@"signExe (main)" target:path input:@"" transactionID:txnID];
     NSString *ep = [NSTemporaryDirectory() stringByAppendingPathComponent:@"orig.ent"];
@@ -778,12 +757,9 @@ extern char **environ;
     if (entOutput && entOutput.length > 0) {
         [entOutput writeToFile:ep atomically:YES encoding:NSUTF8StringEncoding error:nil];
         NSString *sf = [NSString stringWithFormat:@"-S%@", ep];
-        NSLog(@"[IPAInstallerPro] SIGN CMD: %@ %@ %@", self.ldidPath, sf, path);
         BOOL ok = hasH ? [self runRoot:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec]
                        : [self runCmd:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec];
-        NSLog(@"[IPAInstallerPro] SIGN RESULT: ok=%d", ok);
         if (ok) {
-            NSLog(@"[IPAInstallerPro] AFTER SIGN: sha256=%@ size=%lld", [self sha256OfFile:path], [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] fileSize]);
             return;
         }
     }
