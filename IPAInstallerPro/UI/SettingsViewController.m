@@ -2,7 +2,7 @@
 // SettingsViewController.m
 // IPA Installer Pro
 //
-// v2.3 — Fixed with correct property names
+// v2.4 — Frame-based layout for reliability
 //
 
 #import "SettingsViewController.h"
@@ -15,11 +15,8 @@
 
 @interface SettingsViewController ()
 @property (nonatomic, strong) UIScrollView *scrollView;
-@property (nonatomic, strong) UIView *contentView;
-@property (nonatomic, strong) UILabel *envHeader;
-@property (nonatomic, strong) UITextView *envTextView;
-@property (nonatomic, strong) UILabel *capHeader;
-@property (nonatomic, strong) UITextView *capTextView;
+@property (nonatomic, strong) UILabel *envLabel;
+@property (nonatomic, strong) UILabel *capLabel;
 @end
 
 @implementation SettingsViewController
@@ -28,86 +25,73 @@
     [super viewDidLoad];
     self.title = @"الإعدادات";
     self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-    [self setupUI];
-    [self refreshData];
-}
 
-- (void)setupUI {
-    self.scrollView = [[UIScrollView alloc] init];
-    self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    CGFloat w = self.view.bounds.size.width;
+    CGFloat h = self.view.bounds.size.height;
+    CGFloat top = 20;
+    if (@available(iOS 11.0, *)) {
+        top = self.view.safeAreaInsets.top + 20;
+    }
+
+    // ScrollView
+    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, w, h)];
+    self.scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.scrollView.backgroundColor = [UIColor clearColor];
     [self.view addSubview:self.scrollView];
 
-    self.contentView = [[UIView alloc] init];
-    self.contentView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.scrollView addSubview:self.contentView];
+    // Environment Header
+    UILabel *envHeader = [[UILabel alloc] initWithFrame:CGRectMake(16, top, w - 32, 30)];
+    envHeader.text = @"🔧 بيئة التشغيل";
+    envHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
+    envHeader.textColor = [UIColor whiteColor];
+    envHeader.textAlignment = NSTextAlignmentRight;
+    envHeader.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [self.scrollView addSubview:envHeader];
 
-    self.envHeader = [[UILabel alloc] init];
-    self.envHeader.text = @"🔧 بيئة التشغيل";
-    self.envHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
-    self.envHeader.textColor = [UIColor whiteColor];
-    self.envHeader.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.envHeader];
+    // Environment Info
+    self.envLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, top + 40, w - 32, 200)];
+    self.envLabel.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+    self.envLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+    self.envLabel.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
+    self.envLabel.layer.cornerRadius = 10;
+    self.envLabel.clipsToBounds = YES;
+    self.envLabel.numberOfLines = 0;
+    self.envLabel.textAlignment = NSTextAlignmentRight;
+    self.envLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [self.scrollView addSubview:self.envLabel];
 
-    self.envTextView = [[UITextView alloc] init];
-    self.envTextView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
-    self.envTextView.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
-    self.envTextView.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
-    self.envTextView.editable = NO;
-    self.envTextView.selectable = YES;
-    self.envTextView.layer.cornerRadius = 10;
-    self.envTextView.textAlignment = NSTextAlignmentRight;
-    self.envTextView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.envTextView];
+    // Capabilities Header
+    UILabel *capHeader = [[UILabel alloc] initWithFrame:CGRectMake(16, top + 260, w - 32, 30)];
+    capHeader.text = @"⚙️ القدرات";
+    capHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
+    capHeader.textColor = [UIColor whiteColor];
+    capHeader.textAlignment = NSTextAlignmentRight;
+    capHeader.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [self.scrollView addSubview:capHeader];
 
-    self.capHeader = [[UILabel alloc] init];
-    self.capHeader.text = @"⚙️ القدرات";
-    self.capHeader.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
-    self.capHeader.textColor = [UIColor whiteColor];
-    self.capHeader.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.capHeader];
+    // Capabilities Info
+    self.capLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, top + 300, w - 32, 300)];
+    self.capLabel.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+    self.capLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+    self.capLabel.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
+    self.capLabel.layer.cornerRadius = 10;
+    self.capLabel.clipsToBounds = YES;
+    self.capLabel.numberOfLines = 0;
+    self.capLabel.textAlignment = NSTextAlignmentRight;
+    self.capLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [self.scrollView addSubview:self.capLabel];
 
-    self.capTextView = [[UITextView alloc] init];
-    self.capTextView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
-    self.capTextView.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
-    self.capTextView.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
-    self.capTextView.editable = NO;
-    self.capTextView.selectable = YES;
-    self.capTextView.layer.cornerRadius = 10;
-    self.capTextView.textAlignment = NSTextAlignmentRight;
-    self.capTextView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.capTextView];
+    [self refreshData];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [self.scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    // Set scroll content size
+    self.scrollView.contentSize = CGSizeMake(w, top + 620);
+}
 
-        [self.contentView.topAnchor constraintEqualToAnchor:self.scrollView.topAnchor constant:16],
-        [self.contentView.leadingAnchor constraintEqualToAnchor:self.scrollView.leadingAnchor constant:16],
-        [self.contentView.trailingAnchor constraintEqualToAnchor:self.scrollView.trailingAnchor constant:-16],
-        [self.contentView.bottomAnchor constraintEqualToAnchor:self.scrollView.bottomAnchor constant:-16],
-        [self.contentView.widthAnchor constraintEqualToAnchor:self.scrollView.widthAnchor constant:-32],
-
-        [self.envHeader.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
-        [self.envHeader.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
-        [self.envHeader.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-
-        [self.envTextView.topAnchor constraintEqualToAnchor:self.envHeader.bottomAnchor constant:8],
-        [self.envTextView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
-        [self.envTextView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-        [self.envTextView.heightAnchor constraintEqualToConstant:200],
-
-        [self.capHeader.topAnchor constraintEqualToAnchor:self.envTextView.bottomAnchor constant:24],
-        [self.capHeader.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
-        [self.capHeader.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-
-        [self.capTextView.topAnchor constraintEqualToAnchor:self.capHeader.bottomAnchor constant:8],
-        [self.capTextView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
-        [self.capTextView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-        [self.capTextView.heightAnchor constraintEqualToConstant:250],
-        [self.capTextView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
-    ]];
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGFloat w = self.view.bounds.size.width;
+    CGFloat h = self.view.bounds.size.height;
+    self.scrollView.frame = CGRectMake(0, 0, w, h);
 }
 
 - (void)refreshData {
@@ -124,7 +108,7 @@
     [envStr appendFormat:@"Documents: %@\n", env.mobileDocumentsPath ?: @"N/A"];
     [envStr appendFormat:@"Root Path: %@\n", env.rootPath ?: @"N/A"];
 
-    self.envTextView.text = envStr;
+    self.envLabel.text = envStr;
 
     NSMutableString *capStr = [NSMutableString string];
     [capStr appendFormat:@"%@\n", [cap installationReadinessStatus]];
@@ -134,7 +118,7 @@
         [capStr appendFormat:@"%@ %@: %@\n", icon, c.name, c.statusMessage];
     }
 
-    self.capTextView.text = capStr;
+    self.capLabel.text = capStr;
 }
 
 @end
