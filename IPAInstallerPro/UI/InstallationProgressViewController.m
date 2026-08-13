@@ -1,16 +1,16 @@
 //
-//  InstallationProgressViewController.m
-//  IPAInstallerPro
+// InstallationProgressViewController.m
+// IPA Installer Pro
 //
-//  v2.0 — Live OperationLog via NSNotificationCenter (no polling)
+// v2.1 — Real-time OperationLog streaming with NSNotificationCenter + concurrent install guard
 //
 
 #import "InstallationProgressViewController.h"
-#import <objc/runtime.h>
-#import <UIKit/UIKit.h>
 #import "Core/InstallationEngine.h"
 #import "Core/OperationLog.h"
 #import "Core/Logger.h"
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 @interface InstallationProgressViewController ()
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -28,6 +28,7 @@
 @property (nonatomic, strong) UITextView *logTextView;
 @property (nonatomic, strong) UIView *logContainer;
 @property (nonatomic, strong) NSString *currentTxnID;
+@property (nonatomic, strong) NSMutableArray<NSDictionary *> *displayRecords;
 @end
 
 @implementation InstallationProgressViewController
@@ -37,6 +38,7 @@
     self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
     self.title = @"Installing...";
     self.isDone = NO;
+    self.displayRecords = [NSMutableArray array];
 
     [self setupViews];
     [self registerForLogNotifications];
@@ -69,7 +71,7 @@
     [self.view addSubview:self.titleLabel];
 
     self.providerLabel = [[UILabel alloc] initWithFrame:CGRectMake(margin, 180, w - margin * 2, 18)];
-    self.providerLabel.text = @"جاري اختيار أفضل طريقة تثبيت...";
+    self.providerLabel.text = @"جاري التثبيت...";
     self.providerLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
     self.providerLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
     self.providerLabel.textAlignment = NSTextAlignmentCenter;
@@ -169,48 +171,67 @@
 
 - (void)registerForLogNotifications {
     [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(operationLogUpdated:)
+                                             selector:@selector(operationRecordAdded:)
                                                  name:@"OperationRecordAdded"
                                                object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(operationLogUpdated:)
+                                             selector:@selector(operationRecordUpdated:)
                                                  name:@"OperationRecordUpdated"
                                                object:nil];
 }
 
-- (void)operationLogUpdated:(NSNotification *)note {
+- (void)operationRecordAdded:(NSNotification *)note {
+    NSDictionary *rec = note.userInfo[@"record"];
+    if (!rec) return;
+    NSString *recTxnID = rec[@"transactionID"];
+    if (!recTxnID || ![recTxnID isEqualToString:self.currentTxnID]) return;
+
     dispatch_async(dispatch_get_main_queue(), ^{
-        OperationRecord *rec = note.userInfo[@"record"];
-        if (rec) {
-            NSString *line = [self formatRecord:rec];
-            if (line) [self appendLog:line];
+        [self.displayRecords addObject:rec];
+        NSString *line = [self formatRecordDict:rec];
+        if (line) [self appendLog:line];
+    });
+}
+
+- (void)operationRecordUpdated:(NSNotification *)note {
+    NSDictionary *rec = note.userInfo[@"record"];
+    if (!rec) return;
+    NSString *recID = rec[@"recordID"];
+    NSString *recTxnID = rec[@"transactionID"];
+    if (!recID || !recTxnID || ![recTxnID isEqualToString:self.currentTxnID]) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (NSUInteger i = 0; i < self.displayRecords.count; i++) {
+            if ([self.displayRecords[i][@"recordID"] isEqualToString:recID]) {
+                self.displayRecords[i] = rec;
+                break;
+            }
+        }
+        NSString *line = [self formatRecordDict:rec];
+        if (line) [self appendLog:line];
+
+        // Update stage label with latest phase
+        NSString *phase = rec[@"phase"] ?: @"";
+        NSString *verification = rec[@"verification"] ?: @"";
+        if (verification.length > 0) {
+            self.stageLabel.text = [NSString stringWithFormat:@"%@: %@", phase, verification];
         }
     });
 }
 
-- (NSString *)formatRecord:(OperationRecord *)rec {
+- (NSString *)formatRecordDict:(NSDictionary *)rec {
     if (!rec) return nil;
-    NSString *phaseName = @"";
-    switch (rec.phase) {
-        case OperationPhaseIPAOpen: phaseName = @"[IPA]"; break;
-        case OperationPhaseIPAExtract: phaseName = @"[EXT]"; break;
-        case OperationPhaseAppIdentify: phaseName = @"[ID]"; break;
-        case OperationPhaseFileCopy: phaseName = @"[COPY]"; break;
-        case OperationPhasePermission: phaseName = @"[PERM]"; break;
-        case OperationPhaseSign: phaseName = @"[SIGN]"; break;
-        case OperationPhaseFramework: phaseName = @"[FW]"; break;
-        case OperationPhaseUICache: phaseName = @"[UI]"; break;
-        case OperationPhaseVerify: phaseName = @"[VER]"; break;
-        case OperationPhaseCleanup: phaseName = @"[CLN]"; break;
-        case OperationPhaseStart: phaseName = @"[START]"; break;
-        default: phaseName = @"[???]"; break;
-    }
-    NSString *statusIcon = rec.verified ? @"✅" : @"❌";
-    if (rec.exitCode != 0 && rec.verified) statusIcon = @"⚠️";
-    NSString *op = rec.operation ?: @"unknown";
-    NSString *verif = rec.verification ?: @"";
+    NSString *phase = rec[@"phase"] ?: @"???";
+    NSString *op = rec[@"operation"] ?: @"???";
+    NSNumber *verified = rec[@"verified"] ?: @NO;
+    NSNumber *exitCode = rec[@"exitCode"] ?: @(-1);
+    NSString *verif = rec[@"verification"] ?: @"";
+
+    NSString *statusIcon = [verified boolValue] ? @"✅" : @"❌";
+    if ([exitCode intValue] != 0 && [verified boolValue]) statusIcon = @"⚠️";
+
     if (verif.length > 50) verif = [verif substringToIndex:50];
-    return [NSString stringWithFormat:@"%@ %@ %@ | %@", statusIcon, phaseName, op, verif];
+    return [NSString stringWithFormat:@"%@ [%@] %@ | %@", statusIcon, phase, op, verif];
 }
 
 - (void)appendLog:(NSString *)text {
@@ -231,10 +252,17 @@
         return;
     }
 
+    // Check if another installation is in progress
+    InstallationEngine *engine = [InstallationEngine sharedEngine];
+    if (engine.activeTransactionID && engine.activeTransactionID.length > 0) {
+        [self showError:@"تثبيت آخر قيد التقدم" detail:@"يرجى الانتظار حتى اكتمال التثبيت الحالي"];
+        return;
+    }
+
     [self appendLog:@"🚀 بدء عملية التثبيت..."];
 
     [[InstallationEngine sharedEngine] installIPA:self.ipaPath
-                                      progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
+     progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
         self.stageLabel.text = statusMessage;
         self.statusLabel.text = [[InstallationEngine sharedEngine] stageDescription:stage];
         [self.progressView setProgress:progress animated:YES];
@@ -249,7 +277,7 @@
             [self showError:statusMessage detail:@""];
         }
     }
-                                       completion:^(InstallationResult *result) {
+     completion:^(InstallationResult *result) {
         self.isDone = YES;
         if (result.success) {
             self.installedBundleID = result.bundleID;
@@ -259,6 +287,8 @@
             [self showError:result.message detail:result.detailedOutput];
         }
     }];
+
+    self.currentTxnID = engine.activeTransactionID;
 }
 
 - (void)showSuccess {
