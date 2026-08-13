@@ -169,17 +169,17 @@
 - (void)registerForLogNotifications {
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(operationLogUpdated:)
-                                                 name:@"OperationLogRecordAdded"
+                                                 name:@"OperationRecordAdded"
                                                object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(operationLogUpdated:)
-                                                 name:@"OperationLogRecordUpdated"
+                                                 name:@"OperationRecordUpdated"
                                                object:nil];
 }
 
 - (void)operationLogUpdated:(NSNotification *)note {
     dispatch_async(dispatch_get_main_queue(), ^{
-        OperationLogRecord *rec = note.userInfo[@"record"];
+        OperationRecord *rec = note.userInfo[@"record"];
         if (rec) {
             NSString *line = [self formatRecord:rec];
             if (line) [self appendLog:line];
@@ -187,7 +187,7 @@
     });
 }
 
-- (NSString *)formatRecord:(OperationLogRecord *)rec {
+- (NSString *)formatRecord:(OperationRecord *)rec {
     if (!rec) return nil;
     NSString *phaseName = @"";
     switch (rec.phase) {
