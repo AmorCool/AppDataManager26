@@ -299,11 +299,13 @@ extern char **environ;
 }
 
 - (BOOL)verifySignature:(NSString *)path opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
+    NSLog(@"[IPAInstallerPro] verifySignature: path=%@ ldid=%@", path, self.ldidPath);
     NSString *output = [self runCmdOutput:self.ldidPath args:@[@"-d", path]];
     BOOL hasSig = (output && output.length > 10);
     NSString *rec = [opLog beginPhase:OperationPhaseSign operation:@"ldid -d signature check" target:path input:@"" transactionID:txnID];
     [opLog endPhase:rec exitCode:hasSig ? 0 : 1 rawOutput:output ?: @"" rawError:hasSig ? @"" : @"No signature detected"
      verification:hasSig ? @"Signature present" : @"No signature" verified:hasSig duration:0];
+    NSLog(@"[IPAInstallerPro] verifySignature result: hasSig=%d output=%@", hasSig, output);
     return hasSig;
 }
 
