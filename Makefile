@@ -1,9 +1,6 @@
-THEOS_DEVICE_IP = localhost
-THEOS_DEVICE_PORT = 2222
-
-export ARCHS = arm64
-export TARGET = iphone:clang:16.5:15.0
-export THEOS_PACKAGE_SCHEME = rootless
+THEOS_PACKAGE_SCHEME = rootless
+TARGET := iphone:clang:latest:15.0
+ARCHS := arm64
 
 include $(THEOS)/makefiles/common.mk
 
@@ -16,7 +13,3 @@ AppDataManager_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 AppDataManager_CODESIGN_FLAGS = -Sentitlements.plist
 
 include $(THEOS_MAKE_PATH)/application.mk
-
-# Rootless compatibility
-after-package::
-	@echo "✅ Rootless package built successfully"
