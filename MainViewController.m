@@ -343,35 +343,43 @@
     self.isCalculatingSizes = YES;
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-        NSMutableArray *updatedApps = [NSMutableArray array];
+        AppDataManager *mgr = self.manager;
         unsigned long long totalSize = 0;
 
-        for (NSMutableDictionary *app in self.allApps) {
-            NSString *bundleID = app[@"bundleID"];
-            unsigned long long size = [self.manager dataSizeForBundleID:bundleID];
-            NSString *sizeStr = [self.manager formatBytes:size];
+        for (NSInteger i = 0; i < self.allApps.count; i++) {
+            @autoreleasepool {
+                NSMutableDictionary *app = self.allApps[i];
+                NSString *bundleID = app[@"bundleID"];
 
-            NSMutableDictionary *updatedApp = [app mutableCopy];
-            updatedApp[@"size"] = @(size);
-            updatedApp[@"sizeString"] = sizeStr;
-            [updatedApps addObject:updatedApp];
+                NSNumber *cached = [mgr.sizeCache objectForKey:bundleID];
+                unsigned long long size = cached ? [cached unsignedLongLongValue] : [mgr dataSizeForBundleID:bundleID];
+                NSString *sizeStr = [mgr formatBytes:size];
 
-            totalSize += size;
+                app[@"size"] = @(size);
+                app[@"sizeString"] = sizeStr;
+                totalSize += size;
 
-            if ([updatedApps count] % 5 == 0) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    self.statsView.sizeLabel.text = [self.manager formatBytes:totalSize];
-                    [self updateVisibleCellSizes];
+                    self.statsView.sizeLabel.text = [mgr formatBytes:totalSize];
+
+                    NSInteger filteredIndex = [self.filteredApps indexOfObject:app];
+                    if (filteredIndex != NSNotFound) {
+                        NSIndexPath *indexPath = [NSIndexPath indexPathForRow:filteredIndex inSection:0];
+                        if ([self.tableView.indexPathsForVisibleRows containsObject:indexPath]) {
+                            AppListCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
+                            if (cell) cell.sizeLabel.text = sizeStr;
+                        }
+                    }
                 });
+
+                if (i % 5 == 4) {
+                    [NSThread sleepForTimeInterval:0.02];
+                }
             }
         }
 
-        self.allApps = updatedApps;
-        self.filteredApps = self.allApps;
-
         dispatch_async(dispatch_get_main_queue(), ^{
-            self.statsView.sizeLabel.text = [self.manager formatBytes:totalSize];
-            [self.tableView reloadData];
+            self.statsView.sizeLabel.text = [mgr formatBytes:totalSize];
             self.isCalculatingSizes = NO;
         });
     });
