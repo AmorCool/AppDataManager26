@@ -2,13 +2,15 @@
 //  InstallationProgressViewController.m
 //  IPAInstallerPro
 //
-//  v2.1.19 — Live Animated Installation Output
-//  Structured Professional Diagnostic with Real-Time Phase Animation
+//  v2.1.21 — Event-Driven Live Installation UI
+//  Observes OperationLog notifications for real-time phase updates.
+//  No timers. No fake progress. No auto-launch.
 //
 
 #import "InstallationProgressViewController.h"
 #import "InstallationEngine.h"
 #import "JailbreakEnvironment.h"
+#import "OperationLog.h"
 #import <objc/runtime.h>
 
 #pragma mark - Phase Visual State
@@ -181,6 +183,7 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
 @property (nonatomic, strong) UIView *reportCard;
 @property (nonatomic, strong) NSDate *installStartTime;
 @property (nonatomic, assign) NSInteger currentPhaseIndex;
+@property (nonatomic, assign) BOOL hasFailed;
 @end
 
 @implementation InstallationProgressViewController
@@ -190,7 +193,100 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
     self.view.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.08 alpha:1.0];
     self.title = @"تثبيت التطبيق";
     [self setupUI];
+    [self registerForOperationLogNotifications];
     [self startInstallation];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+#pragma mark - OperationLog Notifications (Event-Driven)
+
+- (void)registerForOperationLogNotifications {
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(operationRecordAdded:)
+                                                 name:@"OperationRecordAdded"
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(operationRecordUpdated:)
+                                                 name:@"OperationRecordUpdated"
+                                               object:nil];
+}
+
+/*
+ * Maps OperationPhase → UI Visual Phase (0-4)
+ *
+ * 0: التحقق من ملف IPA       → OperationPhaseIPAOpen
+ * 1: استخراج التطبيق          → OperationPhaseIPAExtract, OperationPhaseAppIdentify
+ * 2: تثبيت الملفات            → OperationPhaseFileCopy, Framework, Dylib, Sign, Permission
+ * 3: تسجيل التطبيق            → OperationPhaseUICache
+ * 4: التحقق النهائي           → OperationPhaseVerify, OperationPhaseComplete
+ */
+- (NSInteger)uiPhaseIndexForOperationPhase:(OperationPhase)opPhase {
+    switch (opPhase) {
+        case OperationPhaseIPAOpen:
+            return 0;
+        case OperationPhaseIPAExtract:
+        case OperationPhaseAppIdentify:
+            return 1;
+        case OperationPhaseFileCopy:
+        case OperationPhaseFramework:
+        case OperationPhaseDylib:
+        case OperationPhaseSign:
+        case OperationPhasePermission:
+            return 2;
+        case OperationPhaseUICache:
+            return 3;
+        case OperationPhaseVerify:
+        case OperationPhaseComplete:
+            return 4;
+        default:
+            return -1; // Unknown / don't map
+    }
+}
+
+- (void)operationRecordAdded:(NSNotification *)note {
+    if (self.isDone) return;
+    OperationRecord *record = note.object;
+    if (!record || ![record.transactionID isEqualToString:self.currentTxnID]) return;
+
+    NSInteger uiPhase = [self uiPhaseIndexForOperationPhase:record.phase];
+    if (uiPhase < 0) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Mark all previous phases as success
+        for (NSInteger i = 0; i < uiPhase; i++) {
+            if (self.phaseViews[i].phaseState == PhaseVisualStatePending) {
+                [self.phaseViews[i] setState:PhaseVisualStateSuccess animated:YES];
+            }
+        }
+        // Activate current phase
+        [self.phaseViews[uiPhase] setState:PhaseVisualStateActive animated:YES];
+        self.currentPhaseIndex = uiPhase;
+
+        // Update progress
+        float progress = (float)(uiPhase + 1) / (float)self.phaseViews.count;
+        [self.progressView setProgress:progress animated:YES];
+    });
+}
+
+- (void)operationRecordUpdated:(NSNotification *)note {
+    if (self.isDone) return;
+    OperationRecord *record = note.object;
+    if (!record || ![record.transactionID isEqualToString:self.currentTxnID]) return;
+
+    NSInteger uiPhase = [self uiPhaseIndexForOperationPhase:record.phase];
+    if (uiPhase < 0) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (record.result == OperationResultSuccess) {
+            [self.phaseViews[uiPhase] setState:PhaseVisualStateSuccess animated:YES];
+        } else if (record.result == OperationResultFailed) {
+            [self.phaseViews[uiPhase] setState:PhaseVisualStateFailed animated:YES];
+            self.hasFailed = YES;
+        }
+    });
 }
 
 #pragma mark - UI Setup
@@ -240,8 +336,7 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
         @[@"استخراج التطبيق",        @"جارٍ فك ضغط المحتويات..."],
         @[@"تثبيت الملفات",          @"جارٍ النسخ والتوقيع..."],
         @[@"تسجيل التطبيق",          @"جارٍ التسجيل في النظام..."],
-        @[@"التحقق النهائي",         @"جارٍ التأكد من اكتمال التثبيت..."],
-        @[@"التشغيل والمراقبة",      @"جارٍ تشغيل التطبيق والتحقق..."]
+        @[@"التحقق النهائي",         @"جارٍ التأكد من اكتمال التثبيت..."]
     ];
     for (NSArray *p in phases) {
         InstallPhaseView *pv = [[InstallPhaseView alloc] initWithTitle:p[0] subtitle:p[1]];
@@ -285,15 +380,7 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
 
 - (void)setPhase:(NSInteger)index state:(PhaseVisualState)state {
     if (index < 0 || index >= (NSInteger)self.phaseViews.count) return;
-
-    InstallPhaseView *pv = self.phaseViews[index];
-    [pv setState:state animated:YES];
-
-    for (NSInteger i = 0; i < index; i++) {
-        if (self.phaseViews[i].phaseState == PhaseVisualStatePending) {
-            [self.phaseViews[i] setState:PhaseVisualStateSuccess animated:YES];
-        }
-    }
+    [self.phaseViews[index] setState:state animated:YES];
     self.currentPhaseIndex = index;
 }
 
@@ -307,10 +394,11 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
 
     // ─── Full State Reset for sequential installs ───
     self.isDone = NO;
+    self.hasFailed = NO;
     self.installedBundleID = nil;
     self.currentTxnID = nil;
-    self.installStartTime = [NSDate date];
     self.currentPhaseIndex = -1;
+    self.installStartTime = [NSDate date];
 
     if (self.reportCard) {
         [self.reportCard removeFromSuperview];
@@ -338,14 +426,13 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
     __weak typeof(self) weakSelf = self;
     [engine installIPA:self.ipaPath
          progressBlock:^(InstallationStage stage, NSString *statusMessage, float progress) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
-        [strongSelf handleProgress:stage progress:progress];
+        // Engine progress is coarse; OperationLog notifications drive the UI phases.
+        // We use this only for final completion/failure signals.
     } completion:^(InstallationResult *result) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
         strongSelf.isDone = YES;
-        if (result.success) {
+        if (result && result.success) {
             strongSelf.installedBundleID = result.bundleID;
             [strongSelf handleCompletionSuccess:result];
         } else {
@@ -354,70 +441,26 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
     }];
 }
 
-- (void)handleProgress:(InstallationStage)stage progress:(float)progress {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.progressView setProgress:progress animated:YES];
-
-        switch (stage) {
-            case InstallationStagePreparing:
-            case InstallationStageValidating:
-                [self setPhase:0 state:PhaseVisualStateActive];
-                break;
-
-            case InstallationStageInstalling:
-                [self setPhase:0 state:PhaseVisualStateSuccess];
-                if (progress < 0.40) {
-                    [self setPhase:1 state:PhaseVisualStateActive];
-                } else if (progress < 0.60) {
-                    [self setPhase:1 state:PhaseVisualStateSuccess];
-                    [self setPhase:2 state:PhaseVisualStateActive];
-                } else {
-                    [self setPhase:1 state:PhaseVisualStateSuccess];
-                    [self setPhase:2 state:PhaseVisualStateActive];
-                }
-                break;
-
-            case InstallationStageRegistering:
-                [self setPhase:1 state:PhaseVisualStateSuccess];
-                [self setPhase:2 state:PhaseVisualStateSuccess];
-                [self setPhase:3 state:PhaseVisualStateActive];
-                break;
-
-            case InstallationStageCompleted:
-                [self setPhase:3 state:PhaseVisualStateSuccess];
-                [self setPhase:4 state:PhaseVisualStateActive];
-                break;
-
-            case InstallationStageFailed:
-                [self setPhase:self.currentPhaseIndex >= 0 ? self.currentPhaseIndex : 0
-                         state:PhaseVisualStateFailed];
-                break;
-
-            default:
-                break;
-        }
-    });
-}
-
 - (void)handleCompletionSuccess:(InstallationResult *)result {
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self setPhase:4 state:PhaseVisualStateSuccess];
+        // Ensure all phases show success
+        for (InstallPhaseView *pv in self.phaseViews) {
+            if (pv.phaseState == PhaseVisualStateActive || pv.phaseState == PhaseVisualStatePending) {
+                [pv setState:PhaseVisualStateSuccess animated:YES];
+            }
+        }
+        [self.progressView setProgress:1.0 animated:YES];
         self.headerLabel.text = @"اكتمل التثبيت ✓";
-
-        // Runtime diagnostics (phase 5)
-        [self setPhase:5 state:PhaseVisualStateActive];
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self setPhase:5 state:PhaseVisualStateSuccess];
-            [self showReportCard:result success:YES];
-        });
+        [self showReportCard:result success:YES];
     });
 }
 
 - (void)handleCompletionFailure:(InstallationResult *)result {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSInteger failIdx = self.currentPhaseIndex >= 0 ? self.currentPhaseIndex : 0;
-        [self setPhase:failIdx state:PhaseVisualStateFailed];
+        if (failIdx < (NSInteger)self.phaseViews.count) {
+            [self.phaseViews[failIdx] setState:PhaseVisualStateFailed animated:YES];
+        }
         self.headerLabel.text = @"فشل التثبيت ✗";
         self.headerLabel.textColor = [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
         [self showReportCard:result success:NO];
@@ -483,7 +526,6 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
         [self addItem:@"المحتوى: ✓ مكتمل" toStack:stack];
         [self addItem:@"التوقيع: ✓ موجود" toStack:stack];
         [self addItem:@"التسجيل: ✓ مكتمل" toStack:stack];
-        [self addItem:@"التشغيل: ✓ ناجح" toStack:stack];
     }
 
     // ─── Environment Section ───
@@ -520,19 +562,6 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
     [doneBtn addTarget:self action:@selector(doneTapped:) forControlEvents:UIControlEventTouchUpInside];
     [doneBtn.heightAnchor constraintEqualToConstant:48].active = YES;
     [stack addArrangedSubview:doneBtn];
-
-    if (success && result.bundleID.length > 0) {
-        UIButton *openBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        openBtn.translatesAutoresizingMaskIntoConstraints = NO;
-        [openBtn setTitle:@"فتح التطبيق" forState:UIControlStateNormal];
-        openBtn.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-        openBtn.backgroundColor = [UIColor colorWithRed:0.3 green:0.8 blue:0.5 alpha:1.0];
-        [openBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        openBtn.layer.cornerRadius = 12;
-        [openBtn addTarget:self action:@selector(openAppTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [openBtn.heightAnchor constraintEqualToConstant:48].active = YES;
-        [stack addArrangedSubview:openBtn];
-    }
 
     [NSLayoutConstraint activateConstraints:@[
         [card.topAnchor constraintEqualToAnchor:self.phasesStack.bottomAnchor constant:24],
@@ -587,24 +616,6 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
 #pragma mark - Actions
 
 - (void)doneTapped:(UIButton *)sender {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-
-- (void)openAppTapped:(UIButton *)sender {
-    if (self.installedBundleID.length > 0) {
-        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://", self.installedBundleID]];
-        if ([[UIApplication sharedApplication] canOpenURL:url]) {
-            [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-        } else {
-            Class LSApplicationWorkspace_class = objc_getClass("LSApplicationWorkspace");
-            if (LSApplicationWorkspace_class) {
-                id workspace = [LSApplicationWorkspace_class performSelector:@selector(defaultWorkspace)];
-                if ([workspace respondsToSelector:@selector(openApplicationWithBundleID:)]) {
-                    [workspace performSelector:@selector(openApplicationWithBundleID:) withObject:self.installedBundleID];
-                }
-            }
-        }
-    }
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
