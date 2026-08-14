@@ -160,65 +160,8 @@
                     }
                 }
             }
-            if (proxy && [proxy respondsToSelector:@selector(entitlements)]) {
-                NSDictionary *entitlements = [proxy performSelector:@selector(entitlements)];
-                NSArray *groupIDs = entitlements[@"com.apple.security.application-groups"];
-                if (groupIDs) {
-                    for (NSString *groupID in groupIDs) {
-                        NSString *groupPath = [self pathForGroupIdentifier:groupID];
-                        if (groupPath && ![paths containsObject:groupPath]) {
-                            [paths addObject:groupPath];
-                        }
-                    }
-                }
-            }
         }
     } @catch (NSException *e) {}
-
-    NSString *groupRoot = @"/var/mobile/Containers/Shared/AppGroup";
-    if ([fm fileExistsAtPath:groupRoot]) {
-        NSArray *folders = [fm contentsOfDirectoryAtPath:groupRoot error:nil];
-        for (NSString *folder in folders) {
-            NSString *plistPath = [groupRoot stringByAppendingPathComponent:
-                [folder stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]];
-            if ([fm fileExistsAtPath:plistPath]) {
-                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-                NSString *identifier = plist[@"MCMMetadataIdentifier"];
-                if (identifier && (
-                    [identifier isEqualToString:bundleID] ||
-                    [identifier rangeOfString:bundleID options:NSCaseInsensitiveSearch].location != NSNotFound ||
-                    [bundleID rangeOfString:identifier options:NSCaseInsensitiveSearch].location != NSNotFound
-                )) {
-                    NSString *fullPath = [groupRoot stringByAppendingPathComponent:folder];
-                    if (![paths containsObject:fullPath]) {
-                        [paths addObject:fullPath];
-                    }
-                }
-            }
-        }
-    }
-
-    NSString *pluginRoot = @"/var/mobile/Containers/Data/PluginKitPlugin";
-    if ([fm fileExistsAtPath:pluginRoot]) {
-        NSArray *folders = [fm contentsOfDirectoryAtPath:pluginRoot error:nil];
-        for (NSString *folder in folders) {
-            NSString *plistPath = [pluginRoot stringByAppendingPathComponent:
-                [folder stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]];
-            if ([fm fileExistsAtPath:plistPath]) {
-                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-                NSString *identifier = plist[@"MCMMetadataIdentifier"];
-                if (identifier && (
-                    [identifier isEqualToString:bundleID] ||
-                    [identifier rangeOfString:bundleID options:NSCaseInsensitiveSearch].location != NSNotFound
-                )) {
-                    NSString *fullPath = [pluginRoot stringByAppendingPathComponent:folder];
-                    if (![paths containsObject:fullPath]) {
-                        [paths addObject:fullPath];
-                    }
-                }
-            }
-        }
-    }
 
     return paths;
 }
@@ -262,25 +205,39 @@
     return [self accurateDataSizeForBundleID:bundleID];
 }
 
+- (unsigned long long)fastDirectorySize:(NSString *)path {
+    if (!path || ![[NSFileManager defaultManager] fileExistsAtPath:path]) return 0;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSURL *url = [NSURL fileURLWithPath:path];
+
+    NSDirectoryEnumerator *enumerator = [fm enumeratorAtURL:url
+                                 includingPropertiesForKeys:@[NSURLFileSizeKey, NSURLIsRegularFileKey]
+                                                    options:NSDirectoryEnumerationSkipsHiddenFiles
+                                               errorHandler:nil];
+
+    unsigned long long total = 0;
+    for (NSURL *fileURL in enumerator) {
+        NSNumber *isRegularFile = nil;
+        [fileURL getResourceValue:&isRegularFile forKey:NSURLIsRegularFileKey error:nil];
+        if (![isRegularFile boolValue]) continue;
+
+        NSNumber *fileSize = nil;
+        [fileURL getResourceValue:&fileSize forKey:NSURLFileSizeKey error:nil];
+        if (fileSize) total += [fileSize unsignedLongLongValue];
+    }
+    return total;
+}
+
 - (unsigned long long)accurateDataSizeForBundleID:(NSString *)bundleID {
     NSArray *paths = [self allDataPathsForBundleID:bundleID];
     if (paths.count == 0) return 0;
 
-    NSFileManager *fm = [NSFileManager defaultManager];
-    unsigned long long totalSize = 0;
-
+    unsigned long long total = 0;
     for (NSString *path in paths) {
-        NSArray *contents = [fm subpathsAtPath:path];
-        for (NSString *item in contents) {
-            @try {
-                NSString *fullPath = [path stringByAppendingPathComponent:item];
-                NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
-                if (attrs) totalSize += [attrs fileSize];
-            } @catch (NSException *e) { continue; }
-        }
+        total += [self fastDirectorySize:path];
     }
-
-    return totalSize;
+    return total;
 }
 
 - (NSString *)formatBytes:(unsigned long long)bytes {
