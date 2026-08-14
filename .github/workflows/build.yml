@@ -163,7 +163,7 @@ jobs:
           dpkg-deb -I "$DEB_FILE" | grep -q "Architecture: iphoneos-arm64" || { echo "❌ Wrong architecture"; exit 1; }
           echo "✅ Architecture is iphoneos-arm64"
 
-          dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
+          dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamanager" || { echo "❌ Wrong package name"; exit 1; }
           echo "✅ Package name correct"
 
           echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
