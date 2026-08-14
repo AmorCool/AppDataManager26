@@ -43,9 +43,9 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
         _iconCache.countLimit = 200;
 
         _fileQueue = dispatch_queue_create(
-            "com.appdatamanager.fileops", DISPATCH_QUEUE_SERIAL);
+            "com.appdatamanager.fileops", DISPATCH_QUEUE_CONCURRENT);
         _cacheQueue = dispatch_queue_create(
-            "com.appdatamanager.cache", DISPATCH_QUEUE_SERIAL);
+            "com.appdatamanager.cache", DISPATCH_QUEUE_CONCURRENT);
 
         _iosMajorVersion = [self detectIOSMajorVersion];
     }
@@ -312,7 +312,9 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
                 [inv setArgument:&bid atIndex:2];
                 [inv setArgument:&create atIndex:3];
                 [inv invoke];
-                [inv getReturnValue:&container];
+                __unsafe_unretained id result = nil;
+                [inv getReturnValue:&result];
+                container = result;
             }
         }
         if (!container && [cls respondsToSelector:
@@ -447,30 +449,27 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 - (unsigned long long)dataSizeForBundleID:(NSString *)bundleID {
     if (!bundleID || bundleID.length == 0) return 0;
 
-    __block NSNumber *cached = nil;
-    dispatch_sync(self.cacheQueue, ^{
-        cached = [self.sizeCache objectForKey:bundleID];
-    });
+    // Fast path: check cache without blocking
+    NSNumber *cached = [self.sizeCache objectForKey:bundleID];
     if (cached) return [cached unsignedLongLongValue];
 
-    __block unsigned long long total = 0;
-    dispatch_sync(self.fileQueue, ^{
-        @autoreleasepool {
-            @try {
-                NSArray *paths =
-                    [self allDataPathsForBundleID:bundleID];
-                for (NSString *path in paths) {
-                    if (!path || path.length == 0) continue;
-                    total += [self fastDirectorySize:path];
-                }
-            } @catch (NSException *e) {
-                NSLog(@"[ADM] size exception for %@: %@", bundleID, e);
-                total = 0;
+    // Calculate synchronously (caller is already on background queue)
+    unsigned long long total = 0;
+    @autoreleasepool {
+        @try {
+            NSArray *paths = [self allDataPathsForBundleID:bundleID];
+            for (NSString *path in paths) {
+                if (!path || path.length == 0) continue;
+                total += [self fastDirectorySize:path];
             }
+        } @catch (NSException *e) {
+            NSLog(@"[ADM] size exception for %@: %@", bundleID, e);
+            total = 0;
         }
-    });
+    }
 
-    dispatch_sync(self.cacheQueue, ^{
+    // Cache write with barrier (thread-safe)
+    dispatch_barrier_async(self.cacheQueue, ^{
         [self.sizeCache setObject:@(total) forKey:bundleID];
     });
 
@@ -479,19 +478,16 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 
 - (unsigned long long)accurateDataSizeForBundleID:(NSString *)bundleID {
     if (!bundleID) return 0;
-    __block unsigned long long total = 0;
-    dispatch_sync(self.fileQueue, ^{
-        @autoreleasepool {
-            @try {
-                NSArray *paths =
-                    [self allDataPathsForBundleID:bundleID];
-                for (NSString *path in paths) {
-                    if (!path || path.length == 0) continue;
-                    total += [self fastDirectorySize:path];
-                }
-            } @catch (NSException *e) { }
-        }
-    });
+    unsigned long long total = 0;
+    @autoreleasepool {
+        @try {
+            NSArray *paths = [self allDataPathsForBundleID:bundleID];
+            for (NSString *path in paths) {
+                if (!path || path.length == 0) continue;
+                total += [self fastDirectorySize:path];
+            }
+        } @catch (NSException *e) { }
+    }
     return total;
 }
 
@@ -517,6 +513,7 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 
         NSMutableSet *visitedInodes = [NSMutableSet set];
 
+        NSUInteger fileCount = 0;
         for (NSURL *fileURL in enumerator) {
             @autoreleasepool {
                 @try {
@@ -540,6 +537,12 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
                     }
                 } @catch (NSException *e) { continue; }
             }
+
+            // Yield every 1000 files to prevent blocking
+            fileCount++;
+            if (fileCount % 1000 == 0) {
+                [NSThread sleepForTimeInterval:0.001];
+            }
         }
     } @catch (NSException *e) {
         NSLog(@"[ADM] fastDirectorySize exception: %@", e);
@@ -555,7 +558,7 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
     if ([self isSystemApp:bundleID]) return NO;
 
     __block BOOL success = YES;
-    dispatch_sync(self.fileQueue, ^{
+    dispatch_barrier_sync(self.fileQueue, ^{
         @autoreleasepool {
             @try {
                 NSArray *paths =
@@ -579,7 +582,7 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
                     }
                 }
 
-                dispatch_sync(self.cacheQueue, ^{
+                dispatch_barrier_async(self.cacheQueue, ^{
                     [self.sizeCache removeObjectForKey:bundleID];
                 });
 
@@ -790,13 +793,11 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 - (UIImage *)iconForBundleID:(NSString *)bundleID {
     if (!bundleID || bundleID.length == 0) return nil;
 
-    __block UIImage *cached = nil;
-    dispatch_sync(self.cacheQueue, ^{
-        cached = [self.iconCache objectForKey:bundleID];
-    });
+    // Fast path: check cache without blocking
+    UIImage *cached = [self.iconCache objectForKey:bundleID];
     if (cached) return cached;
 
-    __block UIImage *icon = nil;
+    UIImage *icon = nil;
 
     @try {
         // Strategy 1: LSApplicationProxy
@@ -878,7 +879,7 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
     }
 
     if (icon) {
-        dispatch_sync(self.cacheQueue, ^{
+        dispatch_barrier_async(self.cacheQueue, ^{
             [self.iconCache setObject:icon forKey:bundleID];
         });
     }
