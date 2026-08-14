@@ -136,41 +136,45 @@
     if (progressBlock) progressBlock(self.currentStage, @"Installing files...", 0.3);
 
     __weak typeof(self) weakSelf = self;
-    [provider installIPA:ipaPath transactionID:self.activeTxnID operationLog:self.operationLog completion:^(InstallationResult *result) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [provider installIPA:ipaPath transactionID:weakSelf.activeTxnID operationLog:weakSelf.operationLog completion:^(InstallationResult *result) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
 
-        if (result && result.success) {
-            strongSelf.currentStage = InstallationStageRegistering;
-            if (progressBlock) progressBlock(strongSelf.currentStage, @"Registering app...", 0.8);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (result && result.success) {
+                    strongSelf.currentStage = InstallationStageRegistering;
+                    if (progressBlock) progressBlock(strongSelf.currentStage, @"Registering app...", 0.8);
 
-            strongSelf.currentStage = InstallationStageCompleted;
-            if (progressBlock) progressBlock(strongSelf.currentStage, @"Installation complete!", 1.0);
-            NSLog(@"[IPAInstallerPro] Installation succeeded via %@", [provider providerName]);
+                    strongSelf.currentStage = InstallationStageCompleted;
+                    if (progressBlock) progressBlock(strongSelf.currentStage, @"Installation complete!", 1.0);
+                    NSLog(@"[IPAInstallerPro] Installation succeeded via %@", [provider providerName]);
 
-            // ─── RUNTIME DIAGNOSTICS ───
-            NSString *bundleID = result.bundleID;
-            if (bundleID && bundleID.length > 0) {
-                NSLog(@"[IPAInstallerPro] Starting RuntimeDiagnostics for %@", bundleID);
-                [[RuntimeDiagnostics sharedDiagnostics] diagnoseAppLaunch:bundleID
-                                                            transactionID:strongSelf.activeTxnID
-                                                             operationLog:strongSelf.operationLog
-                                                               completion:^(RuntimeDiagnosticsResult *runtimeResult) {
-                    NSLog(@"[IPAInstallerPro] RuntimeDiagnostics complete: %@", runtimeResult.state);
-                    NSLog(@"[IPAInstallerPro] %@", [runtimeResult detailedReport]);
-                }];
-            } else {
-                NSLog(@"[IPAInstallerPro] No bundleID in result, skipping RuntimeDiagnostics");
-            }
+                    // ─── RUNTIME DIAGNOSTICS ───
+                    NSString *bundleID = result.bundleID;
+                    if (bundleID && bundleID.length > 0) {
+                        NSLog(@"[IPAInstallerPro] Starting RuntimeDiagnostics for %@", bundleID);
+                        [[RuntimeDiagnostics sharedDiagnostics] diagnoseAppLaunch:bundleID
+                                                                    transactionID:strongSelf.activeTxnID
+                                                                     operationLog:strongSelf.operationLog
+                                                                       completion:^(RuntimeDiagnosticsResult *runtimeResult) {
+                            NSLog(@"[IPAInstallerPro] RuntimeDiagnostics complete: %@", runtimeResult.state);
+                            NSLog(@"[IPAInstallerPro] %@", [runtimeResult detailedReport]);
+                        }];
+                    } else {
+                        NSLog(@"[IPAInstallerPro] No bundleID in result, skipping RuntimeDiagnostics");
+                    }
 
-        } else {
-            strongSelf.currentStage = InstallationStageFailed;
-            if (progressBlock) progressBlock(strongSelf.currentStage, result ? result.message : @"Unknown error", 1.0);
-            NSLog(@"[IPAInstallerPro] Installation failed via %@: %@", [provider providerName], result ? result.message : @"Unknown error");
-        }
-        [strongSelf finishInstallation];
-        if (completion) completion(result);
-    }];
+                } else {
+                    strongSelf.currentStage = InstallationStageFailed;
+                    if (progressBlock) progressBlock(strongSelf.currentStage, result ? result.message : @"Unknown error", 1.0);
+                    NSLog(@"[IPAInstallerPro] Installation failed via %@: %@", [provider providerName], result ? result.message : @"Unknown error");
+                }
+                [strongSelf finishInstallation];
+                if (completion) completion(result);
+            });
+        }];
+    });
 }
 
 - (void)finishInstallation {
