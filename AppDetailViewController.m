@@ -30,8 +30,6 @@
 
 @implementation AppDetailViewController
 
-@synthesize appInfo = _appInfo;
-
 - (instancetype)initWithAppInfo:(NSDictionary *)appInfo {
     self = [super init];
     if (self) {
