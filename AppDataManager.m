@@ -10,6 +10,7 @@
 #import <objc/runtime.h>
 #import <sys/stat.h>
 #import <dlfcn.h>
+#import <stdio.h>
 
 static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Backups";
 
@@ -1028,10 +1029,10 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
             }
         }
 
-        NSTask *task = [[NSTask alloc] init];
-        task.launchPath = @"/usr/bin/killall";
-        task.arguments = @[@"-9", bundleID];
-        @try { [task launch]; } @catch (NSException *e) {}
+        NSString *cmd = [NSString stringWithFormat:
+            @"killall -9 '%@' 2>/dev/null", bundleID];
+        FILE *fp = popen([cmd UTF8String], "r");
+        if (fp) pclose(fp);
         return YES;
     } @catch (NSException *e) { return NO; }
 }
