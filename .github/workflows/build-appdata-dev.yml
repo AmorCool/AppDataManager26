@@ -1,0 +1,165 @@
+name: Build AppDataManager → Dev Repo
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+
+jobs:
+  build:
+    name: Build AppDataManager (Dev)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout AppDataManager source
+        uses: actions/checkout@v4
+        with:
+          path: source
+          fetch-depth: 1
+
+      - name: Checkout repo-dev
+        uses: actions/checkout@v4
+        with:
+          repository: aosaid3224-ops/repo-dev
+          token: ${{ secrets.PAT }}
+          path: repo-dev
+
+      - name: Validate environment
+        run: |
+          echo "=== Environment Validation ==="
+          xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1 || { echo "❌ iOS SDK not found"; exit 1; }
+          echo "✅ iOS SDK found"
+          which clang >/dev/null 2>&1 || { echo "❌ clang not found"; exit 1; }
+          which make >/dev/null 2>&1 || { echo "❌ make not found"; exit 1; }
+          echo "✅ All base tools present"
+
+      - name: Install dependencies
+        run: |
+          brew install ldid dpkg
+          which ldid >/dev/null 2>&1 || { echo "❌ ldid install failed"; exit 1; }
+          which dpkg-deb >/dev/null 2>&1 || { echo "❌ dpkg-deb install failed"; exit 1; }
+          echo "✅ ldid: $(which ldid)"
+          echo "✅ dpkg-deb: $(which dpkg-deb)"
+
+      - name: Cache Theos
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/theos
+          key: ${{ runner.os }}-theos-${{ hashFiles('source/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-theos-
+
+      - name: Install Theos
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: |
+          rm -rf "$THEOS" && git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          test -f "$THEOS/makefiles/common.mk" || { echo "❌ Theos install failed"; exit 1; }
+          echo "✅ Theos installed"
+
+      - name: Verify Theos
+        run: |
+          test -f "$THEOS/makefiles/common.mk" || { echo "❌ common.mk missing"; exit 1; }
+          test -f "$THEOS/makefiles/package/deb.mk" || { echo "❌ deb.mk missing"; exit 1; }
+          test -d "$THEOS/include" || { echo "❌ include dir missing"; exit 1; }
+          echo "✅ Theos structure verified"
+
+      - name: Install libroot
+        run: |
+          if [ -f "$THEOS/include/rootless.h" ]; then
+            echo "✅ rootless.h already present"
+            exit 0
+          fi
+          git clone --depth 1 https://github.com/opa334/libroot.git /tmp/libroot 2>/dev/null || true
+          if [ -f /tmp/libroot/include/rootless.h ]; then
+            cp /tmp/libroot/include/rootless.h "$THEOS/include/"
+            echo "✅ libroot installed from GitHub"
+          elif [ -f source/rootless.h ]; then
+            cp source/rootless.h "$THEOS/include/rootless.h"
+            echo "✅ libroot installed from local stub"
+          else
+            echo "❌ rootless.h not found anywhere"
+            exit 1
+          fi
+
+      - name: Fix script permissions
+        run: |
+          chmod +x source/layout/DEBIAN/postinst 2>/dev/null || true
+          chmod +x source/layout/DEBIAN/prerm 2>/dev/null || true
+          ls -la source/layout/DEBIAN/ 2>/dev/null || echo "No layout/DEBIAN"
+
+      - name: Build AppDataManager
+        run: |
+          echo "=== Building AppDataManager (Dev) ==="
+          export PATH="$THEOS/bin:$PATH"
+          cd source
+          make clean
+          make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+          echo ""
+          echo "=== Build output ==="
+          ls -la packages/ 2>/dev/null || echo "No packages directory"
+
+      - name: Validate .deb
+        run: |
+          echo "=== Validating .deb ==="
+          DEB_FILE=$(ls -t source/packages/*.deb 2>/dev/null | head -1)
+          if [ -z "$DEB_FILE" ]; then
+            echo "❌ FATAL: No .deb file found"
+            exit 1
+          fi
+          echo "Found: $DEB_FILE"
+          dpkg-deb -I "$DEB_FILE" || { echo "❌ dpkg-deb -I failed"; exit 1; }
+          dpkg-deb -I "$DEB_FILE" | grep -q "Architecture: iphoneos-arm64" || { echo "❌ Wrong architecture"; exit 1; }
+          echo "✅ Architecture is iphoneos-arm64"
+          dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
+          echo "✅ Package name correct"
+          echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
+          echo "✅ .deb validation PASSED"
+
+      - name: Deploy to repo-dev
+        run: |
+          echo "=========================================="
+          echo " Deploying to repo-dev"
+          echo "=========================================="
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub CI"
+
+          mkdir -p repo-dev/pool/main/iphoneos-arm64
+          cp source/packages/*.deb repo-dev/pool/main/iphoneos-arm64/
+          echo "✅ .deb copied to repo-dev/pool/"
+          ls -la repo-dev/pool/main/iphoneos-arm64/
+
+          # Copy generate-repo.py if exists
+          if [ -f source/scripts/generate-repo.py ]; then
+            mkdir -p repo-dev/scripts
+            cp source/scripts/generate-repo.py repo-dev/scripts/
+            echo "✅ generate-repo.py copied"
+          fi
+
+          cd repo-dev
+          python3 scripts/generate-repo.py . --dev 2>/dev/null || python3 scripts/generate-repo.py . || echo "⚠️ generate-repo.py failed, continuing..."
+
+          git add -A
+          git commit -m "AppDataManager v1.6.0 — dev build (crash-resilient)" || true
+          git push origin main
+          echo "✅ Deployed to repo-dev"
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "=========================================="
+          if [ "${{ job.status }}" == "success" ]; then
+            echo " ✅ DEV BUILD SUCCESSFUL"
+            echo "=========================================="
+            echo ""
+            echo "📦 Add this repo to Sileo:"
+            echo "   https://aosaid3224-ops.github.io/repo-dev/"
+          else
+            echo " ❌ DEV BUILD FAILED"
+            echo "=========================================="
+          fi
