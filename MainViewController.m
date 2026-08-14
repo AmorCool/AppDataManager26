@@ -597,8 +597,6 @@
             NSMutableArray *results =
                 [NSMutableArray arrayWithCapacity:apps.count];
 
-            BOOL cancelled = NO;
-
             __block BOOL cancelled = NO;
 
             for (NSDictionary *app in apps) {
