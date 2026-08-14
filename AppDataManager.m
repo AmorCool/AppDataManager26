@@ -5,8 +5,6 @@
 #import "rootless.h"
 
 @interface AppDataManager ()
-@property (nonatomic, strong) NSCache *sizeCache;
-@property (nonatomic, strong) NSCache *iconCache;
 @property (nonatomic, strong) NSArray *cachedApps;
 @end
 
