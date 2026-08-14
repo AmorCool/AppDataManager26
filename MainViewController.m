@@ -348,8 +348,9 @@
 
         for (NSInteger i = 0; i < self.allApps.count; i++) {
             @autoreleasepool {
-                NSMutableDictionary *app = self.allApps[i];
+                NSMutableDictionary *app = [self.allApps[i] mutableCopy];
                 NSString *bundleID = app[@"bundleID"];
+                if (!bundleID) continue;
 
                 NSNumber *cached = [mgr.sizeCache objectForKey:bundleID];
                 unsigned long long size = cached ? [cached unsignedLongLongValue] : [mgr dataSizeForBundleID:bundleID];
@@ -359,10 +360,28 @@
                 app[@"sizeString"] = sizeStr;
                 totalSize += size;
 
+                // Update allApps
+                NSMutableArray *mutableAll = [self.allApps mutableCopy];
+                mutableAll[i] = app;
+                self.allApps = [mutableAll copy];
+
+                // Update filteredApps if needed
+                NSInteger filteredIndex = NSNotFound;
+                for (NSInteger j = 0; j < self.filteredApps.count; j++) {
+                    if ([self.filteredApps[j][@"bundleID"] isEqualToString:bundleID]) {
+                        filteredIndex = j;
+                        break;
+                    }
+                }
+                if (filteredIndex != NSNotFound) {
+                    NSMutableArray *mutableFiltered = [self.filteredApps mutableCopy];
+                    mutableFiltered[filteredIndex] = app;
+                    self.filteredApps = [mutableFiltered copy];
+                }
+
                 dispatch_async(dispatch_get_main_queue(), ^{
                     self.statsView.sizeLabel.text = [mgr formatBytes:totalSize];
 
-                    NSInteger filteredIndex = [self.filteredApps indexOfObject:app];
                     if (filteredIndex != NSNotFound) {
                         NSIndexPath *indexPath = [NSIndexPath indexPathForRow:filteredIndex inSection:0];
                         if ([self.tableView.indexPathsForVisibleRows containsObject:indexPath]) {
