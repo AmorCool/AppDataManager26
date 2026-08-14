@@ -599,15 +599,12 @@
 
             BOOL cancelled = NO;
 
+            __block BOOL cancelled = NO;
+
             for (NSDictionary *app in apps) {
                 @autoreleasepool {
-                    __block BOOL current = NO;
-                    dispatch_sync(dispatch_get_main_queue(), ^{
-                        current =
-                            (self.operationGeneration == generation);
-                    });
-
-                    if (!current) {
+                    // Check generation without blocking main thread
+                    if (self.operationGeneration != generation) {
                         cancelled = YES;
                         break;
                     }
@@ -652,8 +649,7 @@
 
             NSArray *finalResults = [results copy];
             unsigned long long finalTotal = totalSize;
-            BOOL completed = !cancelled &&
-                             (finalResults.count == apps.count);
+            BOOL completed = !cancelled;
 
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (self.operationGeneration != generation) return;
