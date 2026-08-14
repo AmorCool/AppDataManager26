@@ -747,7 +747,9 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
             [NSString stringWithFormat:
                 @"cd \"%@\" && zip -r \"%@\" . -x \"*.zip\"",
                 dir, zip];
-        int result = system([cmd UTF8String]);
+        FILE *fp = popen([cmd UTF8String], "r");
+        int result = -1;
+        if (fp) result = pclose(fp);
         if (result == 0 && [self pathExists:zip]) return zip;
         return nil;
     } @catch (NSException *e) {
