@@ -7,9 +7,9 @@ all: appdatamanager ipainstallerpro repo repo-dev
 
 appdatamanager:
 	@echo "🔨 Building AppData Manager..."
-	$(MAKE) -C AppDataManager package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+	$(MAKE) package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
 	@mkdir -p repo/pool/main/iphoneos-arm64/
-	@cp AppDataManager/packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
+	@cp packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
 
 ipainstallerpro:
 	@echo "🔨 Building IPA Installer Pro..."
@@ -29,7 +29,6 @@ repo-dev:
 
 clean:
 	@echo "🧹 Cleaning..."
-	$(MAKE) -C AppDataManager clean 2>/dev/null || true
 	$(MAKE) -C IPAInstallerPro clean 2>/dev/null || true
 
 install:
