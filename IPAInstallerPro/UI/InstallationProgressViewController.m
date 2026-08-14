@@ -147,18 +147,19 @@ typedef NS_ENUM(NSInteger, PhaseVisualState) {
 }
 
 - (void)startPulsing {
-    [self.pulsingDot.layer removeAllAnimations];
-    CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"opacity"];
-    pulse.fromValue = @(1.0);
-    pulse.toValue   = @(0.2);
-    pulse.duration  = 0.8;
-    pulse.autoreverses = YES;
-    pulse.repeatCount  = HUGE_VALF;
-    [self.pulsingDot.layer addAnimation:pulse forKey:@"pulse"];
+    self.pulsingDot.alpha = 1.0;
+    [UIView animateWithDuration:0.8
+                          delay:0
+                        options:UIViewAnimationOptionAutoreverse | UIViewAnimationOptionRepeat | UIViewAnimationOptionAllowUserInteraction
+                     animations:^{
+                         self.pulsingDot.alpha = 0.2;
+                     }
+                     completion:nil];
 }
 
 - (void)stopPulsing {
     [self.pulsingDot.layer removeAllAnimations];
+    self.pulsingDot.alpha = 1.0;
 }
 
 @end
