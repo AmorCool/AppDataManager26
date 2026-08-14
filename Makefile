@@ -1,40 +1,22 @@
-# AppDataManager + IPAInstallerPro — Root Makefile
-# Usage: make [all|appdatamanager|ipainstallerpro|repo|repo-dev|clean]
+THEOS_DEVICE_IP = localhost
+THEOS_DEVICE_PORT = 2222
 
-.PHONY: all appdatamanager ipainstallerpro repo repo-dev clean install test
+export ARCHS = arm64
+export TARGET = iphone:clang:16.5:15.0
+export THEOS_PACKAGE_SCHEME = rootless
 
-all: appdatamanager ipainstallerpro repo repo-dev
+include $(THEOS)/makefiles/common.mk
 
-appdatamanager:
-	@echo "🔨 Building AppData Manager..."
-	$(MAKE) package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
-	@mkdir -p repo/pool/main/iphoneos-arm64/
-	@cp packages/*.deb repo/pool/main/iphoneos-arm64/ 2>/dev/null || true
+APPLICATION_NAME = AppDataManager
 
-ipainstallerpro:
-	@echo "🔨 Building IPA Installer Pro..."
-	$(MAKE) -C IPAInstallerPro package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
-	@mkdir -p repo-dev/pool/main/iphoneos-arm64/
-	@cp IPAInstallerPro/packages/*.deb repo-dev/pool/main/iphoneos-arm64/ 2>/dev/null || true
+AppDataManager_FILES = main.m AppDelegate.m AppDataManager.m MainViewController.m AppDetailViewController.m BackupManagerViewController.m SettingsViewController.m
+AppDataManager_FRAMEWORKS = UIKit Foundation CoreGraphics
+AppDataManager_PRIVATE_FRAMEWORKS = MobileCoreServices
+AppDataManager_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+AppDataManager_CODESIGN_FLAGS = -Sentitlements.plist
 
-repo:
-	@echo "📝 Generating production repo..."
-	@python3 scripts/generate-repo.py repo --prod
-	@python3 scripts/validate-repo.py repo
+include $(THEOS_MAKE_PATH)/application.mk
 
-repo-dev:
-	@echo "📝 Generating dev repo..."
-	@python3 scripts/generate-repo.py repo-dev --dev
-	@python3 scripts/validate-repo.py repo-dev
-
-clean:
-	@echo "🧹 Cleaning..."
-	$(MAKE) -C IPAInstallerPro clean 2>/dev/null || true
-
-install:
-	@echo "📱 Installing latest packages to device..."
-	@./build.sh all
-
-test:
-	@echo "🧪 Running validation tests..."
-	@python3 scripts/validate-repo.py repo-dev
+# Rootless compatibility
+after-package::
+	@echo "✅ Rootless package built successfully"
