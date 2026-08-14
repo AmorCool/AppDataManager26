@@ -300,9 +300,19 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
         id container = nil;
         if ([cls respondsToSelector:
                 @selector(containerWithIdentifier:createIfNecessary:error:)]) {
-            container = [cls performSelector:
-                @selector(containerWithIdentifier:createIfNecessary:error:)
-                withObject:bundleID withObject:@NO withObject:nil];
+            NSMethodSignature *sig = [cls methodSignatureForSelector:
+                @selector(containerWithIdentifier:createIfNecessary:error:)];
+            if (sig) {
+                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                [inv setSelector:@selector(containerWithIdentifier:createIfNecessary:error:)];
+                [inv setTarget:cls];
+                NSString *bid = bundleID;
+                BOOL create = NO;
+                [inv setArgument:&bid atIndex:2];
+                [inv setArgument:&create atIndex:3];
+                [inv invoke];
+                [inv getReturnValue:&container];
+            }
         }
         if (!container && [cls respondsToSelector:
                 @selector(containerWithIdentifier:error:)]) {
@@ -1018,10 +1028,10 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
             }
         }
 
-        NSString *cmd =
-            [NSString stringWithFormat:
-                @"killall -9 '%@' 2>/dev/null || true", bundleID];
-        system([cmd UTF8String]);
+        NSTask *task = [[NSTask alloc] init];
+        task.launchPath = @"/usr/bin/killall";
+        task.arguments = @[@"-9", bundleID];
+        @try { [task launch]; } @catch (NSException *e) {}
         return YES;
     } @catch (NSException *e) { return NO; }
 }
