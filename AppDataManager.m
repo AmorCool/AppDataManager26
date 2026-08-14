@@ -1,478 +1,1038 @@
-#import "MainViewController.h"
+//
+//  AppDataManager.m
+//  AppDataManager
+//
+//  v1.6.0 — Crash-Resilient Core Engine
+//
+
 #import "AppDataManager.h"
-#import "AppDetailViewController.h"
+#import "rootless.h"
+#import <objc/runtime.h>
+#import <sys/stat.h>
+#import <dlfcn.h>
 
-// MARK: - Custom App Cell (Redesigned)
-@interface AppListCell : UITableViewCell
-@property (nonatomic, strong) UIImageView *appIcon;
-@property (nonatomic, strong) UILabel *nameLabel;
-@property (nonatomic, strong) UILabel *bundleLabel;
-@property (nonatomic, strong) UILabel *sizeLabel;
-@property (nonatomic, strong) UIView *containerView;
+static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Backups";
+
+@interface AppDataManager ()
+@property (nonatomic, strong) dispatch_queue_t fileQueue;
+@property (nonatomic, strong) dispatch_queue_t cacheQueue;
+@property (nonatomic, assign) NSUInteger iosMajorVersion;
 @end
 
-@implementation AppListCell
+@implementation AppDataManager
 
-- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
-    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+#pragma mark - Singleton
+
++ (instancetype)sharedManager {
+    static AppDataManager *shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[self alloc] init];
+    });
+    return shared;
+}
+
+- (instancetype)init {
+    self = [super init];
     if (self) {
-        self.backgroundColor = [UIColor clearColor];
-        self.selectionStyle = UITableViewCellSelectionStyleNone;
+        _sizeCache = [[NSCache alloc] init];
+        _sizeCache.countLimit = 500;
 
-        _containerView = [[UIView alloc] init];
-        _containerView.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.13 alpha:1.0];
-        _containerView.layer.cornerRadius = 14;
-        _containerView.layer.masksToBounds = YES;
-        _containerView.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.contentView addSubview:_containerView];
+        _iconCache = [[NSCache alloc] init];
+        _iconCache.countLimit = 200;
 
-        _appIcon = [[UIImageView alloc] init];
-        _appIcon.layer.cornerRadius = 10;
-        _appIcon.layer.masksToBounds = YES;
-        _appIcon.contentMode = UIViewContentModeScaleAspectFit;
-        _appIcon.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:1.0];
-        _appIcon.translatesAutoresizingMaskIntoConstraints = NO;
-        [_containerView addSubview:_appIcon];
+        _fileQueue = dispatch_queue_create(
+            "com.appdatamanager.fileops", DISPATCH_QUEUE_SERIAL);
+        _cacheQueue = dispatch_queue_create(
+            "com.appdatamanager.cache", DISPATCH_QUEUE_SERIAL);
 
-        _nameLabel = [[UILabel alloc] init];
-        _nameLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        _nameLabel.textColor = [UIColor whiteColor];
-        _nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [_containerView addSubview:_nameLabel];
-
-        _bundleLabel = [[UILabel alloc] init];
-        _bundleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
-        _bundleLabel.textColor = [UIColor colorWithWhite:0.40 alpha:1.0];
-        _bundleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [_containerView addSubview:_bundleLabel];
-
-        _sizeLabel = [[UILabel alloc] init];
-        _sizeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-        _sizeLabel.textColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-        _sizeLabel.textAlignment = NSTextAlignmentRight;
-        _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [_containerView addSubview:_sizeLabel];
-
-        UIImageView *arrow = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-        arrow.tintColor = [UIColor colorWithWhite:0.25 alpha:1.0];
-        arrow.translatesAutoresizingMaskIntoConstraints = NO;
-        [_containerView addSubview:arrow];
-
-        [NSLayoutConstraint activateConstraints:@[
-            [_containerView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:5],
-            [_containerView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16],
-            [_containerView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
-            [_containerView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-5],
-            [_containerView.heightAnchor constraintEqualToConstant:68],
-
-            [_appIcon.leadingAnchor constraintEqualToAnchor:_containerView.leadingAnchor constant:12],
-            [_appIcon.centerYAnchor constraintEqualToAnchor:_containerView.centerYAnchor],
-            [_appIcon.widthAnchor constraintEqualToConstant:44],
-            [_appIcon.heightAnchor constraintEqualToConstant:44],
-
-            [_nameLabel.leadingAnchor constraintEqualToAnchor:_appIcon.trailingAnchor constant:12],
-            [_nameLabel.topAnchor constraintEqualToAnchor:_containerView.topAnchor constant:14],
-            [_nameLabel.trailingAnchor constraintEqualToAnchor:_sizeLabel.leadingAnchor constant:-8],
-
-            [_bundleLabel.leadingAnchor constraintEqualToAnchor:_nameLabel.leadingAnchor],
-            [_bundleLabel.topAnchor constraintEqualToAnchor:_nameLabel.bottomAnchor constant:3],
-            [_bundleLabel.trailingAnchor constraintEqualToAnchor:_nameLabel.trailingAnchor],
-
-            [_sizeLabel.trailingAnchor constraintEqualToAnchor:arrow.leadingAnchor constant:-6],
-            [_sizeLabel.centerYAnchor constraintEqualToAnchor:_containerView.centerYAnchor],
-            [_sizeLabel.widthAnchor constraintEqualToConstant:70],
-
-            [arrow.trailingAnchor constraintEqualToAnchor:_containerView.trailingAnchor constant:-14],
-            [arrow.centerYAnchor constraintEqualToAnchor:_containerView.centerYAnchor],
-            [arrow.widthAnchor constraintEqualToConstant:14],
-            [arrow.heightAnchor constraintEqualToConstant:14]
-        ]];
+        _iosMajorVersion = [self detectIOSMajorVersion];
     }
     return self;
 }
 
-@end
+- (NSUInteger)detectIOSMajorVersion {
+    @try {
+        NSProcessInfo *info = [NSProcessInfo processInfo];
+        if ([info respondsToSelector:
+                @selector(operatingSystemVersion)]) {
+            NSOperatingSystemVersion ver =
+                info.operatingSystemVersion;
+            return ver.majorVersion;
+        }
+    } @catch (NSException *e) { }
 
-// MARK: - Stats Header View (Redesigned - Simple & Clean)
-@interface StatsHeaderView : UIView
-@property (nonatomic, strong) UILabel *appsCountLabel;
-@property (nonatomic, strong) UILabel *appsTitleLabel;
-@property (nonatomic, strong) UILabel *sizeLabel;
-@property (nonatomic, strong) UILabel *sizeTitleLabel;
-@end
+    @try {
+        NSString *version =
+            [[UIDevice currentDevice] systemVersion];
+        NSArray *parts = [version componentsSeparatedByString:@"."];
+        if (parts.count > 0) return [parts[0] integerValue];
+    } @catch (NSException *e) { }
 
-@implementation StatsHeaderView
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.14 alpha:1.0];
-        self.layer.cornerRadius = 18;
-        self.layer.masksToBounds = YES;
-
-        // Left side - Apps count
-        UIView *appsIconBg = [[UIView alloc] init];
-        appsIconBg.backgroundColor = [UIColor colorWithRed:0.18 green:0.15 blue:0.30 alpha:1.0];
-        appsIconBg.layer.cornerRadius = 10;
-        appsIconBg.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:appsIconBg];
-
-        UIImageView *appsIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"app.fill"]];
-        appsIcon.tintColor = [UIColor colorWithRed:0.65 green:0.50 blue:0.95 alpha:1.0];
-        appsIcon.contentMode = UIViewContentModeScaleAspectFit;
-        appsIcon.translatesAutoresizingMaskIntoConstraints = NO;
-        [appsIconBg addSubview:appsIcon];
-
-        _appsCountLabel = [[UILabel alloc] init];
-        _appsCountLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-        _appsCountLabel.textColor = [UIColor whiteColor];
-        _appsCountLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_appsCountLabel];
-
-        _appsTitleLabel = [[UILabel alloc] init];
-        _appsTitleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
-        _appsTitleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-        _appsTitleLabel.text = @"التطبيقات";
-        _appsTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_appsTitleLabel];
-
-        // Divider
-        UIView *divider = [[UIView alloc] init];
-        divider.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.6];
-        divider.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:divider];
-
-        // Right side - Total size
-        UIView *sizeIconBg = [[UIView alloc] init];
-        sizeIconBg.backgroundColor = [UIColor colorWithRed:0.15 green:0.20 blue:0.30 alpha:1.0];
-        sizeIconBg.layer.cornerRadius = 10;
-        sizeIconBg.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:sizeIconBg];
-
-        UIImageView *sizeIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"externaldrive.fill"]];
-        sizeIcon.tintColor = [UIColor colorWithRed:0.45 green:0.65 blue:0.95 alpha:1.0];
-        sizeIcon.contentMode = UIViewContentModeScaleAspectFit;
-        sizeIcon.translatesAutoresizingMaskIntoConstraints = NO;
-        [sizeIconBg addSubview:sizeIcon];
-
-        _sizeLabel = [[UILabel alloc] init];
-        _sizeLabel.font = [UIFont systemFontOfSize:22 weight:UIFontWeightBold];
-        _sizeLabel.textColor = [UIColor whiteColor];
-        _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_sizeLabel];
-
-        _sizeTitleLabel = [[UILabel alloc] init];
-        _sizeTitleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
-        _sizeTitleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-        _sizeTitleLabel.text = @"الحجم الكلي";
-        _sizeTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_sizeTitleLabel];
-
-        [NSLayoutConstraint activateConstraints:@[
-            // Apps icon
-            [appsIconBg.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:20],
-            [appsIconBg.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-            [appsIconBg.widthAnchor constraintEqualToConstant:36],
-            [appsIconBg.heightAnchor constraintEqualToConstant:36],
-            [appsIcon.centerXAnchor constraintEqualToAnchor:appsIconBg.centerXAnchor],
-            [appsIcon.centerYAnchor constraintEqualToAnchor:appsIconBg.centerYAnchor],
-            [appsIcon.widthAnchor constraintEqualToConstant:18],
-            [appsIcon.heightAnchor constraintEqualToConstant:18],
-
-            // Apps count & title
-            [_appsCountLabel.leadingAnchor constraintEqualToAnchor:appsIconBg.trailingAnchor constant:10],
-            [_appsCountLabel.topAnchor constraintEqualToAnchor:self.topAnchor constant:18],
-            [_appsTitleLabel.leadingAnchor constraintEqualToAnchor:_appsCountLabel.leadingAnchor],
-            [_appsTitleLabel.topAnchor constraintEqualToAnchor:_appsCountLabel.bottomAnchor constant:2],
-
-            // Divider
-            [divider.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
-            [divider.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-            [divider.widthAnchor constraintEqualToConstant:1],
-            [divider.heightAnchor constraintEqualToConstant:36],
-
-            // Size icon
-            [sizeIconBg.leadingAnchor constraintEqualToAnchor:divider.trailingAnchor constant:20],
-            [sizeIconBg.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-            [sizeIconBg.widthAnchor constraintEqualToConstant:36],
-            [sizeIconBg.heightAnchor constraintEqualToConstant:36],
-            [sizeIcon.centerXAnchor constraintEqualToAnchor:sizeIconBg.centerXAnchor],
-            [sizeIcon.centerYAnchor constraintEqualToAnchor:sizeIconBg.centerYAnchor],
-            [sizeIcon.widthAnchor constraintEqualToConstant:18],
-            [sizeIcon.heightAnchor constraintEqualToConstant:18],
-
-            // Size count & title
-            [_sizeLabel.leadingAnchor constraintEqualToAnchor:sizeIconBg.trailingAnchor constant:10],
-            [_sizeLabel.topAnchor constraintEqualToAnchor:_appsCountLabel.topAnchor],
-            [_sizeTitleLabel.leadingAnchor constraintEqualToAnchor:_sizeLabel.leadingAnchor],
-            [_sizeTitleLabel.topAnchor constraintEqualToAnchor:_appsTitleLabel.topAnchor]
-        ]];
-    }
-    return self;
+    return 15;
 }
 
-@end
+#pragma mark - Cache
 
-// MARK: - MainViewController
-@interface MainViewController () <UITableViewDelegate, UITableViewDataSource, UISearchResultsUpdating>
-@property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) UISearchController *searchController;
-@property (nonatomic, strong) NSArray *allApps;
-@property (nonatomic, strong) NSArray *filteredApps;
-@property (nonatomic, strong) AppDataManager *manager;
-@property (nonatomic, strong) StatsHeaderView *statsView;
-@property (nonatomic, strong) UIRefreshControl *refreshControl;
-@property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
-@property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, assign) BOOL isCalculatingSizes;
-@end
-
-@implementation MainViewController
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"AppData Manager";
-    self.view.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-    self.manager = [AppDataManager sharedManager];
-
-    [self setupNavigationBar];
-    [self setupSearchController];
-    [self setupTableView];
-    [self setupLoadingView];
-    [self loadApps];
-}
-
-- (void)setupNavigationBar {
-    self.navigationController.navigationBar.prefersLargeTitles = YES;
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
-    [self.navigationController.navigationBar setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor]}];
-    [self.navigationController.navigationBar setLargeTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor]}];
-    self.navigationController.navigationBar.barTintColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-    self.navigationController.navigationBar.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-}
-
-- (void)setupSearchController {
-    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.searchController.searchResultsUpdater = self;
-    self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"ابحث عن تطبيق...";
-    self.searchController.searchBar.searchTextField.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.13 alpha:1.0];
-    self.searchController.searchBar.searchTextField.textColor = [UIColor whiteColor];
-    self.searchController.searchBar.searchTextField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"ابحث عن تطبيق..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.35 alpha:1.0]}];
-    self.searchController.searchBar.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-    self.searchController.searchBar.barTintColor = [UIColor clearColor];
-    self.searchController.searchBar.backgroundImage = [[UIImage alloc] init];
-    self.navigationItem.searchController = self.searchController;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-}
-
-- (void)setupTableView {
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
-    self.tableView.delegate = self;
-    self.tableView.dataSource = self;
-    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.tableView.backgroundColor = [UIColor clearColor];
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 20, 0);
-    [self.view addSubview:self.tableView];
-
-    self.refreshControl = [[UIRefreshControl alloc] init];
-    self.refreshControl.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-    [self.refreshControl addTarget:self action:@selector(loadApps) forControlEvents:UIControlEventValueChanged];
-    self.tableView.refreshControl = self.refreshControl;
-
-    // Header with stats
-    UIView *headerContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 100)];
-    headerContainer.backgroundColor = [UIColor clearColor];
-
-    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 8, self.view.bounds.size.width - 32, 82)];
-    self.statsView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    [headerContainer addSubview:self.statsView];
-
-    self.tableView.tableHeaderView = headerContainer;
-}
-
-- (void)setupLoadingView {
-    self.loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
-    self.loadingIndicator.center = self.view.center;
-    self.loadingIndicator.hidesWhenStopped = YES;
-    self.loadingIndicator.color = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-    [self.view addSubview:self.loadingIndicator];
-
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 0, self.view.bounds.size.width - 40, 30)];
-    self.statusLabel.center = CGPointMake(self.view.center.x, self.view.center.y + 40);
-    self.statusLabel.textAlignment = NSTextAlignmentCenter;
-    self.statusLabel.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-    self.statusLabel.font = [UIFont systemFontOfSize:14];
-    self.statusLabel.hidden = YES;
-    [self.view addSubview:self.statusLabel];
-}
-
-#pragma mark - Fast Loading
-
-- (void)loadApps {
-    [self.loadingIndicator startAnimating];
-    self.statusLabel.text = @"جاري تحميل التطبيقات...";
-    self.statusLabel.hidden = NO;
-    self.tableView.hidden = YES;
-
-    [self.manager clearCache];
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        self.allApps = [self.manager allInstalledApplications];
-        self.filteredApps = self.allApps;
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.loadingIndicator stopAnimating];
-            self.statusLabel.hidden = YES;
-            self.tableView.hidden = NO;
-            [self.refreshControl endRefreshing];
-
-            self.statsView.appsCountLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.allApps.count];
-            self.statsView.sizeLabel.text = @"جاري الحساب...";
-
-            [self.tableView reloadData];
-
-            [self calculateSizesInBackground];
-        });
+- (void)clearCache {
+    dispatch_sync(self.cacheQueue, ^{
+        [self.sizeCache removeAllObjects];
+        [self.iconCache removeAllObjects];
     });
 }
 
-- (void)calculateSizesInBackground {
-    if (self.isCalculatingSizes) return;
-    self.isCalculatingSizes = YES;
+#pragma mark - Application Discovery
 
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-        AppDataManager *mgr = self.manager;
-        unsigned long long totalSize = 0;
+- (NSArray *)allInstalledApplications {
+    NSMutableArray *apps = [NSMutableArray array];
 
-        for (NSInteger i = 0; i < self.allApps.count; i++) {
-            @autoreleasepool {
-                NSMutableDictionary *app = [self.allApps[i] mutableCopy];
-                NSString *bundleID = app[@"bundleID"];
-                if (!bundleID) continue;
+    @try {
+        // Strategy 1: LSApplicationWorkspace
+        Class wsClass = NSClassFromString(@"LSApplicationWorkspace");
+        if (wsClass) {
+            id workspace = [wsClass performSelector:
+                @selector(defaultWorkspace)];
+            if (workspace) {
+                NSArray *proxies = nil;
+                @try {
+                    proxies = [workspace performSelector:
+                        @selector(allInstalledApplications)];
+                } @catch (NSException *e) { }
 
-                NSNumber *cached = [mgr.sizeCache objectForKey:bundleID];
-                unsigned long long size = cached ? [cached unsignedLongLongValue] : [mgr dataSizeForBundleID:bundleID];
-                NSString *sizeStr = [mgr formatBytes:size];
+                if (![proxies isKindOfClass:[NSArray class]]) {
+                    @try {
+                        proxies = [workspace performSelector:
+                            @selector(allApplications)];
+                    } @catch (NSException *e) { }
+                }
 
-                app[@"size"] = @(size);
-                app[@"sizeString"] = sizeStr;
-                totalSize += size;
+                if ([proxies isKindOfClass:[NSArray class]]) {
+                    for (id proxy in proxies) {
+                        @autoreleasepool {
+                            NSDictionary *info =
+                                [self extractInfoFromProxy:proxy];
+                            if (info) [apps addObject:info];
+                        }
+                    }
+                }
+            }
+        }
 
-                // Update allApps
-                NSMutableArray *mutableAll = [self.allApps mutableCopy];
-                mutableAll[i] = app;
-                self.allApps = [mutableAll copy];
+        // Strategy 2: Filesystem fallback
+        if (apps.count == 0) {
+            [apps addObjectsFromArray:
+                [self discoverAppsFromFilesystem]];
+        }
 
-                // Update filteredApps if needed
-                NSInteger filteredIndex = NSNotFound;
-                for (NSInteger j = 0; j < self.filteredApps.count; j++) {
-                    if ([self.filteredApps[j][@"bundleID"] isEqualToString:bundleID]) {
-                        filteredIndex = j;
+    } @catch (NSException *e) {
+        NSLog(@"[ADM] discovery exception: %@", e);
+    }
+
+    return [apps sortedArrayUsingComparator:
+        ^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            NSString *n1 = a[@"name"] ?: @"";
+            NSString *n2 = b[@"name"] ?: @"";
+            return [n1 localizedCaseInsensitiveCompare:n2];
+        }];
+}
+
+- (NSDictionary *)extractInfoFromProxy:(id)proxy {
+    @try {
+        if (!proxy) return nil;
+
+        NSString *bundleID = nil;
+        NSString *name = nil;
+        NSString *version = @"1.0";
+        NSString *bundlePath = @"";
+        BOOL isSystem = NO;
+
+        if ([proxy respondsToSelector:@selector(bundleIdentifier)]) {
+            bundleID = [proxy performSelector:@selector(bundleIdentifier)];
+        }
+        if (![bundleID isKindOfClass:[NSString class]] ||
+            bundleID.length == 0) return nil;
+
+        if ([proxy respondsToSelector:@selector(localizedName)]) {
+            name = [proxy performSelector:@selector(localizedName)];
+        }
+        if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+            if ([proxy respondsToSelector:@selector(itemName)]) {
+                name = [proxy performSelector:@selector(itemName)];
+            }
+        }
+        if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+            name = bundleID;
+        }
+
+        if ([proxy respondsToSelector:@selector(shortVersionString)]) {
+            version = [proxy performSelector:@selector(shortVersionString)];
+            if (![version isKindOfClass:[NSString class]])
+                version = @"1.0";
+        }
+
+        if ([proxy respondsToSelector:@selector(bundleContainerURL)]) {
+            NSURL *url = [proxy performSelector:@selector(bundleContainerURL)];
+            bundlePath = url.path ?: @"";
+        }
+        if (!bundlePath.length &&
+            [proxy respondsToSelector:@selector(bundleURL)]) {
+            NSURL *url = [proxy performSelector:@selector(bundleURL)];
+            bundlePath = url.path ?: @"";
+        }
+
+        isSystem = [bundlePath hasPrefix:@"/System/"] ||
+            [bundlePath hasPrefix:@"/var/jb/System/"] ||
+            [bundlePath hasPrefix:@"/Applications/"] ||
+            [bundlePath hasPrefix:@"/var/jb/Applications/"];
+
+        return @{
+            @"bundleID": bundleID,
+            @"name": name ?: bundleID,
+            @"version": version,
+            @"bundlePath": bundlePath,
+            @"isSystem": @(isSystem)
+        };
+
+    } @catch (NSException *e) {
+        return nil;
+    }
+}
+
+- (NSArray *)discoverAppsFromFilesystem {
+    NSMutableArray *apps = [NSMutableArray array];
+
+    @try {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSArray *searchPaths = @[
+            @"/var/containers/Bundle/Application",
+            @"/private/var/containers/Bundle/Application",
+            ROOT_PATH_NS(@"/var/containers/Bundle/Application"),
+            ROOT_PATH_NS(@"/private/var/containers/Bundle/Application")
+        ];
+
+        for (NSString *basePath in searchPaths) {
+            if (![fm fileExistsAtPath:basePath]) continue;
+
+            NSArray *uuidDirs = nil;
+            @try {
+                uuidDirs = [fm contentsOfDirectoryAtPath:basePath error:nil];
+            } @catch (NSException *e) { continue; }
+
+            for (NSString *uuidDir in uuidDirs) {
+                @autoreleasepool {
+                    NSString *container =
+                        [basePath stringByAppendingPathComponent:uuidDir];
+                    NSArray *contents = nil;
+                    @try {
+                        contents = [fm contentsOfDirectoryAtPath:container
+                                                           error:nil];
+                    } @catch (NSException *e) { continue; }
+
+                    for (NSString *item in contents) {
+                        if (![item hasSuffix:@".app"]) continue;
+
+                        NSString *infoPath =
+                            [container stringByAppendingPathComponent:
+                                [item stringByAppendingPathComponent:
+                                    @"Info.plist"]];
+                        NSDictionary *info = nil;
+                        @try {
+                            info = [NSDictionary
+                                dictionaryWithContentsOfFile:infoPath];
+                        } @catch (NSException *e) { continue; }
+
+                        if (!info) continue;
+
+                        NSString *bid = info[@"CFBundleIdentifier"];
+                        NSString *name =
+                            info[@"CFBundleDisplayName"] ?:
+                            info[@"CFBundleName"] ?: bid;
+                        NSString *ver =
+                            info[@"CFBundleShortVersionString"] ?: @"1.0";
+
+                        if (bid) {
+                            [apps addObject:@{
+                                @"bundleID": bid,
+                                @"name": name ?: bid,
+                                @"version": ver,
+                                @"bundlePath":
+                                    [container stringByAppendingPathComponent:item],
+                                @"isSystem": @NO
+                            }];
+                        }
                         break;
                     }
                 }
-                if (filteredIndex != NSNotFound) {
-                    NSMutableArray *mutableFiltered = [self.filteredApps mutableCopy];
-                    mutableFiltered[filteredIndex] = app;
-                    self.filteredApps = [mutableFiltered copy];
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[ADM] filesystem discovery exception: %@", e);
+    }
+
+    return apps;
+}
+
+#pragma mark - Data Paths
+
+- (NSString *)dataPathForBundleID:(NSString *)bundleID {
+    if (!bundleID || bundleID.length == 0) return nil;
+
+    @try {
+        NSString *path = [self dataPathViaContainerManager:bundleID];
+        if (path && [self pathExists:path]) return path;
+
+        path = [self dataPathViaFilesystemSearch:bundleID];
+        if (path && [self pathExists:path]) return path;
+
+        path = [self dataPathViaProxy:bundleID];
+        if (path && [self pathExists:path]) return path;
+
+    } @catch (NSException *e) { }
+
+    return nil;
+}
+
+- (NSString *)dataPathViaContainerManager:(NSString *)bundleID {
+    @try {
+        Class cls = NSClassFromString(@"MCMContainer");
+        if (!cls) return nil;
+
+        id container = nil;
+        if ([cls respondsToSelector:
+                @selector(containerWithIdentifier:createIfNecessary:error:)]) {
+            container = [cls performSelector:
+                @selector(containerWithIdentifier:createIfNecessary:error:)
+                withObject:bundleID withObject:@NO withObject:nil];
+        }
+        if (!container && [cls respondsToSelector:
+                @selector(containerWithIdentifier:error:)]) {
+            container = [cls performSelector:
+                @selector(containerWithIdentifier:error:)
+                withObject:bundleID withObject:nil];
+        }
+
+        if (container && [container respondsToSelector:@selector(url)]) {
+            NSURL *url = [container performSelector:@selector(url)];
+            return url.path;
+        }
+    } @catch (NSException *e) { }
+    return nil;
+}
+
+- (NSString *)dataPathViaFilesystemSearch:(NSString *)bundleID {
+    @try {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSArray *paths = @[
+            @"/var/mobile/Containers/Data/Application",
+            @"/private/var/mobile/Containers/Data/Application",
+            ROOT_PATH_NS(@"/var/mobile/Containers/Data/Application"),
+            ROOT_PATH_NS(@"/private/var/mobile/Containers/Data/Application")
+        ];
+
+        for (NSString *base in paths) {
+            if (![fm fileExistsAtPath:base]) continue;
+
+            NSArray *dirs = [fm contentsOfDirectoryAtPath:base error:nil];
+            for (NSString *dir in dirs) {
+                @autoreleasepool {
+                    NSString *metaPath = [base stringByAppendingPathComponent:
+                        [dir stringByAppendingPathComponent:
+                            @".com.apple.mobile_container_manager.metadata.plist"]];
+                    NSDictionary *meta =
+                        [NSDictionary dictionaryWithContentsOfFile:metaPath];
+                    if ([meta[@"MCMMetadataIdentifier"]
+                            isEqualToString:bundleID]) {
+                        return [base stringByAppendingPathComponent:dir];
+                    }
                 }
+            }
+        }
+    } @catch (NSException *e) { }
+    return nil;
+}
 
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    self.statsView.sizeLabel.text = [mgr formatBytes:totalSize];
+- (NSString *)dataPathViaProxy:(NSString *)bundleID {
+    @try {
+        Class cls = NSClassFromString(@"LSApplicationProxy");
+        if (!cls) return nil;
 
-                    if (filteredIndex != NSNotFound) {
-                        NSIndexPath *indexPath = [NSIndexPath indexPathForRow:filteredIndex inSection:0];
-                        if ([self.tableView.indexPathsForVisibleRows containsObject:indexPath]) {
-                            AppListCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
-                            if (cell) cell.sizeLabel.text = sizeStr;
+        id proxy = [cls performSelector:
+            @selector(applicationProxyForIdentifier:)
+            withObject:bundleID];
+        if (!proxy) return nil;
+
+        if ([proxy respondsToSelector:@selector(containerURL)]) {
+            NSURL *url = [proxy performSelector:@selector(containerURL)];
+            return url.path;
+        }
+        if ([proxy respondsToSelector:@selector(dataContainerURL)]) {
+            NSURL *url = [proxy performSelector:@selector(dataContainerURL)];
+            return url.path;
+        }
+    } @catch (NSException *e) { }
+    return nil;
+}
+
+- (NSArray *)allDataPathsForBundleID:(NSString *)bundleID {
+    if (!bundleID) return @[];
+    NSMutableArray *paths = [NSMutableArray array];
+    NSString *main = [self dataPathForBundleID:bundleID];
+    if (main) [paths addObject:main];
+    [paths addObjectsFromArray:
+        [self groupContainerPathsForBundleID:bundleID]];
+    return [paths copy];
+}
+
+- (NSArray *)groupContainerPathsForBundleID:(NSString *)bundleID {
+    if (!bundleID) return @[];
+    NSMutableArray *paths = [NSMutableArray array];
+
+    @try {
+        Class cls = NSClassFromString(@"LSApplicationProxy");
+        if (cls) {
+            id proxy = [cls performSelector:
+                @selector(applicationProxyForIdentifier:)
+                withObject:bundleID];
+            if (proxy && [proxy respondsToSelector:
+                    @selector(groupContainerURLs)]) {
+                NSDictionary *urls = [proxy performSelector:
+                    @selector(groupContainerURLs)];
+                if ([urls isKindOfClass:[NSDictionary class]]) {
+                    for (NSURL *url in [urls allValues]) {
+                        if ([url isKindOfClass:[NSURL class]] && url.path) {
+                            [paths addObject:url.path];
                         }
                     }
-                });
-
-                if (i % 5 == 4) {
-                    [NSThread sleepForTimeInterval:0.02];
                 }
             }
         }
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.statsView.sizeLabel.text = [mgr formatBytes:totalSize];
-            self.isCalculatingSizes = NO;
-        });
-    });
-}
-
-- (void)updateVisibleCellSizes {
-    NSArray *visiblePaths = [self.tableView indexPathsForVisibleRows];
-    for (NSIndexPath *path in visiblePaths) {
-        if (path.row < self.filteredApps.count) {
-            NSDictionary *app = self.filteredApps[path.row];
-            AppListCell *cell = [self.tableView cellForRowAtIndexPath:path];
-            if ([cell isKindOfClass:[AppListCell class]]) {
-                cell.sizeLabel.text = app[@"sizeString"];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *groupBase =
+            @"/var/mobile/Containers/Shared/AppGroup";
+        NSArray *groupDirs = [fm contentsOfDirectoryAtPath:groupBase
+                                                       error:nil];
+        for (NSString *dir in groupDirs) {
+            @autoreleasepool {
+                NSString *metaPath = [groupBase stringByAppendingPathComponent:
+                    [dir stringByAppendingPathComponent:
+                        @".com.apple.mobile_container_manager.metadata.plist"]];
+                NSDictionary *meta =
+                    [NSDictionary dictionaryWithContentsOfFile:metaPath];
+                if ([meta[@"MCMMetadataIdentifier"]
+                        isEqualToString:bundleID]) {
+                    [paths addObject:
+                        [groupBase stringByAppendingPathComponent:dir]];
+                }
             }
         }
+    } @catch (NSException *e) { }
+
+    return [paths copy];
+}
+
+#pragma mark - Size Calculation
+
+- (unsigned long long)dataSizeForBundleID:(NSString *)bundleID {
+    if (!bundleID || bundleID.length == 0) return 0;
+
+    __block NSNumber *cached = nil;
+    dispatch_sync(self.cacheQueue, ^{
+        cached = [self.sizeCache objectForKey:bundleID];
+    });
+    if (cached) return [cached unsignedLongLongValue];
+
+    __block unsigned long long total = 0;
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSArray *paths =
+                    [self allDataPathsForBundleID:bundleID];
+                for (NSString *path in paths) {
+                    if (!path || path.length == 0) continue;
+                    total += [self fastDirectorySize:path];
+                }
+            } @catch (NSException *e) {
+                NSLog(@"[ADM] size exception for %@: %@", bundleID, e);
+                total = 0;
+            }
+        }
+    });
+
+    dispatch_sync(self.cacheQueue, ^{
+        [self.sizeCache setObject:@(total) forKey:bundleID];
+    });
+
+    return total;
+}
+
+- (unsigned long long)accurateDataSizeForBundleID:(NSString *)bundleID {
+    if (!bundleID) return 0;
+    __block unsigned long long total = 0;
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSArray *paths =
+                    [self allDataPathsForBundleID:bundleID];
+                for (NSString *path in paths) {
+                    if (!path || path.length == 0) continue;
+                    total += [self fastDirectorySize:path];
+                }
+            } @catch (NSException *e) { }
+        }
+    });
+    return total;
+}
+
+- (unsigned long long)fastDirectorySize:(NSString *)path {
+    if (!path || path.length == 0) return 0;
+    if (![self pathExists:path]) return 0;
+
+    unsigned long long total = 0;
+
+    @try {
+        NSFileManager *fm = [[NSFileManager alloc] init];
+        NSURL *url = [NSURL fileURLWithPath:path];
+
+        NSDirectoryEnumerator *enumerator =
+            [fm enumeratorAtURL:url
+     includingPropertiesForKeys:@[NSURLFileSizeKey,
+                                    NSURLIsSymbolicLinkKey]
+                        options:NSDirectoryEnumerationSkipsPackageDescendants |
+                                NSDirectoryEnumerationSkipsHiddenFiles
+                   errorHandler:^BOOL(NSURL *u, NSError *error) {
+                       return YES;
+                   }];
+
+        NSMutableSet *visitedInodes = [NSMutableSet set];
+
+        for (NSURL *fileURL in enumerator) {
+            @autoreleasepool {
+                @try {
+                    NSNumber *isSymlink = nil;
+                    [fileURL getResourceValue:&isSymlink
+                                       forKey:NSURLIsSymbolicLinkKey
+                                        error:nil];
+                    if ([isSymlink boolValue]) continue;
+
+                    const char *cpath =
+                        [fileURL.path fileSystemRepresentation];
+                    struct stat st;
+                    if (lstat(cpath, &st) == 0) {
+                        NSString *key =
+                            [NSString stringWithFormat:@"%llu-%llu",
+                                (unsigned long long)st.st_dev,
+                                (unsigned long long)st.st_ino];
+                        if ([visitedInodes containsObject:key]) continue;
+                        [visitedInodes addObject:key];
+                        total += (unsigned long long)st.st_size;
+                    }
+                } @catch (NSException *e) { continue; }
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[ADM] fastDirectorySize exception: %@", e);
+    }
+
+    return total;
+}
+
+#pragma mark - Wipe / Backup / Restore
+
+- (BOOL)wipeAppData:(NSString *)bundleID {
+    if (!bundleID || bundleID.length == 0) return NO;
+    if ([self isSystemApp:bundleID]) return NO;
+
+    __block BOOL success = YES;
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSArray *paths =
+                    [self allDataPathsForBundleID:bundleID];
+                NSFileManager *fm = [NSFileManager defaultManager];
+
+                for (NSString *path in paths) {
+                    if (!path || path.length == 0) continue;
+                    NSArray *contents =
+                        [fm contentsOfDirectoryAtPath:path error:nil];
+                    for (NSString *item in contents) {
+                        @autoreleasepool {
+                            NSString *full =
+                                [path stringByAppendingPathComponent:item];
+                            @try {
+                                [fm removeItemAtPath:full error:nil];
+                            } @catch (NSException *e) {
+                                success = NO;
+                            }
+                        }
+                    }
+                }
+
+                dispatch_sync(self.cacheQueue, ^{
+                    [self.sizeCache removeObjectForKey:bundleID];
+                });
+
+            } @catch (NSException *e) {
+                success = NO;
+            }
+        }
+    });
+
+    return success;
+}
+
+- (NSString *)backupDirectory {
+    NSString *path = ROOT_PATH_NS(kBackupDir);
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path]) {
+        @try {
+            [fm createDirectoryAtPath:path
+        withIntermediateDirectories:YES
+                         attributes:nil
+                              error:nil];
+        } @catch (NSException *e) { }
+    }
+    return path;
+}
+
+- (BOOL)backupAppData:(NSString *)bundleID {
+    if (!bundleID || bundleID.length == 0) return NO;
+
+    @try {
+        NSString *backupDir = [self backupDirectory];
+        if (!backupDir) return NO;
+
+        NSDateFormatter *df = [[NSDateFormatter alloc] init];
+        [df setDateFormat:@"yyyy-MM-dd_HH-mm-ss"];
+        NSString *ts = [df stringFromDate:[NSDate date]];
+        NSString *name =
+            [NSString stringWithFormat:@"%@_%@", bundleID, ts];
+        NSString *dest = [backupDir stringByAppendingPathComponent:name];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        [fm createDirectoryAtPath:dest
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:nil];
+
+        NSArray *dataPaths =
+            [self allDataPathsForBundleID:bundleID];
+        for (NSString *src in dataPaths) {
+            if (!src || src.length == 0) continue;
+            NSString *itemDest =
+                [dest stringByAppendingPathComponent:[src lastPathComponent]];
+            @try {
+                [fm copyItemAtPath:src toPath:itemDest error:nil];
+            } @catch (NSException *e) { }
+        }
+
+        return YES;
+    } @catch (NSException *e) {
+        return NO;
     }
 }
 
-#pragma mark - UITableViewDataSource
+- (BOOL)restoreAppData:(NSString *)bundleID
+            fromBackup:(NSString *)backupPath {
+    if (!bundleID || !backupPath || backupPath.length == 0) return NO;
+    if ([self isSystemApp:bundleID]) return NO;
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 1;
+    @try {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:backupPath]) return NO;
+
+        [self killApp:bundleID];
+        [self wipeAppData:bundleID];
+
+        NSArray *destPaths =
+            [self allDataPathsForBundleID:bundleID];
+        for (NSString *dest in destPaths) {
+            if (!dest || dest.length == 0) continue;
+            NSString *src =
+                [backupPath stringByAppendingPathComponent:
+                    [dest lastPathComponent]];
+            if ([fm fileExistsAtPath:src]) {
+                @try {
+                    [fm copyItemAtPath:src toPath:dest error:nil];
+                } @catch (NSException *e) { }
+            }
+        }
+
+        dispatch_sync(self.cacheQueue, ^{
+            [self.sizeCache removeObjectForKey:bundleID];
+        });
+
+        return YES;
+    } @catch (NSException *e) {
+        return NO;
+    }
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.filteredApps.count;
+- (NSArray *)availableBackupsForBundleID:(NSString *)bundleID {
+    if (!bundleID) return @[];
+
+    @try {
+        NSString *dir = [self backupDirectory];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
+        NSMutableArray *backups = [NSMutableArray array];
+
+        for (NSString *item in contents) {
+            if ([item hasPrefix:bundleID]) {
+                NSString *full = [dir stringByAppendingPathComponent:item];
+                NSDictionary *attrs =
+                    [fm attributesOfItemAtPath:full error:nil];
+                [backups addObject:@{
+                    @"path": full,
+                    @"date": attrs[NSFileModificationDate] ?: [NSDate date],
+                    @"name": item
+                }];
+            }
+        }
+
+        return [backups sortedArrayUsingComparator:
+            ^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+                return [b[@"date"] compare:a[@"date"]];
+            }];
+
+    } @catch (NSException *e) {
+        return @[];
+    }
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *cellId = @"AppCell";
-    AppListCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
-    if (!cell) {
-        cell = [[AppListCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellId];
+- (BOOL)deleteBackup:(NSString *)backupPath {
+    if (!backupPath || backupPath.length == 0) return NO;
+    @try {
+        [[NSFileManager defaultManager] removeItemAtPath:backupPath
+                                                   error:nil];
+        return YES;
+    } @catch (NSException *e) { return NO; }
+}
+
+- (BOOL)deleteAllBackups {
+    @try {
+        NSString *dir = [self backupDirectory];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
+        for (NSString *item in contents) {
+            @autoreleasepool {
+                @try {
+                    [fm removeItemAtPath:
+                        [dir stringByAppendingPathComponent:item]
+                                   error:nil];
+                } @catch (NSException *e) { }
+            }
+        }
+        return YES;
+    } @catch (NSException *e) { return NO; }
+}
+
+- (NSString *)exportBackupsToZip:(NSError **)error {
+    @try {
+        NSString *dir = [self backupDirectory];
+        NSString *zip = [dir stringByAppendingPathComponent:
+            @"backups_export.zip"];
+        NSString *cmd =
+            [NSString stringWithFormat:
+                @"cd \"%@\" && zip -r \"%@\" . -x \"*.zip\"",
+                dir, zip];
+        int result = system([cmd UTF8String]);
+        if (result == 0 && [self pathExists:zip]) return zip;
+        return nil;
+    } @catch (NSException *e) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataManager"
+                                         code:500
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    e.reason ?: @"Unknown"}];
+        }
+        return nil;
+    }
+}
+
+#pragma mark - Disk Space
+
+- (unsigned long long)totalFreeSpace {
+    @try {
+        NSDictionary *attrs =
+            [[NSFileManager defaultManager]
+                attributesOfFileSystemForPath:NSHomeDirectory()
+                                        error:nil];
+        return [attrs[NSFileSystemFreeSize] unsignedLongLongValue];
+    } @catch (NSException *e) { return 0; }
+}
+
+- (unsigned long long)totalDiskSpace {
+    @try {
+        NSDictionary *attrs =
+            [[NSFileManager defaultManager]
+                attributesOfFileSystemForPath:NSHomeDirectory()
+                                        error:nil];
+        return [attrs[NSFileSystemSize] unsignedLongLongValue];
+    } @catch (NSException *e) { return 0; }
+}
+
+#pragma mark - UI Support
+
+- (UIImage *)iconForBundleID:(NSString *)bundleID {
+    if (!bundleID || bundleID.length == 0) return nil;
+
+    __block UIImage *cached = nil;
+    dispatch_sync(self.cacheQueue, ^{
+        cached = [self.iconCache objectForKey:bundleID];
+    });
+    if (cached) return cached;
+
+    __block UIImage *icon = nil;
+
+    @try {
+        // Strategy 1: LSApplicationProxy
+        Class cls = NSClassFromString(@"LSApplicationProxy");
+        if (cls) {
+            id proxy = [cls performSelector:
+                @selector(applicationProxyForIdentifier:)
+                withObject:bundleID];
+            if (proxy) {
+                for (NSNumber *variant in @[@(2), @(0)]) {
+                    if ([proxy respondsToSelector:
+                            @selector(iconDataForVariant:)]) {
+                        NSData *data = [proxy performSelector:
+                            @selector(iconDataForVariant:)
+                            withObject:variant];
+                        if ([data isKindOfClass:[NSData class]]) {
+                            icon = [UIImage imageWithData:data];
+                            if (icon) break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Strategy 2: Filesystem
+        if (!icon) {
+            NSString *dataPath = [self dataPathForBundleID:bundleID];
+            if (dataPath) {
+                NSFileManager *fm = [NSFileManager defaultManager];
+                NSArray *items =
+                    [fm contentsOfDirectoryAtPath:dataPath error:nil];
+                for (NSString *item in items) {
+                    if (![item hasSuffix:@".app"]) continue;
+                    NSString *appPath =
+                        [dataPath stringByAppendingPathComponent:item];
+                    NSArray *iconNames = @[@"AppIcon60x60",
+                                             @"AppIcon76x76",
+                                             @"Icon-60",
+                                             @"Icon",
+                                             @"icon"];
+                    for (NSString *name in iconNames) {
+                        for (NSString *ext in @[@"png", @"jpg",
+                                                @"@2x.png",
+                                                @"@3x.png"]) {
+                            NSString *ip = [appPath
+                                stringByAppendingPathComponent:
+                                    [name stringByAppendingPathExtension:ext]];
+                            if ([fm fileExistsAtPath:ip]) {
+                                icon = [UIImage imageWithContentsOfFile:ip];
+                                if (icon) break;
+                            }
+                        }
+                        if (icon) break;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Strategy 3: SpringBoardServices
+        if (!icon) {
+            void *handle = dlopen(
+                "/System/Library/PrivateFrameworks/"
+                "SpringBoardServices.framework/SpringBoardServices",
+                RTLD_LAZY);
+            if (handle) {
+                NSData *(*func)(NSString *) = dlsym(handle,
+                    "SBSCopyIconImagePNGDataForDisplayIdentifier");
+                if (func) {
+                    NSData *data = func(bundleID);
+                    if (data) icon = [UIImage imageWithData:data];
+                }
+                dlclose(handle);
+            }
+        }
+
+    } @catch (NSException *e) {
+        NSLog(@"[ADM] icon exception for %@: %@", bundleID, e);
     }
 
-    NSDictionary *app = self.filteredApps[indexPath.row];
-    cell.nameLabel.text = app[@"name"];
-    cell.bundleLabel.text = app[@"bundleID"];
-    cell.sizeLabel.text = app[@"sizeString"];
-
-    NSString *bundleID = app[@"bundleID"];
-    UIImage *icon = [self.manager iconForBundleID:bundleID];
     if (icon) {
-        cell.appIcon.image = icon;
-    } else {
-        cell.appIcon.image = [UIImage systemImageNamed:@"app.fill"];
-        cell.appIcon.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
+        dispatch_sync(self.cacheQueue, ^{
+            [self.iconCache setObject:icon forKey:bundleID];
+        });
     }
 
-    return cell;
+    return icon;
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSDictionary *app = self.filteredApps[indexPath.row];
-    AppDetailViewController *detailVC = [[AppDetailViewController alloc] initWithAppInfo:app];
-    [self.navigationController pushViewController:detailVC animated:YES];
+- (NSString *)formatBytes:(unsigned long long)bytes {
+    @try {
+        if (bytes == 0) return @"0 B";
+
+        NSArray *units = @[@"B", @"KB", @"MB", @"GB", @"TB"];
+        NSUInteger idx = 0;
+        double size = (double)bytes;
+
+        while (size >= 1024.0 && idx < units.count - 1) {
+            size /= 1024.0;
+            idx++;
+        }
+
+        if (idx == 0) {
+            return [NSString stringWithFormat:@"%llu %@",
+                    bytes, units[idx]];
+        } else if (size < 10) {
+            return [NSString stringWithFormat:@"%.2f %@",
+                    size, units[idx]];
+        } else if (size < 100) {
+            return [NSString stringWithFormat:@"%.1f %@",
+                    size, units[idx]];
+        } else {
+            return [NSString stringWithFormat:@"%.0f %@",
+                    size, units[idx]];
+        }
+    } @catch (NSException *e) { return @"0 B"; }
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-    return 78;
+- (NSString *)versionForBundleID:(NSString *)bundleID {
+    if (!bundleID) return @"1.0";
+
+    @try {
+        Class cls = NSClassFromString(@"LSApplicationProxy");
+        if (cls) {
+            id proxy = [cls performSelector:
+                @selector(applicationProxyForIdentifier:)
+                withObject:bundleID];
+            if (proxy && [proxy respondsToSelector:
+                    @selector(shortVersionString)]) {
+                NSString *v = [proxy performSelector:
+                    @selector(shortVersionString)];
+                if ([v isKindOfClass:[NSString class]] && v.length > 0)
+                    return v;
+            }
+        }
+
+        NSString *dp = [self dataPathForBundleID:bundleID];
+        if (dp) {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSArray *items = [fm contentsOfDirectoryAtPath:dp error:nil];
+            for (NSString *item in items) {
+                if ([item hasSuffix:@".app"]) {
+                    NSString *ip = [dp stringByAppendingPathComponent:
+                        [item stringByAppendingPathComponent:@"Info.plist"]];
+                    NSDictionary *info =
+                        [NSDictionary dictionaryWithContentsOfFile:ip];
+                    NSString *v = info[@"CFBundleShortVersionString"];
+                    if (v) return v;
+                }
+            }
+        }
+    } @catch (NSException *e) { }
+
+    return @"1.0";
 }
 
-#pragma mark - UISearchResultsUpdating
+- (NSString *)documentsPathForBundleID:(NSString *)bundleID {
+    NSString *dp = [self dataPathForBundleID:bundleID];
+    if (!dp) return nil;
+    NSString *docs = [dp stringByAppendingPathComponent:@"Documents"];
+    return [self pathExists:docs] ? docs : nil;
+}
 
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    NSString *searchText = searchController.searchBar.text;
-    if (searchText.length == 0) {
-        self.filteredApps = self.allApps;
-    } else {
-        NSPredicate *predicate = [NSPredicate predicateWithFormat:@"name CONTAINS[c] %@ OR bundleID CONTAINS[c] %@", searchText, searchText];
-        self.filteredApps = [self.allApps filteredArrayUsingPredicate:predicate];
-    }
-    [self.tableView reloadData];
+- (NSUInteger)documentsCountForBundleID:(NSString *)bundleID {
+    NSString *dp = [self documentsPathForBundleID:bundleID];
+    if (!dp) return 0;
+    @try {
+        NSArray *c = [[NSFileManager defaultManager]
+            contentsOfDirectoryAtPath:dp error:nil];
+        return c.count;
+    } @catch (NSException *e) { return 0; }
+}
+
+- (NSDate *)lastBackupDateForBundleID:(NSString *)bundleID {
+    NSArray *backups = [self availableBackupsForBundleID:bundleID];
+    return backups.count > 0 ? backups[0][@"date"] : nil;
+}
+
+- (unsigned long long)totalBackupsSize {
+    @try {
+        return [self fastDirectorySize:[self backupDirectory]];
+    } @catch (NSException *e) { return 0; }
+}
+
+- (unsigned long long)totalAppsDataSize {
+    @try {
+        NSArray *apps = [self allInstalledApplications];
+        unsigned long long total = 0;
+        for (NSDictionary *app in apps) {
+            @autoreleasepool {
+                NSString *bid = app[@"bundleID"];
+                if (bid) total += [self dataSizeForBundleID:bid];
+            }
+        }
+        return total;
+    } @catch (NSException *e) { return 0; }
+}
+
+- (BOOL)isSystemApp:(NSString *)bundleID {
+    if (!bundleID) return NO;
+
+    @try {
+        NSArray *apps = [self allInstalledApplications];
+        for (NSDictionary *app in apps) {
+            if ([app[@"bundleID"] isEqualToString:bundleID]) {
+                return [app[@"isSystem"] boolValue];
+            }
+        }
+
+        NSArray *prefixes = @[@"com.apple.", @"system."];
+        for (NSString *p in prefixes) {
+            if ([bundleID hasPrefix:p]) return YES;
+        }
+    } @catch (NSException *e) { }
+
+    return NO;
+}
+
+- (BOOL)killApp:(NSString *)bundleID {
+    if (!bundleID) return NO;
+
+    @try {
+        Class cls = NSClassFromString(@"LSApplicationWorkspace");
+        if (cls) {
+            id ws = [cls performSelector:@selector(defaultWorkspace)];
+            if (ws && [ws respondsToSelector:
+                    @selector(terminateApplicationWithBundleIdentifier:)]) {
+                [ws performSelector:
+                    @selector(terminateApplicationWithBundleIdentifier:)
+                    withObject:bundleID];
+                return YES;
+            }
+        }
+
+        NSString *cmd =
+            [NSString stringWithFormat:
+                @"killall -9 '%@' 2>/dev/null || true", bundleID];
+        system([cmd UTF8String]);
+        return YES;
+    } @catch (NSException *e) { return NO; }
+}
+
+#pragma mark - Helpers
+
+- (BOOL)pathExists:(NSString *)path {
+    if (!path || path.length == 0) return NO;
+    @try {
+        return [[NSFileManager defaultManager] fileExistsAtPath:path];
+    } @catch (NSException *e) { return NO; }
 }
 
 @end
