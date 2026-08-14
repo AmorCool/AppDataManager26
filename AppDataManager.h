@@ -4,6 +4,9 @@
 
 + (instancetype)sharedManager;
 
+@property (nonatomic, strong) NSCache *sizeCache;
+@property (nonatomic, strong) NSCache *iconCache;
+
 // جلب كل التطبيقات المثبتة
 - (NSArray *)allInstalledApplications;
 
@@ -15,6 +18,7 @@
 // حجم بيانات التطبيق (شامل)
 - (unsigned long long)dataSizeForBundleID:(NSString *)bundleID;
 - (unsigned long long)accurateDataSizeForBundleID:(NSString *)bundleID;
+- (unsigned long long)fastDirectorySize:(NSString *)path;
 
 // مسح بيانات التطبيق (شامل - يشمل كل المسارات)
 - (BOOL)wipeAppData:(NSString *)bundleID;
