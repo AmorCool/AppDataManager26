@@ -52,11 +52,11 @@ jobs:
         run: |
           cd source
           make clean
-          make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
+          make appdatamanager
 
       - name: Verify build
         run: |
-          ls -la source/packages/
+          ls -la source/AppDataManager/packages/
           echo "✅ AppData Manager build verified!"
 
       - name: Copy generate-repo.py to repo
@@ -70,7 +70,7 @@ jobs:
           git config --global user.name "GitHub CI"
 
           mkdir -p repo/pool/main/iphoneos-arm64
-          cp source/packages/*.deb repo/pool/main/iphoneos-arm64/
+          cp source/AppDataManager/packages/*.deb repo/pool/main/iphoneos-arm64/
 
           cd repo
           python3 scripts/generate-repo.py . --prod
