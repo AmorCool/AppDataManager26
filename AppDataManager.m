@@ -2,17 +2,19 @@
 //  AppDataManager.m
 //  AppDataManager
 //
-//  v1.6.0 — Crash-Resilient Core Engine
+//  v1.6.1 — Crash-Resilient Core Engine
 //
 
 #import "AppDataManager.h"
 #import "rootless.h"
 #import <objc/runtime.h>
+#import <UIKit/UIKit.h>
 #import <sys/stat.h>
 #import <dlfcn.h>
 #import <stdio.h>
 
-static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Backups";
+static NSString * const kBackupDir =
+    @"/var/mobile/Documents/AppDataManager/Backups";
 
 @interface AppDataManager ()
 @property (nonatomic, strong) dispatch_queue_t fileQueue;
@@ -25,16 +27,19 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 #pragma mark - Singleton
 
 + (instancetype)sharedManager {
-    static AppDataManager *shared = nil;
+    static AppDataManager *sharedManager = nil;
     static dispatch_once_t onceToken;
+
     dispatch_once(&onceToken, ^{
-        shared = [[self alloc] init];
+        sharedManager = [[self alloc] init];
     });
-    return shared;
+
+    return sharedManager;
 }
 
 - (instancetype)init {
     self = [super init];
+
     if (self) {
         _sizeCache = [[NSCache alloc] init];
         _sizeCache.countLimit = 500;
@@ -42,33 +47,72 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
         _iconCache = [[NSCache alloc] init];
         _iconCache.countLimit = 200;
 
-        _fileQueue = dispatch_queue_create(
-            "com.appdatamanager.fileops", DISPATCH_QUEUE_CONCURRENT);
-        _cacheQueue = dispatch_queue_create(
-            "com.appdatamanager.cache", DISPATCH_QUEUE_CONCURRENT);
+        /*
+         * File operations are serialized.
+         *
+         * This is intentional. AppDataManager performs destructive
+         * operations such as wipe/restore, therefore correctness is
+         * more important than allowing concurrent filesystem mutation.
+         */
+        _fileQueue =
+            dispatch_queue_create("com.appdatamanager.fileops",
+                                   DISPATCH_QUEUE_SERIAL);
+
+        /*
+         * Cache operations can safely run concurrently.
+         * Barrier writes are used whenever multiple cache operations
+         * need synchronization.
+         */
+        _cacheQueue =
+            dispatch_queue_create("com.appdatamanager.cache",
+                                   DISPATCH_QUEUE_CONCURRENT);
 
         _iosMajorVersion = [self detectIOSMajorVersion];
     }
+
     return self;
 }
+
+#pragma mark - iOS Version
 
 - (NSUInteger)detectIOSMajorVersion {
     @try {
         NSProcessInfo *info = [NSProcessInfo processInfo];
-        if ([info respondsToSelector:
-                @selector(operatingSystemVersion)]) {
-            NSOperatingSystemVersion ver =
+
+        if ([info respondsToSelector:@selector(operatingSystemVersion)]) {
+            NSOperatingSystemVersion version =
                 info.operatingSystemVersion;
-            return ver.majorVersion;
+
+            if (version.majorVersion > 0) {
+                return (NSUInteger)version.majorVersion;
+            }
         }
-    } @catch (NSException *e) { }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] iOS version detection exception: %@",
+              exception.reason);
+    }
 
     @try {
         NSString *version =
             [[UIDevice currentDevice] systemVersion];
-        NSArray *parts = [version componentsSeparatedByString:@"."];
-        if (parts.count > 0) return [parts[0] integerValue];
-    } @catch (NSException *e) { }
+
+        NSArray *components =
+            [version componentsSeparatedByString:@"."];
+
+        if (components.count > 0) {
+            NSInteger major =
+                [components.firstObject integerValue];
+
+            if (major > 0) {
+                return (NSUInteger)major;
+            }
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] fallback version detection exception: %@",
+              exception.reason);
+    }
 
     return 15;
 }
@@ -76,7 +120,7 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 #pragma mark - Cache
 
 - (void)clearCache {
-    dispatch_sync(self.cacheQueue, ^{
+    dispatch_barrier_sync(self.cacheQueue, ^{
         [self.sizeCache removeAllObjects];
         [self.iconCache removeAllObjects];
     });
@@ -85,26 +129,58 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 #pragma mark - Application Discovery
 
 - (NSArray *)allInstalledApplications {
-    NSMutableArray *apps = [NSMutableArray array];
+    NSMutableArray *applications =
+        [NSMutableArray array];
 
     @try {
-        // Strategy 1: LSApplicationWorkspace
-        Class wsClass = NSClassFromString(@"LSApplicationWorkspace");
-        if (wsClass) {
-            id workspace = [wsClass performSelector:
-                @selector(defaultWorkspace)];
+        Class workspaceClass =
+            NSClassFromString(@"LSApplicationWorkspace");
+
+        if (workspaceClass) {
+            id workspace = nil;
+
+            @try {
+                if ([workspaceClass respondsToSelector:
+                        @selector(defaultWorkspace)]) {
+                    workspace =
+                        [workspaceClass performSelector:
+                            @selector(defaultWorkspace)];
+                }
+            }
+            @catch (NSException *exception) {
+                NSLog(@"[ADM] workspace exception: %@",
+                      exception.reason);
+            }
+
             if (workspace) {
                 NSArray *proxies = nil;
+
                 @try {
-                    proxies = [workspace performSelector:
-                        @selector(allInstalledApplications)];
-                } @catch (NSException *e) { }
+                    if ([workspace respondsToSelector:
+                            @selector(allInstalledApplications)]) {
+                        proxies =
+                            [workspace performSelector:
+                                @selector(allInstalledApplications)];
+                    }
+                }
+                @catch (NSException *exception) {
+                    NSLog(@"[ADM] installed applications exception: %@",
+                          exception.reason);
+                }
 
                 if (![proxies isKindOfClass:[NSArray class]]) {
                     @try {
-                        proxies = [workspace performSelector:
-                            @selector(allApplications)];
-                    } @catch (NSException *e) { }
+                        if ([workspace respondsToSelector:
+                                @selector(allApplications)]) {
+                            proxies =
+                                [workspace performSelector:
+                                    @selector(allApplications)];
+                        }
+                    }
+                    @catch (NSException *exception) {
+                        NSLog(@"[ADM] allApplications exception: %@",
+                              exception.reason);
+                    }
                 }
 
                 if ([proxies isKindOfClass:[NSArray class]]) {
@@ -112,35 +188,58 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
                         @autoreleasepool {
                             NSDictionary *info =
                                 [self extractInfoFromProxy:proxy];
-                            if (info) [apps addObject:info];
+
+                            if (info) {
+                                [applications addObject:info];
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Strategy 2: Filesystem fallback
-        if (apps.count == 0) {
-            [apps addObjectsFromArray:
-                [self discoverAppsFromFilesystem]];
-        }
+        /*
+         * Filesystem discovery is used only when LaunchServices
+         * did not return anything. This prevents duplicate entries.
+         */
+        if (applications.count == 0) {
+            NSArray *fallback =
+                [self discoverAppsFromFilesystem];
 
-    } @catch (NSException *e) {
-        NSLog(@"[ADM] discovery exception: %@", e);
+            if (fallback.count > 0) {
+                [applications addObjectsFromArray:fallback];
+            }
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] discovery exception: %@",
+              exception.reason);
     }
 
-    return [apps sortedArrayUsingComparator:
+    return [applications sortedArrayUsingComparator:
         ^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-            NSString *n1 = a[@"name"] ?: @"";
-            NSString *n2 = b[@"name"] ?: @"";
-            return [n1 localizedCaseInsensitiveCompare:n2];
-        }];
+
+        NSString *nameA = a[@"name"];
+        NSString *nameB = b[@"name"];
+
+        if (![nameA isKindOfClass:[NSString class]]) {
+            nameA = @"";
+        }
+
+        if (![nameB isKindOfClass:[NSString class]]) {
+            nameB = @"";
+        }
+
+        return [nameA localizedCaseInsensitiveCompare:nameB];
+    }];
 }
 
 - (NSDictionary *)extractInfoFromProxy:(id)proxy {
-    @try {
-        if (!proxy) return nil;
+    if (!proxy) {
+        return nil;
+    }
 
+    @try {
         NSString *bundleID = nil;
         NSString *name = nil;
         NSString *version = @"1.0";
@@ -148,40 +247,75 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
         BOOL isSystem = NO;
 
         if ([proxy respondsToSelector:@selector(bundleIdentifier)]) {
-            bundleID = [proxy performSelector:@selector(bundleIdentifier)];
+            bundleID =
+                [proxy performSelector:@selector(bundleIdentifier)];
         }
+
         if (![bundleID isKindOfClass:[NSString class]] ||
-            bundleID.length == 0) return nil;
+            bundleID.length == 0) {
+            return nil;
+        }
 
         if ([proxy respondsToSelector:@selector(localizedName)]) {
-            name = [proxy performSelector:@selector(localizedName)];
+            name =
+                [proxy performSelector:@selector(localizedName)];
         }
-        if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+
+        if (![name isKindOfClass:[NSString class]] ||
+            name.length == 0) {
+
             if ([proxy respondsToSelector:@selector(itemName)]) {
-                name = [proxy performSelector:@selector(itemName)];
+                name =
+                    [proxy performSelector:@selector(itemName)];
             }
         }
-        if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+
+        if (![name isKindOfClass:[NSString class]] ||
+            name.length == 0) {
             name = bundleID;
         }
 
-        if ([proxy respondsToSelector:@selector(shortVersionString)]) {
-            version = [proxy performSelector:@selector(shortVersionString)];
-            if (![version isKindOfClass:[NSString class]])
-                version = @"1.0";
+        if ([proxy respondsToSelector:
+                @selector(shortVersionString)]) {
+
+            NSString *proxyVersion =
+                [proxy performSelector:
+                    @selector(shortVersionString)];
+
+            if ([proxyVersion isKindOfClass:[NSString class]] &&
+                proxyVersion.length > 0) {
+                version = proxyVersion;
+            }
         }
 
         if ([proxy respondsToSelector:@selector(bundleContainerURL)]) {
-            NSURL *url = [proxy performSelector:@selector(bundleContainerURL)];
-            bundlePath = url.path ?: @"";
-        }
-        if (!bundlePath.length &&
-            [proxy respondsToSelector:@selector(bundleURL)]) {
-            NSURL *url = [proxy performSelector:@selector(bundleURL)];
-            bundlePath = url.path ?: @"";
+            NSURL *url =
+                [proxy performSelector:@selector(bundleContainerURL)];
+
+            if ([url isKindOfClass:[NSURL class]]) {
+                bundlePath = url.path ?: @"";
+            }
         }
 
-        isSystem = [bundlePath hasPrefix:@"/System/"] ||
+        if (bundlePath.length == 0 &&
+            [proxy respondsToSelector:@selector(bundleURL)]) {
+
+            NSURL *url =
+                [proxy performSelector:@selector(bundleURL)];
+
+            if ([url isKindOfClass:[NSURL class]]) {
+                bundlePath = url.path ?: @"";
+            }
+        }
+
+        /*
+         * Do not classify an application as system solely because
+         * its bundle identifier starts with com.apple.
+         *
+         * The actual installation path is a stronger signal.
+         */
+        isSystem =
+            [bundlePath hasPrefix:@"/System/"] ||
             [bundlePath hasPrefix:@"/var/jb/System/"] ||
             [bundlePath hasPrefix:@"/Applications/"] ||
             [bundlePath hasPrefix:@"/var/jb/Applications/"];
@@ -189,21 +323,26 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
         return @{
             @"bundleID": bundleID,
             @"name": name ?: bundleID,
-            @"version": version,
-            @"bundlePath": bundlePath,
+            @"version": version ?: @"1.0",
+            @"bundlePath": bundlePath ?: @"",
             @"isSystem": @(isSystem)
         };
-
-    } @catch (NSException *e) {
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] proxy extraction exception: %@",
+              exception.reason);
         return nil;
     }
 }
 
 - (NSArray *)discoverAppsFromFilesystem {
-    NSMutableArray *apps = [NSMutableArray array];
+    NSMutableArray *applications =
+        [NSMutableArray array];
 
     @try {
-        NSFileManager *fm = [NSFileManager defaultManager];
+        NSFileManager *fm =
+            [NSFileManager defaultManager];
+
         NSArray *searchPaths = @[
             @"/var/containers/Bundle/Application",
             @"/private/var/containers/Bundle/Application",
@@ -211,130 +350,354 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
             ROOT_PATH_NS(@"/private/var/containers/Bundle/Application")
         ];
 
+        NSMutableSet *knownBundleIDs =
+            [NSMutableSet set];
+
         for (NSString *basePath in searchPaths) {
-            if (![fm fileExistsAtPath:basePath]) continue;
+            if (![self pathExists:basePath]) {
+                continue;
+            }
 
-            NSArray *uuidDirs = nil;
-            @try {
-                uuidDirs = [fm contentsOfDirectoryAtPath:basePath error:nil];
-            } @catch (NSException *e) { continue; }
+            NSArray *uuidDirectories =
+                [fm contentsOfDirectoryAtPath:basePath error:nil];
 
-            for (NSString *uuidDir in uuidDirs) {
+            if (![uuidDirectories isKindOfClass:[NSArray class]]) {
+                continue;
+            }
+
+            for (NSString *uuidDirectory in uuidDirectories) {
                 @autoreleasepool {
                     NSString *container =
-                        [basePath stringByAppendingPathComponent:uuidDir];
-                    NSArray *contents = nil;
-                    @try {
-                        contents = [fm contentsOfDirectoryAtPath:container
-                                                           error:nil];
-                    } @catch (NSException *e) { continue; }
+                        [basePath stringByAppendingPathComponent:
+                            uuidDirectory];
+
+                    NSArray *contents =
+                        [fm contentsOfDirectoryAtPath:
+                            container
+                                             error:nil];
+
+                    if (![contents isKindOfClass:[NSArray class]]) {
+                        continue;
+                    }
 
                     for (NSString *item in contents) {
-                        if (![item hasSuffix:@".app"]) continue;
+                        @autoreleasepool {
+                            if (![item hasSuffix:@".app"]) {
+                                continue;
+                            }
 
-                        NSString *infoPath =
-                            [container stringByAppendingPathComponent:
-                                [item stringByAppendingPathComponent:
-                                    @"Info.plist"]];
-                        NSDictionary *info = nil;
-                        @try {
-                            info = [NSDictionary
-                                dictionaryWithContentsOfFile:infoPath];
-                        } @catch (NSException *e) { continue; }
+                            NSString *appPath =
+                                [container stringByAppendingPathComponent:
+                                    item];
 
-                        if (!info) continue;
+                            NSString *infoPath =
+                                [appPath stringByAppendingPathComponent:
+                                    @"Info.plist"];
 
-                        NSString *bid = info[@"CFBundleIdentifier"];
-                        NSString *name =
-                            info[@"CFBundleDisplayName"] ?:
-                            info[@"CFBundleName"] ?: bid;
-                        NSString *ver =
-                            info[@"CFBundleShortVersionString"] ?: @"1.0";
+                            NSDictionary *info =
+                                [NSDictionary dictionaryWithContentsOfFile:
+                                    infoPath];
 
-                        if (bid) {
-                            [apps addObject:@{
-                                @"bundleID": bid,
-                                @"name": name ?: bid,
-                                @"version": ver,
-                                @"bundlePath":
-                                    [container stringByAppendingPathComponent:item],
-                                @"isSystem": @NO
+                            if (![info isKindOfClass:[NSDictionary class]]) {
+                                continue;
+                            }
+
+                            NSString *bundleID =
+                                info[@"CFBundleIdentifier"];
+
+                            if (![bundleID isKindOfClass:[NSString class]] ||
+                                bundleID.length == 0) {
+                                continue;
+                            }
+
+                            if ([knownBundleIDs containsObject:bundleID]) {
+                                continue;
+                            }
+
+                            NSString *name =
+                                info[@"CFBundleDisplayName"];
+
+                            if (![name isKindOfClass:[NSString class]] ||
+                                name.length == 0) {
+                                name = info[@"CFBundleName"];
+                            }
+
+                            if (![name isKindOfClass:[NSString class]] ||
+                                name.length == 0) {
+                                name = bundleID;
+                            }
+
+                            NSString *version =
+                                info[@"CFBundleShortVersionString"];
+
+                            if (![version isKindOfClass:[NSString class]] ||
+                                version.length == 0) {
+                                version = @"1.0";
+                            }
+
+                            BOOL system =
+                                [appPath hasPrefix:@"/System/"] ||
+                                [appPath hasPrefix:@"/var/jb/System/"] ||
+                                [appPath hasPrefix:@"/Applications/"] ||
+                                [appPath hasPrefix:@"/var/jb/Applications/"];
+
+                            [applications addObject:@{
+                                @"bundleID": bundleID,
+                                @"name": name,
+                                @"version": version,
+                                @"bundlePath": appPath,
+                                @"isSystem": @(system)
                             }];
+
+                            [knownBundleIDs addObject:bundleID];
+
+                            /*
+                             * One .app is expected per application
+                             * container in the normal layout.
+                             */
+                            break;
                         }
-                        break;
                     }
                 }
             }
         }
-    } @catch (NSException *e) {
-        NSLog(@"[ADM] filesystem discovery exception: %@", e);
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] filesystem discovery exception: %@",
+              exception.reason);
     }
 
-    return apps;
+    return [applications copy];
 }
 
 #pragma mark - Data Paths
 
 - (NSString *)dataPathForBundleID:(NSString *)bundleID {
-    if (!bundleID || bundleID.length == 0) return nil;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return nil;
+    }
 
     @try {
-        NSString *path = [self dataPathViaContainerManager:bundleID];
-        if (path && [self pathExists:path]) return path;
+        NSString *path =
+            [self dataPathViaContainerManager:bundleID];
 
-        path = [self dataPathViaFilesystemSearch:bundleID];
-        if (path && [self pathExists:path]) return path;
+        if (path.length > 0 &&
+            [self pathExists:path]) {
+            return path;
+        }
 
-        path = [self dataPathViaProxy:bundleID];
-        if (path && [self pathExists:path]) return path;
+        path =
+            [self dataPathViaProxy:bundleID];
 
-    } @catch (NSException *e) { }
+        if (path.length > 0 &&
+            [self pathExists:path]) {
+            return path;
+        }
+
+        path =
+            [self dataPathViaFilesystemSearch:bundleID];
+
+        if (path.length > 0 &&
+            [self pathExists:path]) {
+            return path;
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] data path exception for %@: %@",
+              bundleID,
+              exception.reason);
+    }
 
     return nil;
 }
 
 - (NSString *)dataPathViaContainerManager:(NSString *)bundleID {
-    @try {
-        Class cls = NSClassFromString(@"MCMContainer");
-        if (!cls) return nil;
+    if (bundleID.length == 0) {
+        return nil;
+    }
 
-        id container = nil;
-        if ([cls respondsToSelector:
-                @selector(containerWithIdentifier:createIfNecessary:error:)]) {
-            NSMethodSignature *sig = [cls methodSignatureForSelector:
-                @selector(containerWithIdentifier:createIfNecessary:error:)];
-            if (sig) {
-                NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                [inv setSelector:@selector(containerWithIdentifier:createIfNecessary:error:)];
-                [inv setTarget:cls];
-                NSString *bid = bundleID;
-                BOOL create = NO;
-                [inv setArgument:&bid atIndex:2];
-                [inv setArgument:&create atIndex:3];
-                [inv invoke];
-                __unsafe_unretained id result = nil;
-                [inv getReturnValue:&result];
-                container = result;
+    @try {
+        Class cls =
+            NSClassFromString(@"MCMContainer");
+
+        if (!cls) {
+            return nil;
+        }
+
+        SEL selector =
+            @selector(containerWithIdentifier:createIfNecessary:error:);
+
+        if ([cls respondsToSelector:selector]) {
+            NSMethodSignature *signature =
+                [cls methodSignatureForSelector:selector];
+
+            if (signature) {
+                NSInvocation *invocation =
+                    [NSInvocation invocationWithMethodSignature:
+                        signature];
+
+                [invocation setSelector:selector];
+                [invocation setTarget:cls];
+
+                NSString *identifier = bundleID;
+                BOOL createIfNecessary = NO;
+                NSError *error = nil;
+
+                [invocation setArgument:&identifier atIndex:2];
+                [invocation setArgument:&createIfNecessary atIndex:3];
+                [invocation setArgument:&error atIndex:4];
+
+                @try {
+                    [invocation invoke];
+                }
+                @catch (NSException *exception) {
+                    NSLog(@"[ADM] MCM invocation exception: %@",
+                          exception.reason);
+                }
+
+                id result = nil;
+
+                if (signature.methodReturnLength > 0) {
+                    [invocation getReturnValue:&result];
+                }
+
+                if (result &&
+                    [result respondsToSelector:@selector(url)]) {
+
+                    NSURL *url =
+                        [result performSelector:@selector(url)];
+
+                    if ([url isKindOfClass:[NSURL class]] &&
+                        url.path.length > 0) {
+                        return url.path;
+                    }
+                }
             }
         }
-        if (!container && [cls respondsToSelector:
-                @selector(containerWithIdentifier:error:)]) {
-            container = [cls performSelector:
-                @selector(containerWithIdentifier:error:)
-                withObject:bundleID withObject:nil];
+
+        SEL fallbackSelector =
+            @selector(containerWithIdentifier:error:);
+
+        if ([cls respondsToSelector:fallbackSelector]) {
+            NSMethodSignature *signature =
+                [cls methodSignatureForSelector:fallbackSelector];
+
+            if (signature) {
+                NSInvocation *invocation =
+                    [NSInvocation invocationWithMethodSignature:
+                        signature];
+
+                [invocation setSelector:fallbackSelector];
+                [invocation setTarget:cls];
+
+                NSString *identifier = bundleID;
+                NSError *error = nil;
+
+                [invocation setArgument:&identifier atIndex:2];
+                [invocation setArgument:&error atIndex:3];
+
+                @try {
+                    [invocation invoke];
+                }
+                @catch (NSException *exception) {
+                    NSLog(@"[ADM] MCM fallback exception: %@",
+                          exception.reason);
+                }
+
+                id result = nil;
+
+                if (signature.methodReturnLength > 0) {
+                    [invocation getReturnValue:&result];
+                }
+
+                if (result &&
+                    [result respondsToSelector:@selector(url)]) {
+
+                    NSURL *url =
+                        [result performSelector:@selector(url)];
+
+                    if ([url isKindOfClass:[NSURL class]] &&
+                        url.path.length > 0) {
+                        return url.path;
+                    }
+                }
+            }
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] container manager exception: %@",
+              exception.reason);
+    }
+
+    return nil;
+}
+
+- (NSString *)dataPathViaProxy:(NSString *)bundleID {
+    if (bundleID.length == 0) {
+        return nil;
+    }
+
+    @try {
+        Class cls =
+            NSClassFromString(@"LSApplicationProxy");
+
+        if (!cls) {
+            return nil;
         }
 
-        if (container && [container respondsToSelector:@selector(url)]) {
-            NSURL *url = [container performSelector:@selector(url)];
-            return url.path;
+        SEL selector =
+            @selector(applicationProxyForIdentifier:);
+
+        if (![cls respondsToSelector:selector]) {
+            return nil;
         }
-    } @catch (NSException *e) { }
+
+        id proxy =
+            [cls performSelector:selector
+                      withObject:bundleID];
+
+        if (!proxy) {
+            return nil;
+        }
+
+        if ([proxy respondsToSelector:@selector(dataContainerURL)]) {
+            NSURL *url =
+                [proxy performSelector:@selector(dataContainerURL)];
+
+            if ([url isKindOfClass:[NSURL class]] &&
+                url.path.length > 0) {
+                return url.path;
+            }
+        }
+
+        if ([proxy respondsToSelector:@selector(containerURL)]) {
+            NSURL *url =
+                [proxy performSelector:@selector(containerURL)];
+
+            if ([url isKindOfClass:[NSURL class]] &&
+                url.path.length > 0) {
+                return url.path;
+            }
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] proxy data path exception: %@",
+              exception.reason);
+    }
+
     return nil;
 }
 
 - (NSString *)dataPathViaFilesystemSearch:(NSString *)bundleID {
+    if (bundleID.length == 0) {
+        return nil;
+    }
+
     @try {
-        NSFileManager *fm = [NSFileManager defaultManager];
+        NSFileManager *fm =
+            [NSFileManager defaultManager];
+
         NSArray *paths = @[
             @"/var/mobile/Containers/Data/Application",
             @"/private/var/mobile/Containers/Data/Application",
@@ -342,104 +705,156 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
             ROOT_PATH_NS(@"/private/var/mobile/Containers/Data/Application")
         ];
 
-        for (NSString *base in paths) {
-            if (![fm fileExistsAtPath:base]) continue;
+        NSMutableSet *visitedBases =
+            [NSMutableSet set];
 
-            NSArray *dirs = [fm contentsOfDirectoryAtPath:base error:nil];
-            for (NSString *dir in dirs) {
+        for (NSString *basePath in paths) {
+            if (![basePath isKindOfClass:[NSString class]] ||
+                basePath.length == 0) {
+                continue;
+            }
+
+            if ([visitedBases containsObject:basePath]) {
+                continue;
+            }
+
+            [visitedBases addObject:basePath];
+
+            if (![self pathExists:basePath]) {
+                continue;
+            }
+
+            NSArray *directories =
+                [fm contentsOfDirectoryAtPath:basePath error:nil];
+
+            if (![directories isKindOfClass:[NSArray class]]) {
+                continue;
+            }
+
+            for (NSString *directory in directories) {
                 @autoreleasepool {
-                    NSString *metaPath = [base stringByAppendingPathComponent:
-                        [dir stringByAppendingPathComponent:
-                            @".com.apple.mobile_container_manager.metadata.plist"]];
-                    NSDictionary *meta =
-                        [NSDictionary dictionaryWithContentsOfFile:metaPath];
-                    if ([meta[@"MCMMetadataIdentifier"]
-                            isEqualToString:bundleID]) {
-                        return [base stringByAppendingPathComponent:dir];
+                    NSString *container =
+                        [basePath stringByAppendingPathComponent:
+                            directory];
+
+                    NSString *metadata =
+                        [container stringByAppendingPathComponent:
+                            @".com.apple.mobile_container_manager.metadata.plist"];
+
+                    NSDictionary *info =
+                        [NSDictionary dictionaryWithContentsOfFile:
+                            metadata];
+
+                    NSString *identifier =
+                        info[@"MCMMetadataIdentifier"];
+
+                    if ([identifier isKindOfClass:[NSString class]] &&
+                        [identifier isEqualToString:bundleID]) {
+                        return container;
                     }
                 }
             }
         }
-    } @catch (NSException *e) { }
-    return nil;
-}
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] filesystem data search exception: %@",
+              exception.reason);
+    }
 
-- (NSString *)dataPathViaProxy:(NSString *)bundleID {
-    @try {
-        Class cls = NSClassFromString(@"LSApplicationProxy");
-        if (!cls) return nil;
-
-        id proxy = [cls performSelector:
-            @selector(applicationProxyForIdentifier:)
-            withObject:bundleID];
-        if (!proxy) return nil;
-
-        if ([proxy respondsToSelector:@selector(containerURL)]) {
-            NSURL *url = [proxy performSelector:@selector(containerURL)];
-            return url.path;
-        }
-        if ([proxy respondsToSelector:@selector(dataContainerURL)]) {
-            NSURL *url = [proxy performSelector:@selector(dataContainerURL)];
-            return url.path;
-        }
-    } @catch (NSException *e) { }
     return nil;
 }
 
 - (NSArray *)allDataPathsForBundleID:(NSString *)bundleID {
-    if (!bundleID) return @[];
-    NSMutableArray *paths = [NSMutableArray array];
-    NSString *main = [self dataPathForBundleID:bundleID];
-    if (main) [paths addObject:main];
-    [paths addObjectsFromArray:
-        [self groupContainerPathsForBundleID:bundleID]];
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return @[];
+    }
+
+    NSMutableArray *paths =
+        [NSMutableArray array];
+
+    NSString *mainPath =
+        [self dataPathForBundleID:bundleID];
+
+    if (mainPath.length > 0 &&
+        [self pathExists:mainPath]) {
+        [paths addObject:mainPath];
+    }
+
+    NSArray *groupPaths =
+        [self groupContainerPathsForBundleID:bundleID];
+
+    for (NSString *path in groupPaths) {
+        if (![path isKindOfClass:[NSString class]] ||
+            path.length == 0) {
+            continue;
+        }
+
+        if (![paths containsObject:path] &&
+            [self pathExists:path]) {
+            [paths addObject:path];
+        }
+    }
+
     return [paths copy];
 }
 
 - (NSArray *)groupContainerPathsForBundleID:(NSString *)bundleID {
-    if (!bundleID) return @[];
-    NSMutableArray *paths = [NSMutableArray array];
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return @[];
+    }
+
+    NSMutableArray *paths =
+        [NSMutableArray array];
 
     @try {
-        Class cls = NSClassFromString(@"LSApplicationProxy");
-        if (cls) {
-            id proxy = [cls performSelector:
-                @selector(applicationProxyForIdentifier:)
-                withObject:bundleID];
-            if (proxy && [proxy respondsToSelector:
+        Class cls =
+            NSClassFromString(@"LSApplicationProxy");
+
+        if (cls &&
+            [cls respondsToSelector:
+                @selector(applicationProxyForIdentifier:)]) {
+
+            id proxy =
+                [cls performSelector:
+                    @selector(applicationProxyForIdentifier:)
+                    withObject:bundleID];
+
+            if (proxy &&
+                [proxy respondsToSelector:
                     @selector(groupContainerURLs)]) {
-                NSDictionary *urls = [proxy performSelector:
-                    @selector(groupContainerURLs)];
-                if ([urls isKindOfClass:[NSDictionary class]]) {
-                    for (NSURL *url in [urls allValues]) {
-                        if ([url isKindOfClass:[NSURL class]] && url.path) {
-                            [paths addObject:url.path];
+
+                id result =
+                    [proxy performSelector:
+                        @selector(groupContainerURLs)];
+
+                if ([result isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *urls = result;
+
+                    for (id value in urls.allValues) {
+                        @autoreleasepool {
+                            if (![value isKindOfClass:[NSURL class]]) {
+                                continue;
+                            }
+
+                            NSString *path =
+                                [(NSURL *)value path];
+
+                            if (path.length > 0 &&
+                                ![paths containsObject:path]) {
+                                [paths addObject:path];
+                            }
                         }
                     }
                 }
             }
         }
-
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSString *groupBase =
-            @"/var/mobile/Containers/Shared/AppGroup";
-        NSArray *groupDirs = [fm contentsOfDirectoryAtPath:groupBase
-                                                       error:nil];
-        for (NSString *dir in groupDirs) {
-            @autoreleasepool {
-                NSString *metaPath = [groupBase stringByAppendingPathComponent:
-                    [dir stringByAppendingPathComponent:
-                        @".com.apple.mobile_container_manager.metadata.plist"]];
-                NSDictionary *meta =
-                    [NSDictionary dictionaryWithContentsOfFile:metaPath];
-                if ([meta[@"MCMMetadataIdentifier"]
-                        isEqualToString:bundleID]) {
-                    [paths addObject:
-                        [groupBase stringByAppendingPathComponent:dir]];
-                }
-            }
-        }
-    } @catch (NSException *e) { }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] group container exception: %@",
+              exception.reason);
+    }
 
     return [paths copy];
 }
@@ -447,146 +862,486 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 #pragma mark - Size Calculation
 
 - (unsigned long long)dataSizeForBundleID:(NSString *)bundleID {
-    if (!bundleID || bundleID.length == 0) return 0;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return 0;
+    }
 
-    // Fast path: check cache without blocking
-    NSNumber *cached = [self.sizeCache objectForKey:bundleID];
-    if (cached) return [cached unsignedLongLongValue];
+    NSNumber *cached =
+        [self.sizeCache objectForKey:bundleID];
 
-    // Calculate synchronously (caller is already on background queue)
+    if (cached) {
+        return cached.unsignedLongLongValue;
+    }
+
     unsigned long long total = 0;
+
     @autoreleasepool {
         @try {
-            NSArray *paths = [self allDataPathsForBundleID:bundleID];
+            NSArray *paths =
+                [self allDataPathsForBundleID:bundleID];
+
             for (NSString *path in paths) {
-                if (!path || path.length == 0) continue;
-                total += [self fastDirectorySize:path];
+                @autoreleasepool {
+                    if (path.length == 0) {
+                        continue;
+                    }
+
+                    total +=
+                        [self fastDirectorySize:path];
+                }
             }
-        } @catch (NSException *e) {
-            NSLog(@"[ADM] size exception for %@: %@", bundleID, e);
+        }
+        @catch (NSException *exception) {
+            NSLog(@"[ADM] size exception for %@: %@",
+                  bundleID,
+                  exception.reason);
             total = 0;
         }
     }
 
-    // Cache write with barrier (thread-safe)
+    NSNumber *value = @(total);
+
     dispatch_barrier_async(self.cacheQueue, ^{
-        [self.sizeCache setObject:@(total) forKey:bundleID];
+        [self.sizeCache setObject:value
+                           forKey:bundleID];
     });
 
     return total;
 }
 
 - (unsigned long long)accurateDataSizeForBundleID:(NSString *)bundleID {
-    if (!bundleID) return 0;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return 0;
+    }
+
     unsigned long long total = 0;
+
     @autoreleasepool {
         @try {
-            NSArray *paths = [self allDataPathsForBundleID:bundleID];
+            NSArray *paths =
+                [self allDataPathsForBundleID:bundleID];
+
             for (NSString *path in paths) {
-                if (!path || path.length == 0) continue;
-                total += [self fastDirectorySize:path];
+                @autoreleasepool {
+                    if (path.length == 0) {
+                        continue;
+                    }
+
+                    total +=
+                        [self fastDirectorySize:path];
+                }
             }
-        } @catch (NSException *e) { }
+        }
+        @catch (NSException *exception) {
+            NSLog(@"[ADM] accurate size exception: %@",
+                  exception.reason);
+        }
     }
+
     return total;
 }
 
 - (unsigned long long)fastDirectorySize:(NSString *)path {
-    if (!path || path.length == 0) return 0;
-    if (![self pathExists:path]) return 0;
+    if (![path isKindOfClass:[NSString class]] ||
+        path.length == 0) {
+        return 0;
+    }
+
+    if (![self pathExists:path]) {
+        return 0;
+    }
 
     unsigned long long total = 0;
 
     @try {
-        NSFileManager *fm = [[NSFileManager alloc] init];
-        NSURL *url = [NSURL fileURLWithPath:path];
+        NSFileManager *fm =
+            [NSFileManager defaultManager];
 
+        NSURL *rootURL =
+            [NSURL fileURLWithPath:path
+                       isDirectory:YES];
+
+        /*
+         * Hidden files MUST NOT be skipped.
+         *
+         * App data commonly contains hidden metadata/database files.
+         * Skipping them makes the displayed size incorrect.
+         */
         NSDirectoryEnumerator *enumerator =
-            [fm enumeratorAtURL:url
-     includingPropertiesForKeys:@[NSURLFileSizeKey,
-                                    NSURLIsSymbolicLinkKey]
-                        options:NSDirectoryEnumerationSkipsPackageDescendants |
-                                NSDirectoryEnumerationSkipsHiddenFiles
-                   errorHandler:^BOOL(NSURL *u, NSError *error) {
-                       return YES;
-                   }];
+            [fm enumeratorAtURL:rootURL
+     includingPropertiesForKeys:@[
+         NSURLFileSizeKey,
+         NSURLIsDirectoryKey,
+         NSURLIsSymbolicLinkKey
+     ]
+                        options:0
+                   errorHandler:^BOOL(NSURL *url, NSError *error) {
+            return YES;
+        }];
 
-        NSMutableSet *visitedInodes = [NSMutableSet set];
+        if (!enumerator) {
+            return 0;
+        }
+
+        NSMutableSet *visitedInodes =
+            [NSMutableSet set];
 
         NSUInteger fileCount = 0;
+
         for (NSURL *fileURL in enumerator) {
             @autoreleasepool {
                 @try {
                     NSNumber *isSymlink = nil;
+
                     [fileURL getResourceValue:&isSymlink
                                        forKey:NSURLIsSymbolicLinkKey
                                         error:nil];
-                    if ([isSymlink boolValue]) continue;
 
-                    const char *cpath =
-                        [fileURL.path fileSystemRepresentation];
-                    struct stat st;
-                    if (lstat(cpath, &st) == 0) {
-                        NSString *key =
-                            [NSString stringWithFormat:@"%llu-%llu",
-                                (unsigned long long)st.st_dev,
-                                (unsigned long long)st.st_ino];
-                        if ([visitedInodes containsObject:key]) continue;
-                        [visitedInodes addObject:key];
-                        total += (unsigned long long)st.st_size;
+                    if (isSymlink.boolValue) {
+                        continue;
                     }
-                } @catch (NSException *e) { continue; }
+
+                    const char *filesystemPath =
+                        fileURL.path.fileSystemRepresentation;
+
+                    if (!filesystemPath) {
+                        continue;
+                    }
+
+                    struct stat st;
+
+                    if (lstat(filesystemPath, &st) != 0) {
+                        continue;
+                    }
+
+                    /*
+                     * Only regular files contribute their logical file
+                     * size. Directory metadata itself is not included.
+                     */
+                    if (!S_ISREG(st.st_mode)) {
+                        continue;
+                    }
+
+                    NSString *inodeKey =
+                        [NSString stringWithFormat:
+                           :@"%llu:%llu",
+                            (unsigned long long)st.st_dev,
+                            (unsigned long long)st.st_ino];
+
+                    if ([visitedInodes containsObject:inodeKey]) {
+                        continue;
+                    }
+
+                    [visitedInodes addObject:inodeKey];
+
+                    total +=
+                        (unsigned long long)st.st_size;
+                }
+                @catch (NSException *exception) {
+                    continue;
+                }
             }
 
-            // Yield every 1000 files to prevent blocking
             fileCount++;
-            if (fileCount % 1000 == 0) {
+
+            /*
+             * Give the system a tiny opportunity to schedule other
+             * work when processing very large containers.
+             */
+            if ((fileCount % 2000) == 0) {
                 [NSThread sleepForTimeInterval:0.001];
             }
         }
-    } @catch (NSException *e) {
-        NSLog(@"[ADM] fastDirectorySize exception: %@", e);
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] directory size exception for %@: %@",
+              path,
+              exception.reason);
     }
 
     return total;
 }
 
-#pragma mark - Wipe / Backup / Restore
+#pragma mark - Wipe
 
 - (BOOL)wipeAppData:(NSString *)bundleID {
-    if (!bundleID || bundleID.length == 0) return NO;
-    if ([self isSystemApp:bundleID]) return NO;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return NO;
+    }
+
+    if ([self isSystemApp:bundleID]) {
+        return NO;
+    }
 
     __block BOOL success = YES;
-    dispatch_barrier_sync(self.fileQueue, ^{
+
+    /*
+     * Serialize destructive filesystem operations.
+     */
+    dispatch_sync(self.fileQueue, ^{
         @autoreleasepool {
             @try {
                 NSArray *paths =
                     [self allDataPathsForBundleID:bundleID];
-                NSFileManager *fm = [NSFileManager defaultManager];
+
+                if (paths.count == 0) {
+                    success = NO;
+                    return;
+                }
+
+                NSFileManager *fm =
+                    [NSFileManager defaultManager];
 
                 for (NSString *path in paths) {
-                    if (!path || path.length == 0) continue;
+                    if (path.length == 0 ||
+                        ![self pathExists:path]) {
+                        continue;
+                    }
+
                     NSArray *contents =
-                        [fm contentsOfDirectoryAtPath:path error:nil];
+                        [fm contentsOfDirectoryAtPath:path
+                                                 error:nil];
+
+                    if (![contents isKindOfClass:[NSArray class]]) {
+                        success = NO;
+                        continue;
+                    }
+
                     for (NSString *item in contents) {
                         @autoreleasepool {
-                            NSString *full =
+                            if (item.length == 0) {
+                                continue;
+                            }
+
+                            NSString *fullPath =
                                 [path stringByAppendingPathComponent:item];
-                            @try {
-                                [fm removeItemAtPath:full error:nil];
-                            } @catch (NSException *e) {
+
+                            NSError *error = nil;
+
+                            BOOL removed =
+                                [fm removeItemAtPath:fullPath
+                                               error:&error];
+
+                            if (!removed) {
                                 success = NO;
+
+                                NSLog(@"[ADM] wipe failed: %@ (%@)",
+                                      fullPath,
+                                      error.localizedDescription);
                             }
                         }
                     }
                 }
+            }
+            @catch (NSException *exception) {
+                NSLog(@"[ADM] wipe exception: %@",
+                      exception.reason);
+                success = NO;
+            }
+        }
+    });
 
-                dispatch_barrier_async(self.cacheQueue, ^{
-                    [self.sizeCache removeObjectForKey:bundleID];
-                });
+    if (success) {
+        dispatch_barrier_sync(self.cacheQueue, ^{
+            [self.sizeCache removeObjectForKey:bundleID];
+        });
+    }
 
-            } @catch (NSException *e) {
+    return success;
+}
+
+#pragma mark - Backup Directory
+
+- (NSString *)backupDirectory {
+    NSString *path =
+        ROOT_PATH_NS(kBackupDir);
+
+    if (![path isKindOfClass:[NSString class]] ||
+        path.length == 0) {
+        return nil;
+    }
+
+    NSFileManager *fm =
+        [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:path]) {
+        @try {
+            NSError *error = nil;
+
+            BOOL created =
+                [fm createDirectoryAtPath:path
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error];
+
+            if (!created) {
+                NSLog(@"[ADM] backup directory creation failed: %@",
+                      error.localizedDescription);
+                return nil;
+            }
+        }
+        @catch (NSException *exception) {
+            NSLog(@"[ADM] backup directory exception: %@",
+                  exception.reason);
+            return nil;
+        }
+    }
+
+    return path;
+}
+
+#pragma mark - Backup
+
+- (BOOL)backupAppData:(NSString *)bundleID {
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return NO;
+    }
+
+    if ([self isSystemApp:bundleID]) {
+        return NO;
+    }
+
+    __block BOOL success = YES;
+
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSString *backupDir =
+                    [self backupDirectory];
+
+                if (backupDir.length == 0) {
+                    success = NO;
+                    return;
+                }
+
+                NSArray *dataPaths =
+                    [self allDataPathsForBundleID:bundleID];
+
+                if (dataPaths.count == 0) {
+                    success = NO;
+                    return;
+                }
+
+                NSDateFormatter *formatter =
+                    [[NSDateFormatter alloc] init];
+
+                formatter.locale =
+                    [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+
+                formatter.dateFormat =
+                    @"yyyy-MM-dd_HH-mm-ss";
+
+                NSString *timestamp =
+                    [formatter stringFromDate:[NSDate date]];
+
+                /*
+                 * Bundle IDs are normally safe path components, but
+                 * sanitize unexpected path separators anyway.
+                 */
+                NSString *safeBundleID =
+                    [bundleID stringByReplacingOccurrencesOfString:@"/"
+                                                           withString:@"_"];
+
+                NSString *backupName =
+                    [NSString stringWithFormat:@"%@_%@",
+                        safeBundleID,
+                        timestamp];
+
+                NSString *destination =
+                    [backupDir stringByAppendingPathComponent:
+                        backupName];
+
+                NSFileManager *fm =
+                    [NSFileManager defaultManager];
+
+                NSError *directoryError = nil;
+
+                if (![fm createDirectoryAtPath:destination
+                    withIntermediateDirectories:YES
+                                     attributes:nil
+                                          error:&directoryError]) {
+
+                    NSLog(@"[ADM] backup directory failed: %@",
+                          directoryError.localizedDescription);
+
+                    success = NO;
+                    return;
+                }
+
+                NSUInteger index = 0;
+
+                for (NSString *source in dataPaths) {
+                    @autoreleasepool {
+                        if (source.length == 0 ||
+                            ![self pathExists:source]) {
+                            success = NO;
+                            continue;
+                        }
+
+                        /*
+                         * Use a unique destination name instead of relying
+                         * only on lastPathComponent. This prevents collisions
+                         * between containers that happen to have the same
+                         * UUID basename in unusual environments.
+                         */
+                        NSString *baseName =
+                            source.lastPathComponent;
+
+                        if (baseName.length == 0) {
+                            baseName =
+                                [NSString stringWithFormat:
+                                    @"container_%lu",
+                                    (unsigned long)index];
+                        }
+
+                        NSString *itemDestination =
+                            [destination stringByAppendingPathComponent:
+                                baseName];
+
+                        if ([fm fileExistsAtPath:itemDestination]) {
+                            itemDestination =
+                                [destination stringByAppendingPathComponent:
+                                    [NSString stringWithFormat:
+                                        @"%@_%lu",
+                                        baseName,
+                                        (unsigned long)index]];
+                        }
+
+                        NSError *copyError = nil;
+
+                        BOOL copied =
+                            [fm copyItemAtPath:source
+                                        toPath:itemDestination
+                                         error:&copyError];
+
+                        if (!copied) {
+                            success = NO;
+
+                            NSLog(@"[ADM] backup copy failed: %@ -> %@ (%@)",
+                                  source,
+                                  itemDestination,
+                                  copyError.localizedDescription);
+                        }
+
+                        index++;
+                    }
+                }
+
+                /*
+                 * Never leave an apparently valid empty backup behind.
+                 */
+                if (!success) {
+                    [fm removeItemAtPath:destination
+                                   error:nil];
+                }
+            }
+            @catch (NSException *exception) {
+                NSLog(@"[ADM] backup exception: %@",
+                      exception.reason);
                 success = NO;
             }
         }
@@ -595,173 +1350,550 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
     return success;
 }
 
-- (NSString *)backupDirectory {
-    NSString *path = ROOT_PATH_NS(kBackupDir);
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:path]) {
-        @try {
-            [fm createDirectoryAtPath:path
-        withIntermediateDirectories:YES
-                         attributes:nil
-                              error:nil];
-        } @catch (NSException *e) { }
-    }
-    return path;
-}
-
-- (BOOL)backupAppData:(NSString *)bundleID {
-    if (!bundleID || bundleID.length == 0) return NO;
-
-    @try {
-        NSString *backupDir = [self backupDirectory];
-        if (!backupDir) return NO;
-
-        NSDateFormatter *df = [[NSDateFormatter alloc] init];
-        [df setDateFormat:@"yyyy-MM-dd_HH-mm-ss"];
-        NSString *ts = [df stringFromDate:[NSDate date]];
-        NSString *name =
-            [NSString stringWithFormat:@"%@_%@", bundleID, ts];
-        NSString *dest = [backupDir stringByAppendingPathComponent:name];
-
-        NSFileManager *fm = [NSFileManager defaultManager];
-        [fm createDirectoryAtPath:dest
-      withIntermediateDirectories:YES
-                       attributes:nil
-                            error:nil];
-
-        NSArray *dataPaths =
-            [self allDataPathsForBundleID:bundleID];
-        for (NSString *src in dataPaths) {
-            if (!src || src.length == 0) continue;
-            NSString *itemDest =
-                [dest stringByAppendingPathComponent:[src lastPathComponent]];
-            @try {
-                [fm copyItemAtPath:src toPath:itemDest error:nil];
-            } @catch (NSException *e) { }
-        }
-
-        return YES;
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
+#pragma mark - Restore
 
 - (BOOL)restoreAppData:(NSString *)bundleID
             fromBackup:(NSString *)backupPath {
-    if (!bundleID || !backupPath || backupPath.length == 0) return NO;
-    if ([self isSystemApp:bundleID]) return NO;
 
-    @try {
-        NSFileManager *fm = [NSFileManager defaultManager];
-        if (![fm fileExistsAtPath:backupPath]) return NO;
-
-        [self killApp:bundleID];
-        [self wipeAppData:bundleID];
-
-        NSArray *destPaths =
-            [self allDataPathsForBundleID:bundleID];
-        for (NSString *dest in destPaths) {
-            if (!dest || dest.length == 0) continue;
-            NSString *src =
-                [backupPath stringByAppendingPathComponent:
-                    [dest lastPathComponent]];
-            if ([fm fileExistsAtPath:src]) {
-                @try {
-                    [fm copyItemAtPath:src toPath:dest error:nil];
-                } @catch (NSException *e) { }
-            }
-        }
-
-        dispatch_sync(self.cacheQueue, ^{
-            [self.sizeCache removeObjectForKey:bundleID];
-        });
-
-        return YES;
-    } @catch (NSException *e) {
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
         return NO;
     }
+
+    if (![backupPath isKindOfClass:[NSString class]] ||
+        backupPath.length == 0) {
+        return NO;
+    }
+
+    if ([self isSystemApp:bundleID]) {
+        return NO;
+    }
+
+    __block BOOL success = YES;
+
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSString *backupRoot =
+                    [self backupDirectory];
+
+                if (backupRoot.length == 0) {
+                    success = NO;
+                    return;
+                }
+
+                /*
+                 * Do not allow restore from an arbitrary filesystem path.
+                 * The selected backup must reside inside our backup store.
+                 */
+                NSString *standardBackup =
+                    [backupRoot stringByStandardizingPath];
+
+                NSString *standardSelected =
+                    [backupPath stringByStandardizingPath];
+
+                NSString *prefix =
+                    [standardBackup stringByAppendingString:@"/"];
+
+                if (![standardSelected hasPrefix:prefix]) {
+                    NSLog(@"[ADM] rejected restore path outside backup directory");
+                    success = NO;
+                    return;
+                }
+
+                NSFileManager *fm =
+                    [NSFileManager defaultManager];
+
+                BOOL isDirectory = NO;
+
+                if (![fm fileExistsAtPath:standardSelected
+                               isDirectory:&isDirectory] ||
+                    !isDirectory) {
+                    success = NO;
+                    return;
+                }
+
+                /*
+                 * Terminate the application before changing its container.
+                 */
+                [self killApp:bundleID];
+
+                /*
+                 * Wipe current data.
+                 */
+                NSArray *destinationPaths =
+                    [self allDataPathsForBundleID:bundleID];
+
+                if (destinationPaths.count == 0) {
+                    success = NO;
+                    return;
+                }
+
+                for (NSString *destination in destinationPaths) {
+                    @autoreleasepool {
+                        if (destination.length == 0) {
+                            continue;
+                        }
+
+                        NSArray *contents =
+                            [fm contentsOfDirectoryAtPath:
+                                destination
+                                                   error:nil];
+
+                        for (NSString *item in contents) {
+                            @autoreleasepool {
+                                NSString *full =
+                                    [destination stringByAppendingPathComponent:
+                                        item];
+
+                                NSError *removeError = nil;
+
+                                if (![fm removeItemAtPath:full
+                                                    error:&removeError]) {
+                                    success = NO;
+
+                                    NSLog(@"[ADM] restore wipe failed: %@ (%@)",
+                                          full,
+                                          removeError.localizedDescription);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /*
+                 * Restore each backed-up container by copying its CONTENTS
+                 * into the existing destination container.
+                 *
+                 * The old implementation attempted to copy the entire
+                 * directory onto an already-existing container, which can
+                 * fail because the destination directory already exists.
+                 */
+                NSArray *backupItems =
+                    [fm contentsOfDirectoryAtPath:
+                        standardSelected
+                                                   error:nil];
+
+                if (![backupItems isKindOfClass:[NSArray class]]) {
+                    success = NO;
+                    return;
+                }
+
+                for (NSString *item in backupItems) {
+                    @autoreleasepool {
+                        NSString *source =
+                            [standardSelected stringByAppendingPathComponent:
+                                item];
+
+                        BOOL isDirectory = NO;
+
+                        if (![fm fileExistsAtPath:source
+                                       isDirectory:&isDirectory]) {
+                            continue;
+                        }
+
+                        /*
+                         * Match a backup container by basename.
+                         */
+                        NSString *matchingDestination = nil;
+
+                        NSString *sourceName =
+                            source.lastPathComponent;
+
+                        for (NSString *destination in destinationPaths) {
+                            if ([[destination lastPathComponent]
+                                    isEqualToString:sourceName]) {
+                                matchingDestination = destination;
+                                break;
+                            }
+                        }
+
+                        /*
+                         * If no exact basename match exists, use the first
+                         * available destination only when there is a single
+                         * destination. This keeps normal-app restoration
+                         * compatible with the common case.
+                         */
+                        if (!matchingDestination &&
+                            destinationPaths.count == 1) {
+                            matchingDestination =
+                                destinationPaths.firstObject;
+                        }
+
+                        if (!matchingDestination ||
+                            ![self pathExists:matchingDestination]) {
+                            success = NO;
+                            continue;
+                        }
+
+                        if (isDirectory) {
+                            NSArray *children =
+                                [fm contentsOfDirectoryAtPath:
+                                    source
+                                                       error:nil];
+
+                            for (NSString *child in children) {
+                                @autoreleasepool {
+                                    NSString *childSource =
+                                        [source stringByAppendingPathComponent:
+                                            child];
+
+                                    NSString *childDestination =
+                                        [matchingDestination
+                                            stringByAppendingPathComponent:
+                                                child];
+
+                                    NSError *copyError = nil;
+
+                                    /*
+                                     * Remove conflicting items first.
+                                     */
+                                    if ([fm fileExistsAtPath:
+                                            childDestination]) {
+
+                                        if (![fm removeItemAtPath:
+                                                childDestination
+                                                              error:&copyError]) {
+                                            success = NO;
+                                            continue;
+                                        }
+                                    }
+
+                                    copyError = nil;
+
+                                    if (![fm copyItemAtPath:childSource
+                                                     toPath:childDestination
+                                                      error:&copyError]) {
+                                        success = NO;
+
+                                        NSLog(@"[ADM] restore copy failed: %@ -> %@ (%@)",
+                                              childSource,
+                                              childDestination,
+                                              copyError.localizedDescription);
+                                    }
+                                }
+                            }
+                        } else {
+                            NSString *destinationFile =
+                                [matchingDestination
+                                    stringByAppendingPathComponent:
+                                        source.lastPathComponent];
+
+                            NSError *copyError = nil;
+
+                            if ([fm fileExistsAtPath:destinationFile]) {
+                                [fm removeItemAtPath:destinationFile
+                                               error:nil];
+                            }
+
+                            if (![fm copyItemAtPath:source
+                                              toPath:destinationFile
+                                               error:&copyError]) {
+                                success = NO;
+                            }
+                        }
+                    }
+                }
+            }
+            @catch (NSException *exception) {
+                NSLog(@"[ADM] restore exception: %@",
+                      exception.reason);
+                success = NO;
+            }
+        }
+    });
+
+    dispatch_barrier_sync(self.cacheQueue, ^{
+        [self.sizeCache removeObjectForKey:bundleID];
+    });
+
+    return success;
 }
 
+#pragma mark - Backup Management
+
 - (NSArray *)availableBackupsForBundleID:(NSString *)bundleID {
-    if (!bundleID) return @[];
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return @[];
+    }
 
     @try {
-        NSString *dir = [self backupDirectory];
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
-        NSMutableArray *backups = [NSMutableArray array];
+        NSString *directory =
+            [self backupDirectory];
+
+        if (directory.length == 0) {
+            return @[];
+        }
+
+        NSFileManager *fm =
+            [NSFileManager defaultManager];
+
+        NSArray *contents =
+            [fm contentsOfDirectoryAtPath:directory
+                                     error:nil];
+
+        if (![contents isKindOfClass:[NSArray class]]) {
+            return @[];
+        }
+
+        NSMutableArray *backups =
+            [NSMutableArray array];
+
+        NSString *prefix =
+            [bundleID stringByAppendingString:@"_"];
 
         for (NSString *item in contents) {
-            if ([item hasPrefix:bundleID]) {
-                NSString *full = [dir stringByAppendingPathComponent:item];
-                NSDictionary *attrs =
-                    [fm attributesOfItemAtPath:full error:nil];
+            @autoreleasepool {
+                if (![item hasPrefix:prefix]) {
+                    continue;
+                }
+
+                NSString *fullPath =
+                    [directory stringByAppendingPathComponent:item];
+
+                BOOL isDirectory = NO;
+
+                if (![fm fileExistsAtPath:fullPath
+                               isDirectory:&isDirectory] ||
+                    !isDirectory) {
+                    continue;
+                }
+
+                NSDictionary *attributes =
+                    [fm attributesOfItemAtPath:fullPath
+                                         error:nil];
+
+                NSDate *date =
+                    attributes[NSFileModificationDate];
+
+                if (![date isKindOfClass:[NSDate class]]) {
+                    date = [NSDate date];
+                }
+
                 [backups addObject:@{
-                    @"path": full,
-                    @"date": attrs[NSFileModificationDate] ?: [NSDate date],
+                    @"path": fullPath,
+                    @"date": date,
                     @"name": item
                 }];
             }
         }
 
         return [backups sortedArrayUsingComparator:
-            ^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-                return [b[@"date"] compare:a[@"date"]];
-            }];
+            ^NSComparisonResult(NSDictionary *a,
+                                NSDictionary *b) {
 
-    } @catch (NSException *e) {
+            NSDate *dateA = a[@"date"];
+            NSDate *dateB = b[@"date"];
+
+            return [dateB compare:dateA];
+        }];
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] available backups exception: %@",
+              exception.reason);
         return @[];
     }
 }
 
 - (BOOL)deleteBackup:(NSString *)backupPath {
-    if (!backupPath || backupPath.length == 0) return NO;
+    if (![backupPath isKindOfClass:[NSString class]] ||
+        backupPath.length == 0) {
+        return NO;
+    }
+
     @try {
-        [[NSFileManager defaultManager] removeItemAtPath:backupPath
-                                                   error:nil];
-        return YES;
-    } @catch (NSException *e) { return NO; }
+        NSString *directory =
+            [self backupDirectory];
+
+        if (directory.length == 0) {
+            return NO;
+        }
+
+        NSString *root =
+            [directory stringByStandardizingPath];
+
+        NSString *target =
+            [backupPath stringByStandardizingPath];
+
+        NSString *prefix =
+            [root stringByAppendingString:@"/"];
+
+        if (![target hasPrefix:prefix]) {
+            return NO;
+        }
+
+        NSFileManager *fm =
+            [NSFileManager defaultManager];
+
+        if (![fm fileExistsAtPath:target]) {
+            return NO;
+        }
+
+        NSError *error = nil;
+
+        return [fm removeItemAtPath:target
+                              error:&error];
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] delete backup exception: %@",
+              exception.reason);
+        return NO;
+    }
 }
 
 - (BOOL)deleteAllBackups {
     @try {
-        NSString *dir = [self backupDirectory];
-        NSFileManager *fm = [NSFileManager defaultManager];
-        NSArray *contents = [fm contentsOfDirectoryAtPath:dir error:nil];
+        NSString *directory =
+            [self backupDirectory];
+
+        if (directory.length == 0) {
+            return NO;
+        }
+
+        NSFileManager *fm =
+            [NSFileManager defaultManager];
+
+        NSArray *contents =
+            [fm contentsOfDirectoryAtPath:directory
+                                     error:nil];
+
+        if (![contents isKindOfClass:[NSArray class]]) {
+            return NO;
+        }
+
+        BOOL success = YES;
+
         for (NSString *item in contents) {
             @autoreleasepool {
-                @try {
-                    [fm removeItemAtPath:
-                        [dir stringByAppendingPathComponent:item]
-                                   error:nil];
-                } @catch (NSException *e) { }
+                NSString *fullPath =
+                    [directory stringByAppendingPathComponent:item];
+
+                NSError *error = nil;
+
+                if (![fm removeItemAtPath:fullPath
+                                    error:&error]) {
+                    success = NO;
+
+                    NSLog(@"[ADM] delete backup failed: %@ (%@)",
+                          fullPath,
+                          error.localizedDescription);
+                }
             }
         }
-        return YES;
-    } @catch (NSException *e) { return NO; }
+
+        return success;
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] delete all backups exception: %@",
+              exception.reason);
+        return NO;
+    }
 }
 
+#pragma mark - ZIP Export
+
 - (NSString *)exportBackupsToZip:(NSError **)error {
+    if (error) {
+        *error = nil;
+    }
+
     @try {
-        NSString *dir = [self backupDirectory];
-        NSString *zip = [dir stringByAppendingPathComponent:
-            @"backups_export.zip"];
-        NSString *cmd =
-            [NSString stringWithFormat:
-                @"cd \"%@\" && zip -r \"%@\" . -x \"*.zip\"",
-                dir, zip];
-        FILE *fp = popen([cmd UTF8String], "r");
-        int result = -1;
-        if (fp) result = pclose(fp);
-        if (result == 0 && [self pathExists:zip]) return zip;
-        return nil;
-    } @catch (NSException *e) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"AppDataManager"
+        NSString *directory =
+            [self backupDirectory];
+
+        if (directory.length == 0) {
+            if (error) {
+                *error =
+                    [NSError errorWithDomain:@"AppDataManager"
                                          code:500
-                                     userInfo:@{NSLocalizedDescriptionKey:
-                                                    e.reason ?: @"Unknown"}];
+                                     userInfo:@{
+                    NSLocalizedDescriptionKey:
+                        @"تعذر الوصول إلى مجلد النسخ الاحتياطية"
+                }];
+            }
+
+            return nil;
         }
+
+        NSString *zipPath =
+            [directory stringByAppendingPathComponent:
+                @"backups_export.zip"];
+
+        /*
+         * Remove an old export before creating the new one.
+         */
+        [[NSFileManager defaultManager]
+            removeItemAtPath:zipPath
+                       error:nil];
+
+        /*
+         * The backup directory is internally controlled and does not
+         * contain user-provided shell fragments. Still, quote every
+         * path before invoking the system utility.
+         */
+        NSString *escapedDirectory =
+            [directory stringByReplacingOccurrencesOfString:@"\""
+                                                  withString:@"\\\""];
+
+        NSString *escapedZip =
+            [zipPath stringByReplacingOccurrencesOfString:@"\""
+                                                withString:@"\\\""];
+
+        NSString *command =
+            [NSString stringWithFormat:
+                @"cd \"%@\" && /usr/bin/zip -r \"%@\" . -x \"*.zip\"",
+                escapedDirectory,
+                escapedZip];
+
+        FILE *pipe =
+            popen(command.UTF8String, "r");
+
+        if (!pipe) {
+            if (error) {
+                *error =
+                    [NSError errorWithDomain:@"AppDataManager"
+                                         code:501
+                                     userInfo:@{
+                    NSLocalizedDescriptionKey:
+                        @"تعذر تشغيل أداة الضغط"
+                }];
+            }
+
+            return nil;
+        }
+
+        int result =
+            pclose(pipe);
+
+        if (result == 0 &&
+            [self pathExists:zipPath]) {
+            return zipPath;
+        }
+
+        if (error) {
+            *error =
+                [NSError errorWithDomain:@"AppDataManager"
+                                     code:502
+                                 userInfo:@{
+                NSLocalizedDescriptionKey:
+                    @"فشل إنشاء ملف النسخة المضغوطة"
+            }];
+        }
+
+        return nil;
+    }
+    @catch (NSException *exception) {
+        if (error) {
+            *error =
+                [NSError errorWithDomain:@"AppDataManager"
+                                     code:503
+                                 userInfo:@{
+                NSLocalizedDescriptionKey:
+                    exception.reason ?: @"Unknown error"
+            }];
+        }
+
         return nil;
     }
 }
@@ -770,283 +1902,671 @@ static NSString * const kBackupDir = @"/var/mobile/Documents/AppDataManager/Back
 
 - (unsigned long long)totalFreeSpace {
     @try {
-        NSDictionary *attrs =
+        NSDictionary *attributes =
             [[NSFileManager defaultManager]
-                attributesOfFileSystemForPath:NSHomeDirectory()
-                                        error:nil];
-        return [attrs[NSFileSystemFreeSize] unsignedLongLongValue];
-    } @catch (NSException *e) { return 0; }
+                attributesOfFileSystemForPath:
+                    NSHomeDirectory()
+                                      error:nil];
+
+        return [attributes[NSFileSystemFreeSize]
+            unsignedLongLongValue];
+    }
+    @catch (NSException *exception) {
+        return 0;
+    }
 }
 
 - (unsigned long long)totalDiskSpace {
     @try {
-        NSDictionary *attrs =
+        NSDictionary *attributes =
             [[NSFileManager defaultManager]
-                attributesOfFileSystemForPath:NSHomeDirectory()
-                                        error:nil];
-        return [attrs[NSFileSystemSize] unsignedLongLongValue];
-    } @catch (NSException *e) { return 0; }
+                attributesOfFileSystemForPath:
+                    NSHomeDirectory()
+                                      error:nil];
+
+        return [attributes[NSFileSystemSize]
+            unsignedLongLongValue];
+    }
+    @catch (NSException *exception) {
+        return 0;
+    }
 }
 
-#pragma mark - UI Support
+#pragma mark - Icon
 
 - (UIImage *)iconForBundleID:(NSString *)bundleID {
-    if (!bundleID || bundleID.length == 0) return nil;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return nil;
+    }
 
-    // Fast path: check cache without blocking
-    UIImage *cached = [self.iconCache objectForKey:bundleID];
-    if (cached) return cached;
+    UIImage *cached =
+        [self.iconCache objectForKey:bundleID];
+
+    if (cached) {
+        return cached;
+    }
 
     UIImage *icon = nil;
 
     @try {
-        // Strategy 1: LSApplicationProxy
-        Class cls = NSClassFromString(@"LSApplicationProxy");
-        if (cls) {
-            id proxy = [cls performSelector:
-                @selector(applicationProxyForIdentifier:)
-                withObject:bundleID];
-            if (proxy) {
-                for (NSNumber *variant in @[@(2), @(0)]) {
-                    if ([proxy respondsToSelector:
-                            @selector(iconDataForVariant:)]) {
-                        NSData *data = [proxy performSelector:
-                            @selector(iconDataForVariant:)
-                            withObject:variant];
-                        if ([data isKindOfClass:[NSData class]]) {
-                            icon = [UIImage imageWithData:data];
-                            if (icon) break;
-                        }
-                    }
-                }
-            }
-        }
+        /*
+         * Strategy 1:
+         * LSApplicationProxy
+         */
+        Class cls =
+            NSClassFromString(@"LSApplicationProxy");
 
-        // Strategy 2: Filesystem
-        if (!icon) {
-            NSString *dataPath = [self dataPathForBundleID:bundleID];
-            if (dataPath) {
-                NSFileManager *fm = [NSFileManager defaultManager];
-                NSArray *items =
-                    [fm contentsOfDirectoryAtPath:dataPath error:nil];
-                for (NSString *item in items) {
-                    if (![item hasSuffix:@".app"]) continue;
-                    NSString *appPath =
-                        [dataPath stringByAppendingPathComponent:item];
-                    NSArray *iconNames = @[@"AppIcon60x60",
-                                             @"AppIcon76x76",
-                                             @"Icon-60",
-                                             @"Icon",
-                                             @"icon"];
-                    for (NSString *name in iconNames) {
-                        for (NSString *ext in @[@"png", @"jpg",
-                                                @"@2x.png",
-                                                @"@3x.png"]) {
-                            NSString *ip = [appPath
-                                stringByAppendingPathComponent:
-                                    [name stringByAppendingPathExtension:ext]];
-                            if ([fm fileExistsAtPath:ip]) {
-                                icon = [UIImage imageWithContentsOfFile:ip];
-                                if (icon) break;
+        if (cls &&
+            [cls respondsToSelector:
+                @selector(applicationProxyForIdentifier:)]) {
+
+            id proxy =
+                [cls performSelector:
+                    @selector(applicationProxyForIdentifier:)
+                    withObject:bundleID];
+
+            if (proxy &&
+                [proxy respondsToSelector:
+                    @selector(iconDataForVariant:)]) {
+
+                for (NSNumber *variant in @[
+                    @(2),
+                    @(0)
+                ]) {
+                    @autoreleasepool {
+                        NSData *data = nil;
+
+                        @try {
+                            data =
+                                [proxy performSelector:
+                                    @selector(iconDataForVariant:)
+                                    withObject:variant];
+                        }
+                        @catch (NSException *exception) {
+                            data = nil;
+                        }
+
+                        if ([data isKindOfClass:[NSData class]] &&
+                            data.length > 0) {
+
+                            UIImage *candidate =
+                                [UIImage imageWithData:data];
+
+                            if (candidate) {
+                                icon = candidate;
+                                break;
                             }
                         }
-                        if (icon) break;
                     }
-                    break;
                 }
             }
         }
 
-        // Strategy 3: SpringBoardServices
+        /*
+         * Strategy 2:
+         * Filesystem fallback.
+         */
         if (!icon) {
-            void *handle = dlopen(
-                "/System/Library/PrivateFrameworks/"
-                "SpringBoardServices.framework/SpringBoardServices",
-                RTLD_LAZY);
-            if (handle) {
-                NSData *(*func)(NSString *) = dlsym(handle,
-                    "SBSCopyIconImagePNGDataForDisplayIdentifier");
-                if (func) {
-                    NSData *data = func(bundleID);
-                    if (data) icon = [UIImage imageWithData:data];
+            NSString *dataPath =
+                [self dataPathForBundleID:bundleID];
+
+            if (dataPath.length > 0) {
+                NSFileManager *fm =
+                    [NSFileManager defaultManager];
+
+                NSArray *items =
+                    [fm contentsOfDirectoryAtPath:
+                        dataPath
+                                             error:nil];
+
+                NSArray *iconNames = @[
+                    @"AppIcon60x60",
+                    @"AppIcon76x76",
+                    @"AppIcon",
+                    @"Icon-60",
+                    @"Icon",
+                    @"icon"
+                ];
+
+                NSArray *extensions = @[
+                    @"png",
+                    @"jpg",
+                    @"jpeg"
+                ];
+
+                for (NSString *item in items) {
+                    @autoreleasepool {
+                        if (![item hasSuffix:@".app"]) {
+                            continue;
+                        }
+
+                        NSString *appPath =
+                            [dataPath stringByAppendingPathComponent:
+                                item];
+
+                        for (NSString *iconName in iconNames) {
+                            if (icon) {
+                                break;
+                            }
+
+                            for (NSString *extension in extensions) {
+                                @autoreleasepool {
+                                    NSString *iconPath =
+                                        [appPath
+                                            stringByAppendingPathComponent:
+                                                [iconName
+                                                    stringByAppendingPathExtension:
+                                                        extension]];
+
+                                    if ([fm fileExistsAtPath:iconPath]) {
+                                        UIImage *candidate =
+                                            [UIImage imageWithContentsOfFile:
+                                                iconPath];
+
+                                        if (candidate) {
+                                            icon = candidate;
+                                            break;
+                                        }
+                                    }
+
+                                    /*
+                                     * Also check retina suffixes.
+                                     */
+                                    NSArray *suffixes = @[
+                                        @"@2x",
+                                        @"@3x"
+                                    ];
+
+                                    for (NSString *suffix in suffixes) {
+                                        NSString *retinaName =
+                                            [NSString stringWithFormat:
+                                                @"%@%@.%@",
+                                                iconName,
+                                                suffix,
+                                                extension];
+
+                                        NSString *retinaPath =
+                                            [appPath
+                                                stringByAppendingPathComponent:
+                                                    retinaName];
+
+                                        if ([fm fileExistsAtPath:
+                                                retinaPath]) {
+
+                                            UIImage *candidate =
+                                                [UIImage imageWithContentsOfFile:
+                                                    retinaPath];
+
+                                            if (candidate) {
+                                                icon = candidate;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (icon) {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (icon) {
+                            break;
+                        }
+                    }
                 }
+            }
+        }
+
+        /*
+         * Strategy 3:
+         * SpringBoardServices.
+         */
+        if (!icon) {
+            void *handle =
+                dlopen(
+                    "/System/Library/PrivateFrameworks/"
+                    "SpringBoardServices.framework/"
+                    "SpringBoardServices",
+                    RTLD_LAZY);
+
+            if (handle) {
+                NSData *(*copyIconData)(NSString *) =
+                    dlsym(handle,
+                          "SBSCopyIconImagePNGDataForDisplayIdentifier");
+
+                if (copyIconData) {
+                    @try {
+                        NSData *data =
+                            copyIconData(bundleID);
+
+                        if ([data isKindOfClass:[NSData class]] &&
+                            data.length > 0) {
+                            icon =
+                                [UIImage imageWithData:data];
+                        }
+                    }
+                    @catch (NSException *exception) {
+                        NSLog(@"[ADM] SBS icon exception: %@",
+                              exception.reason);
+                    }
+                }
+
                 dlclose(handle);
             }
         }
-
-    } @catch (NSException *e) {
-        NSLog(@"[ADM] icon exception for %@: %@", bundleID, e);
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] icon exception for %@: %@",
+              bundleID,
+              exception.reason);
     }
 
     if (icon) {
+        UIImage *cacheImage = icon;
+
         dispatch_barrier_async(self.cacheQueue, ^{
-            [self.iconCache setObject:icon forKey:bundleID];
+            [self.iconCache setObject:cacheImage
+                               forKey:bundleID];
         });
     }
 
     return icon;
 }
 
+#pragma mark - Formatting
+
 - (NSString *)formatBytes:(unsigned long long)bytes {
     @try {
-        if (bytes == 0) return @"0 B";
+        if (bytes == 0) {
+            return @"0 B";
+        }
 
-        NSArray *units = @[@"B", @"KB", @"MB", @"GB", @"TB"];
-        NSUInteger idx = 0;
+        NSArray *units = @[
+            @"B",
+            @"KB",
+            @"MB",
+            @"GB",
+            @"TB"
+        ];
+
+        NSUInteger index = 0;
         double size = (double)bytes;
 
-        while (size >= 1024.0 && idx < units.count - 1) {
+        while (size >= 1024.0 &&
+               index < units.count - 1) {
+
             size /= 1024.0;
-            idx++;
+            index++;
         }
 
-        if (idx == 0) {
-            return [NSString stringWithFormat:@"%llu %@",
-                    bytes, units[idx]];
-        } else if (size < 10) {
-            return [NSString stringWithFormat:@"%.2f %@",
-                    size, units[idx]];
-        } else if (size < 100) {
-            return [NSString stringWithFormat:@"%.1f %@",
-                    size, units[idx]];
-        } else {
-            return [NSString stringWithFormat:@"%.0f %@",
-                    size, units[idx]];
+        if (index == 0) {
+            return [NSString stringWithFormat:
+                @"%llu %@",
+                bytes,
+                units[index]];
         }
-    } @catch (NSException *e) { return @"0 B"; }
+
+        if (size < 10.0) {
+            return [NSString stringWithFormat:
+                @"%.2f %@",
+                size,
+                units[index]];
+        }
+
+        if (size < 100.0) {
+            return [NSString stringWithFormat:
+                @"%.1f %@",
+                size,
+                units[index]];
+        }
+
+        return [NSString stringWithFormat:
+            @"%.0f %@",
+            size,
+            units[index]];
+    }
+    @catch (NSException *exception) {
+        return @"0 B";
+    }
 }
 
+#pragma mark - Version
+
 - (NSString *)versionForBundleID:(NSString *)bundleID {
-    if (!bundleID) return @"1.0";
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return @"1.0";
+    }
 
     @try {
-        Class cls = NSClassFromString(@"LSApplicationProxy");
-        if (cls) {
-            id proxy = [cls performSelector:
-                @selector(applicationProxyForIdentifier:)
-                withObject:bundleID];
-            if (proxy && [proxy respondsToSelector:
-                    @selector(shortVersionString)]) {
-                NSString *v = [proxy performSelector:
-                    @selector(shortVersionString)];
-                if ([v isKindOfClass:[NSString class]] && v.length > 0)
-                    return v;
-            }
-        }
+        Class cls =
+            NSClassFromString(@"LSApplicationProxy");
 
-        NSString *dp = [self dataPathForBundleID:bundleID];
-        if (dp) {
-            NSFileManager *fm = [NSFileManager defaultManager];
-            NSArray *items = [fm contentsOfDirectoryAtPath:dp error:nil];
-            for (NSString *item in items) {
-                if ([item hasSuffix:@".app"]) {
-                    NSString *ip = [dp stringByAppendingPathComponent:
-                        [item stringByAppendingPathComponent:@"Info.plist"]];
-                    NSDictionary *info =
-                        [NSDictionary dictionaryWithContentsOfFile:ip];
-                    NSString *v = info[@"CFBundleShortVersionString"];
-                    if (v) return v;
+        if (cls &&
+            [cls respondsToSelector:
+                @selector(applicationProxyForIdentifier:)]) {
+
+            id proxy =
+                [cls performSelector:
+                    @selector(applicationProxyForIdentifier:)
+                    withObject:bundleID];
+
+            if (proxy &&
+                [proxy respondsToSelector:
+                    @selector(shortVersionString)]) {
+
+                NSString *version =
+                    [proxy performSelector:
+                        @selector(shortVersionString)];
+
+                if ([version isKindOfClass:[NSString class]] &&
+                    version.length > 0) {
+                    return version;
                 }
             }
         }
-    } @catch (NSException *e) { }
+
+        NSString *dataPath =
+            [self dataPathForBundleID:bundleID];
+
+        if (dataPath.length > 0) {
+            NSFileManager *fm =
+                [NSFileManager defaultManager];
+
+            NSArray *items =
+                [fm contentsOfDirectoryAtPath:
+                    dataPath
+                                         error:nil];
+
+            for (NSString *item in items) {
+                @autoreleasepool {
+                    if (![item hasSuffix:@".app"]) {
+                        continue;
+                    }
+
+                    NSString *infoPath =
+                        [dataPath
+                            stringByAppendingPathComponent:
+                                [item
+                                    stringByAppendingPathComponent:
+                                        @"Info.plist"]];
+
+                    NSDictionary *info =
+                        [NSDictionary dictionaryWithContentsOfFile:
+                            infoPath];
+
+                    NSString *version =
+                        info[@"CFBundleShortVersionString"];
+
+                    if ([version isKindOfClass:[NSString class]] &&
+                        version.length > 0) {
+                        return version;
+                    }
+                }
+            }
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] version exception for %@: %@",
+              bundleID,
+              exception.reason);
+    }
 
     return @"1.0";
 }
 
+#pragma mark - Documents
+
 - (NSString *)documentsPathForBundleID:(NSString *)bundleID {
-    NSString *dp = [self dataPathForBundleID:bundleID];
-    if (!dp) return nil;
-    NSString *docs = [dp stringByAppendingPathComponent:@"Documents"];
-    return [self pathExists:docs] ? docs : nil;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return nil;
+    }
+
+    NSString *dataPath =
+        [self dataPathForBundleID:bundleID];
+
+    if (dataPath.length == 0) {
+        return nil;
+    }
+
+    NSString *documents =
+        [dataPath stringByAppendingPathComponent:@"Documents"];
+
+    return [self pathExists:documents] ? documents : nil;
 }
 
 - (NSUInteger)documentsCountForBundleID:(NSString *)bundleID {
-    NSString *dp = [self documentsPathForBundleID:bundleID];
-    if (!dp) return 0;
+    NSString *documents =
+        [self documentsPathForBundleID:bundleID];
+
+    if (documents.length == 0) {
+        return 0;
+    }
+
     @try {
-        NSArray *c = [[NSFileManager defaultManager]
-            contentsOfDirectoryAtPath:dp error:nil];
-        return c.count;
-    } @catch (NSException *e) { return 0; }
+        NSArray *contents =
+            [[NSFileManager defaultManager]
+                contentsOfDirectoryAtPath:documents
+                                    error:nil];
+
+        return contents.count;
+    }
+    @catch (NSException *exception) {
+        return 0;
+    }
 }
 
+#pragma mark - Backup Information
+
 - (NSDate *)lastBackupDateForBundleID:(NSString *)bundleID {
-    NSArray *backups = [self availableBackupsForBundleID:bundleID];
-    return backups.count > 0 ? backups[0][@"date"] : nil;
+    NSArray *backups =
+        [self availableBackupsForBundleID:bundleID];
+
+    if (backups.count == 0) {
+        return nil;
+    }
+
+    NSDate *date =
+        backups.firstObject[@"date"];
+
+    return [date isKindOfClass:[NSDate class]]
+        ? date
+        : nil;
 }
 
 - (unsigned long long)totalBackupsSize {
+    NSString *directory =
+        [self backupDirectory];
+
+    if (directory.length == 0) {
+        return 0;
+    }
+
     @try {
-        return [self fastDirectorySize:[self backupDirectory]];
-    } @catch (NSException *e) { return 0; }
+        return [self fastDirectorySize:directory];
+    }
+    @catch (NSException *exception) {
+        return 0;
+    }
 }
 
 - (unsigned long long)totalAppsDataSize {
     @try {
-        NSArray *apps = [self allInstalledApplications];
+        NSArray *applications =
+            [self allInstalledApplications];
+
         unsigned long long total = 0;
-        for (NSDictionary *app in apps) {
+
+        for (NSDictionary *application in applications) {
             @autoreleasepool {
-                NSString *bid = app[@"bundleID"];
-                if (bid) total += [self dataSizeForBundleID:bid];
+                NSString *bundleID =
+                    application[@"bundleID"];
+
+                if (![bundleID isKindOfClass:[NSString class]] ||
+                    bundleID.length == 0) {
+                    continue;
+                }
+
+                /*
+                 * Skip system applications. The manager is intended
+                 * to report user application data.
+                 */
+                if ([application[@"isSystem"] boolValue]) {
+                    continue;
+                }
+
+                total +=
+                    [self dataSizeForBundleID:bundleID];
             }
         }
+
         return total;
-    } @catch (NSException *e) { return 0; }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] total apps data size exception: %@",
+              exception.reason);
+        return 0;
+    }
 }
 
+#pragma mark - System Application Detection
+
 - (BOOL)isSystemApp:(NSString *)bundleID {
-    if (!bundleID) return NO;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return NO;
+    }
 
     @try {
-        NSArray *apps = [self allInstalledApplications];
-        for (NSDictionary *app in apps) {
-            if ([app[@"bundleID"] isEqualToString:bundleID]) {
-                return [app[@"isSystem"] boolValue];
+        NSArray *applications =
+            [self allInstalledApplications];
+
+        for (NSDictionary *application in applications) {
+            NSString *identifier =
+                application[@"bundleID"];
+
+            if ([identifier isKindOfClass:[NSString class]] &&
+                [identifier isEqualToString:bundleID]) {
+
+                return [application[@"isSystem"] boolValue];
             }
         }
 
-        NSArray *prefixes = @[@"com.apple.", @"system."];
-        for (NSString *p in prefixes) {
-            if ([bundleID hasPrefix:p]) return YES;
+        /*
+         * Fallback only when LaunchServices/filesystem discovery
+         * cannot identify the application.
+         */
+        NSArray *systemPrefixes = @[
+            @"com.apple.",
+            @"system."
+        ];
+
+        for (NSString *prefix in systemPrefixes) {
+            if ([bundleID hasPrefix:prefix]) {
+                return YES;
+            }
         }
-    } @catch (NSException *e) { }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] system app detection exception: %@",
+              exception.reason);
+    }
 
     return NO;
 }
 
+#pragma mark - Application Termination
+
 - (BOOL)killApp:(NSString *)bundleID {
-    if (!bundleID) return NO;
+    if (![bundleID isKindOfClass:[NSString class]] ||
+        bundleID.length == 0) {
+        return NO;
+    }
 
     @try {
-        Class cls = NSClassFromString(@"LSApplicationWorkspace");
-        if (cls) {
-            id ws = [cls performSelector:@selector(defaultWorkspace)];
-            if (ws && [ws respondsToSelector:
-                    @selector(terminateApplicationWithBundleIdentifier:)]) {
-                [ws performSelector:
-                    @selector(terminateApplicationWithBundleIdentifier:)
-                    withObject:bundleID];
-                return YES;
+        Class cls =
+            NSClassFromString(@"LSApplicationWorkspace");
+
+        if (cls &&
+            [cls respondsToSelector:@selector(defaultWorkspace)]) {
+
+            id workspace =
+                [cls performSelector:
+                    @selector(defaultWorkspace)];
+
+            SEL selector =
+                @selector(
+                    terminateApplicationWithBundleIdentifier:);
+
+            if (workspace &&
+                [workspace respondsToSelector:selector]) {
+
+                @try {
+                    NSMethodSignature *signature =
+                        [workspace methodSignatureForSelector:selector];
+
+                    if (signature) {
+                        NSInvocation *invocation =
+                            [NSInvocation invocationWithMethodSignature:
+                                signature];
+
+                        [invocation setSelector:selector];
+                        [invocation setTarget:workspace];
+
+                        NSString *identifier = bundleID;
+
+                        [invocation setArgument:&identifier
+                                        atIndex:2];
+
+                        [invocation invoke];
+
+                        return YES;
+                    }
+                }
+                @catch (NSException *exception) {
+                    NSLog(@"[ADM] application termination exception: %@",
+                          exception.reason);
+                }
             }
         }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] killApp exception: %@",
+              exception.reason);
+    }
 
-        NSString *cmd = [NSString stringWithFormat:
-            @"killall -9 '%@' 2>/dev/null", bundleID];
-        FILE *fp = popen([cmd UTF8String], "r");
-        if (fp) pclose(fp);
-        return YES;
-    } @catch (NSException *e) { return NO; }
+    /*
+     * Deliberately no shell fallback.
+     *
+     * The previous implementation constructed:
+     *
+     *     killall -9 '<bundleID>'
+     *
+     * which was unnecessary and introduced command parsing risk.
+     * LaunchServices is the correct primary mechanism here.
+     */
+    return NO;
 }
 
 #pragma mark - Helpers
 
 - (BOOL)pathExists:(NSString *)path {
-    if (!path || path.length == 0) return NO;
+    if (![path isKindOfClass:[NSString class]] ||
+        path.length == 0) {
+        return NO;
+    }
+
     @try {
-        return [[NSFileManager defaultManager] fileExistsAtPath:path];
-    } @catch (NSException *e) { return NO; }
+        return [[NSFileManager defaultManager]
+            fileExistsAtPath:path];
+    }
+    @catch (NSException *exception) {
+        return NO;
+    }
 }
 
 @end
