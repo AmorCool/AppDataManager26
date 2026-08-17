@@ -2,7 +2,16 @@
 //  AppDetailViewController.m
 //  AppDataManager
 //
-//  v1.6.0 — Crash-Resilient App Detail
+//  v1.6.1 — Crash-Resilient App Detail
+//  Fixes:
+//  - Correct card/label ownership
+//  - Async lifecycle safety
+//  - Stale-result protection
+//  - Main-thread UI isolation
+//  - Correct Documents size calculation
+//  - Safer destructive operations
+//  - Loading-state protection
+//  - Nil/error resilience
 //
 
 #import "AppDetailViewController.h"
@@ -10,42 +19,84 @@
 #import "BackupManagerViewController.h"
 
 @interface AppDetailViewController ()
+
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIView *contentView;
+
 @property (nonatomic, strong) UIImageView *appIcon;
 @property (nonatomic, strong) UILabel *nameLabel;
 @property (nonatomic, strong) UILabel *bundleIDLabel;
-@property (nonatomic, strong) UILabel *versionLabel;
-@property (nonatomic, strong) UILabel *dataSizeLabel;
-@property (nonatomic, strong) UILabel *documentsSizeLabel;
-@property (nonatomic, strong) UILabel *documentsCountLabel;
-@property (nonatomic, strong) UILabel *lastBackupLabel;
-@property (nonatomic, strong) UILabel *dataPathLabel;
-@property (nonatomic, strong) UILabel *documentsPathLabel;
+
+@property (nonatomic, strong) UIView *versionCard;
+@property (nonatomic, strong) UIView *dataSizeCard;
+@property (nonatomic, strong) UIView *documentsSizeCard;
+@property (nonatomic, strong) UIView *documentsCountCard;
+@property (nonatomic, strong) UIView *lastBackupCard;
+@property (nonatomic, strong) UIView *dataPathCard;
+@property (nonatomic, strong) UIView *documentsPathCard;
+
+@property (nonatomic, strong) UILabel *versionValueLabel;
+@property (nonatomic, strong) UILabel *dataSizeValueLabel;
+@property (nonatomic, strong) UILabel *documentsSizeValueLabel;
+@property (nonatomic, strong) UILabel *documentsCountValueLabel;
+@property (nonatomic, strong) UILabel *lastBackupValueLabel;
+@property (nonatomic, strong) UILabel *dataPathValueLabel;
+@property (nonatomic, strong) UILabel *documentsPathValueLabel;
+
 @property (nonatomic, strong) AppDataManager *manager;
+
 @property (nonatomic, assign) BOOL isSystemApp;
+@property (nonatomic, assign) BOOL operationInProgress;
+
 @property (nonatomic, strong) UIActivityIndicatorView *loadingIndicator;
 @property (nonatomic, strong) dispatch_queue_t workerQueue;
+
+/*
+ * Every load receives a unique generation.
+ *
+ * If the user triggers another load before the previous one finishes,
+ * an old result must never overwrite the new state.
+ */
+@property (nonatomic, assign) NSUInteger loadGeneration;
+
 @end
 
 @implementation AppDetailViewController
 
-- (instancetype)initWithAppInfo:(NSDictionary *)appInfo {
+#pragma mark - Lifecycle
+
+- (instancetype)initWithAppInfo:(NSDictionary *)appInfo
+{
     self = [super init];
+
     if (self) {
-        _appInfo = appInfo;
+        _appInfo = [appInfo copy];
         _manager = [AppDataManager sharedManager];
+
         _workerQueue = dispatch_queue_create(
-            "com.appdatamanager.detailworker", DISPATCH_QUEUE_SERIAL);
+            "com.appdatamanager.detailworker",
+            DISPATCH_QUEUE_SERIAL
+        );
+
+        _loadGeneration = 0;
+        _operationInProgress = NO;
+        _isSystemApp = NO;
     }
+
     return self;
 }
 
-- (void)viewDidLoad {
+- (void)viewDidLoad
+{
     [super viewDidLoad];
+
     self.title = @"تفاصيل التطبيق";
+
     self.view.backgroundColor =
-        [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
+        [UIColor colorWithRed:0.02
+                        green:0.02
+                         blue:0.04
+                        alpha:1.0];
 
     [self setupScrollView];
     [self setupHeader];
@@ -56,179 +107,275 @@
     [self loadDataAsync];
 }
 
+- (void)viewDidDisappear:(BOOL)animated
+{
+    [super viewDidDisappear:animated];
+
+    /*
+     * Invalidate the current load generation.
+     *
+     * The worker may still finish, but its result will no longer
+     * be allowed to update this controller.
+     */
+    self.loadGeneration++;
+}
+
 #pragma mark - UI Setup
 
-- (void)setupScrollView {
-    self.scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-    self.scrollView.autoresizingMask =
-        UIViewAutoresizingFlexibleWidth |
-        UIViewAutoresizingFlexibleHeight;
+- (void)setupScrollView
+{
+    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+
+    self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
     self.scrollView.backgroundColor = [UIColor clearColor];
+    self.scrollView.alwaysBounceVertical = YES;
+    self.scrollView.directionalLockEnabled = YES;
+    self.scrollView.showsVerticalScrollIndicator = YES;
+
     [self.view addSubview:self.scrollView];
 
-    self.contentView = [[UIView alloc] init];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.scrollView.topAnchor
+            constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+
+        [self.scrollView.leadingAnchor
+            constraintEqualToAnchor:self.view.leadingAnchor],
+
+        [self.scrollView.trailingAnchor
+            constraintEqualToAnchor:self.view.trailingAnchor],
+
+        [self.scrollView.bottomAnchor
+            constraintEqualToAnchor:self.view.bottomAnchor]
+    ]];
+
+    self.contentView = [[UIView alloc] initWithFrame:CGRectZero];
+
     self.contentView.translatesAutoresizingMaskIntoConstraints = NO;
     self.contentView.backgroundColor = [UIColor clearColor];
+
     [self.scrollView addSubview:self.contentView];
 
     [NSLayoutConstraint activateConstraints:@[
         [self.contentView.topAnchor
-            constraintEqualToAnchor:self.scrollView.topAnchor],
+            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor],
+
         [self.contentView.leadingAnchor
-            constraintEqualToAnchor:self.scrollView.leadingAnchor],
+            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor],
+
         [self.contentView.trailingAnchor
-            constraintEqualToAnchor:self.scrollView.trailingAnchor],
+            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor],
+
         [self.contentView.bottomAnchor
-            constraintEqualToAnchor:self.scrollView.bottomAnchor],
+            constraintEqualToAnchor:self.scrollView.contentLayoutGuide.bottomAnchor],
+
         [self.contentView.widthAnchor
-            constraintEqualToAnchor:self.scrollView.widthAnchor]
+            constraintEqualToAnchor:self.scrollView.frameLayoutGuide.widthAnchor]
     ]];
 }
 
-- (void)setupHeader {
-    self.appIcon = [[UIImageView alloc] init];
+- (void)setupHeader
+{
+    self.appIcon = [[UIImageView alloc] initWithFrame:CGRectZero];
+
+    self.appIcon.translatesAutoresizingMaskIntoConstraints = NO;
     self.appIcon.layer.cornerRadius = 20.0;
     self.appIcon.layer.masksToBounds = YES;
     self.appIcon.contentMode = UIViewContentModeScaleAspectFit;
     self.appIcon.backgroundColor =
-        [UIColor colorWithRed:0.15 green:0.15 blue:0.18 alpha:1.0];
-    self.appIcon.translatesAutoresizingMaskIntoConstraints = NO;
+        [UIColor colorWithRed:0.15
+                        green:0.15
+                         blue:0.18
+                        alpha:1.0];
+
     [self.contentView addSubview:self.appIcon];
 
-    self.nameLabel = [[UILabel alloc] init];
+    self.nameLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+
+    self.nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
     self.nameLabel.font =
-        [UIFont systemFontOfSize:22.0 weight:UIFontWeightBold];
+        [UIFont systemFontOfSize:22.0
+                           weight:UIFontWeightBold];
     self.nameLabel.textColor = [UIColor whiteColor];
     self.nameLabel.textAlignment = NSTextAlignmentCenter;
-    self.nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.nameLabel.numberOfLines = 2;
+    self.nameLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+
     [self.contentView addSubview:self.nameLabel];
 
-    self.bundleIDLabel = [[UILabel alloc] init];
+    self.bundleIDLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+
+    self.bundleIDLabel.translatesAutoresizingMaskIntoConstraints = NO;
     self.bundleIDLabel.font =
-        [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
+        [UIFont systemFontOfSize:13.0
+                           weight:UIFontWeightRegular];
     self.bundleIDLabel.textColor =
         [UIColor colorWithWhite:0.40 alpha:1.0];
     self.bundleIDLabel.textAlignment = NSTextAlignmentCenter;
-    self.bundleIDLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.bundleIDLabel.numberOfLines = 2;
+    self.bundleIDLabel.lineBreakMode =
+        NSLineBreakByTruncatingMiddle;
+
     [self.contentView addSubview:self.bundleIDLabel];
 
-    NSString *name = self.appInfo[@"name"] ?: @"Unknown";
-    NSString *bid = self.appInfo[@"bundleID"] ?: @"";
+    NSString *name = [self stringValue:self.appInfo[@"name"]
+                               fallback:@"Unknown"];
+
+    NSString *bundleID =
+        [self stringValue:self.appInfo[@"bundleID"]
+                  fallback:@""];
 
     self.nameLabel.text = name;
-    self.bundleIDLabel.text = bid;
-
-    dispatch_async(self.workerQueue, ^{
-        @autoreleasepool {
-            UIImage *icon = nil;
-            @try {
-                icon = [self.manager iconForBundleID:bid];
-            } @catch (NSException *e) { }
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (icon) {
-                    self.appIcon.image = icon;
-                } else {
-                    self.appIcon.image =
-                        [UIImage systemImageNamed:@"app.fill"];
-                    self.appIcon.tintColor =
-                        [UIColor colorWithRed:0.55
-                                        green:0.45
-                                         blue:0.95 alpha:1.0];
-                }
-            });
-        }
-    });
+    self.bundleIDLabel.text = bundleID;
 
     [NSLayoutConstraint activateConstraints:@[
         [self.appIcon.topAnchor
             constraintEqualToAnchor:self.contentView.topAnchor
-            constant:20.0],
+                           constant:20.0],
+
         [self.appIcon.centerXAnchor
             constraintEqualToAnchor:self.contentView.centerXAnchor],
-        [self.appIcon.widthAnchor constraintEqualToConstant:80.0],
-        [self.appIcon.heightAnchor constraintEqualToConstant:80.0],
+
+        [self.appIcon.widthAnchor
+            constraintEqualToConstant:80.0],
+
+        [self.appIcon.heightAnchor
+            constraintEqualToConstant:80.0],
 
         [self.nameLabel.topAnchor
             constraintEqualToAnchor:self.appIcon.bottomAnchor
-            constant:12.0],
+                           constant:12.0],
+
         [self.nameLabel.leadingAnchor
             constraintEqualToAnchor:self.contentView.leadingAnchor
-            constant:20.0],
+                           constant:20.0],
+
         [self.nameLabel.trailingAnchor
             constraintEqualToAnchor:self.contentView.trailingAnchor
-            constant:-20.0],
+                            constant:-20.0],
 
         [self.bundleIDLabel.topAnchor
             constraintEqualToAnchor:self.nameLabel.bottomAnchor
-            constant:4.0],
+                           constant:4.0],
+
         [self.bundleIDLabel.leadingAnchor
             constraintEqualToAnchor:self.nameLabel.leadingAnchor],
+
         [self.bundleIDLabel.trailingAnchor
             constraintEqualToAnchor:self.nameLabel.trailingAnchor]
     ]];
+
+    [self loadIconAsyncForBundleID:bundleID];
 }
 
 - (UIView *)makeCardWithTitle:(NSString *)title
                         value:(NSString *)value
                          icon:(NSString *)iconName
-                       topRef:(UIView *)topRef {
-    UIView *card = [[UIView alloc] init];
+                       topRef:(UIView *)topRef
+                   valueLabel:(UILabel **)outValueLabel
+{
+    UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
+
+    card.translatesAutoresizingMaskIntoConstraints = NO;
     card.backgroundColor =
-        [UIColor colorWithRed:0.10 green:0.10 blue:0.13 alpha:1.0];
+        [UIColor colorWithRed:0.10
+                        green:0.10
+                         blue:0.13
+                        alpha:1.0];
+
     card.layer.cornerRadius = 14.0;
     card.layer.masksToBounds = YES;
-    card.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIImage *iconImage = nil;
+
+    if (iconName.length > 0) {
+        iconImage = [UIImage systemImageNamed:iconName];
+    }
 
     UIImageView *icon =
-        [[UIImageView alloc] initWithImage:
-            [UIImage systemImageNamed:iconName]];
-    icon.tintColor =
-        [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-    icon.contentMode = UIViewContentModeScaleAspectFit;
+        [[UIImageView alloc] initWithImage:iconImage];
+
     icon.translatesAutoresizingMaskIntoConstraints = NO;
+    icon.tintColor =
+        [UIColor colorWithRed:0.55
+                        green:0.45
+                         blue:0.95
+                        alpha:1.0];
+    icon.contentMode = UIViewContentModeScaleAspectFit;
+
     [card addSubview:icon];
 
-    UILabel *titleLabel = [[UILabel alloc] init];
-    titleLabel.font =
-        [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
-    titleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-    titleLabel.text = title;
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+
     titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    titleLabel.font =
+        [UIFont systemFontOfSize:12.0
+                           weight:UIFontWeightMedium];
+    titleLabel.textColor =
+        [UIColor colorWithWhite:0.45 alpha:1.0];
+    titleLabel.text = title ?: @"";
+    titleLabel.numberOfLines = 1;
+    titleLabel.lineBreakMode =
+        NSLineBreakByTruncatingTail;
+
     [card addSubview:titleLabel];
 
-    UILabel *valueLabel = [[UILabel alloc] init];
+    UILabel *valueLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+
+    valueLabel.translatesAutoresizingMaskIntoConstraints = NO;
     valueLabel.font =
-        [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+        [UIFont systemFontOfSize:15.0
+                           weight:UIFontWeightSemibold];
     valueLabel.textColor = [UIColor whiteColor];
     valueLabel.text = value ?: @"—";
     valueLabel.numberOfLines = 0;
-    valueLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    valueLabel.lineBreakMode = NSLineBreakByCharWrapping;
+
     [card addSubview:valueLabel];
+
+    if (outValueLabel) {
+        *outValueLabel = valueLabel;
+    }
 
     [NSLayoutConstraint activateConstraints:@[
         [icon.leadingAnchor
-            constraintEqualToAnchor:card.leadingAnchor constant:14.0],
-        [icon.centerYAnchor
-            constraintEqualToAnchor:card.centerYAnchor],
-        [icon.widthAnchor constraintEqualToConstant:22.0],
-        [icon.heightAnchor constraintEqualToConstant:22.0],
+            constraintEqualToAnchor:card.leadingAnchor
+                           constant:14.0],
+
+        [icon.topAnchor
+            constraintEqualToAnchor:card.topAnchor
+                           constant:12.0],
+
+        [icon.widthAnchor
+            constraintEqualToConstant:22.0],
+
+        [icon.heightAnchor
+            constraintEqualToConstant:22.0],
 
         [titleLabel.leadingAnchor
-            constraintEqualToAnchor:icon.trailingAnchor constant:10.0],
+            constraintEqualToAnchor:icon.trailingAnchor
+                           constant:10.0],
+
         [titleLabel.topAnchor
-            constraintEqualToAnchor:card.topAnchor constant:12.0],
+            constraintEqualToAnchor:card.topAnchor
+                           constant:12.0],
+
         [titleLabel.trailingAnchor
-            constraintEqualToAnchor:card.trailingAnchor constant:-14.0],
+            constraintEqualToAnchor:card.trailingAnchor
+                            constant:-14.0],
 
         [valueLabel.leadingAnchor
             constraintEqualToAnchor:titleLabel.leadingAnchor],
+
         [valueLabel.topAnchor
-            constraintEqualToAnchor:titleLabel.bottomAnchor constant:3.0],
+            constraintEqualToAnchor:titleLabel.bottomAnchor
+                           constant:3.0],
+
         [valueLabel.trailingAnchor
             constraintEqualToAnchor:titleLabel.trailingAnchor],
+
         [valueLabel.bottomAnchor
-            constraintEqualToAnchor:card.bottomAnchor constant:-12.0]
+            constraintEqualToAnchor:card.bottomAnchor
+                           constant:-12.0]
     ]];
 
     [self.contentView addSubview:card];
@@ -236,347 +383,961 @@
     [NSLayoutConstraint activateConstraints:@[
         [card.leadingAnchor
             constraintEqualToAnchor:self.contentView.leadingAnchor
-            constant:16.0],
+                           constant:16.0],
+
         [card.trailingAnchor
             constraintEqualToAnchor:self.contentView.trailingAnchor
-            constant:-16.0],
+                            constant:-16.0],
+
         [card.topAnchor
-            constraintEqualToAnchor:topRef.bottomAnchor constant:10.0]
+            constraintEqualToAnchor:topRef.bottomAnchor
+                           constant:10.0]
     ]];
 
     return card;
 }
 
-- (void)setupInfoCards {
+- (void)setupInfoCards
+{
     UIView *ref = self.bundleIDLabel;
 
-    self.versionLabel =
-        (UILabel *)[self makeCardWithTitle:@"الإصدار"
-                                     value:self.appInfo[@"version"] ?: @"1.0"
-                                      icon:@"number"
-                                    topRef:ref];
+    self.versionCard =
+        [self makeCardWithTitle:@"الإصدار"
+                          value:@"جاري القراءة..."
+                           icon:@"number"
+                         topRef:ref
+                     valueLabel:&_versionValueLabel];
 
-    self.dataSizeLabel =
-        (UILabel *)[self makeCardWithTitle:@"حجم البيانات"
-                                     value:@"جاري الحساب..."
-                                      icon:@"externaldrive.fill"
-                                    topRef:(UIView *)self.versionLabel];
+    self.dataSizeCard =
+        [self makeCardWithTitle:@"حجم البيانات"
+                          value:@"جاري الحساب..."
+                           icon:@"externaldrive.fill"
+                         topRef:self.versionCard
+                     valueLabel:&_dataSizeValueLabel];
 
-    self.documentsSizeLabel =
-        (UILabel *)[self makeCardWithTitle:@"حجم المستندات"
-                                     value:@"—"
-                                      icon:@"doc.fill"
-                                    topRef:(UIView *)self.dataSizeLabel];
+    self.documentsSizeCard =
+        [self makeCardWithTitle:@"حجم المستندات"
+                          value:@"جاري الحساب..."
+                           icon:@"doc.fill"
+                         topRef:self.dataSizeCard
+                     valueLabel:&_documentsSizeValueLabel];
 
-    self.documentsCountLabel =
-        (UILabel *)[self makeCardWithTitle:@"عدد الملفات"
-                                     value:@"—"
-                                      icon:@"folder.fill"
-                                    topRef:(UIView *)self.documentsSizeLabel];
+    self.documentsCountCard =
+        [self makeCardWithTitle:@"عدد الملفات"
+                          value:@"جاري الحساب..."
+                           icon:@"folder.fill"
+                         topRef:self.documentsSizeCard
+                     valueLabel:&_documentsCountValueLabel];
 
-    self.lastBackupLabel =
-        (UILabel *)[self makeCardWithTitle:@"آخر نسخة احتياطية"
-                                     value:@"—"
-                                      icon:@"clock.fill"
-                                    topRef:(UIView *)self.documentsCountLabel];
+    self.lastBackupCard =
+        [self makeCardWithTitle:@"آخر نسخة احتياطية"
+                          value:@"جاري القراءة..."
+                           icon:@"clock.fill"
+                         topRef:self.documentsCountCard
+                     valueLabel:&_lastBackupValueLabel];
 
-    self.dataPathLabel =
-        (UILabel *)[self makeCardWithTitle:@"مسار البيانات"
-                                     value:@"—"
-                                      icon:@"arrow.right.doc.fill"
-                                    topRef:(UIView *)self.lastBackupLabel];
+    self.dataPathCard =
+        [self makeCardWithTitle:@"مسار البيانات"
+                          value:@"جاري القراءة..."
+                           icon:@"arrow.right.doc.fill"
+                         topRef:self.lastBackupCard
+                     valueLabel:&_dataPathValueLabel];
 
-    self.documentsPathLabel =
-        (UILabel *)[self makeCardWithTitle:@"مسار المستندات"
-                                     value:@"—"
-                                      icon:@"doc.text.fill"
-                                    topRef:(UIView *)self.dataPathLabel];
+    self.documentsPathCard =
+        [self makeCardWithTitle:@"مسار المستندات"
+                          value:@"جاري القراءة..."
+                           icon:@"doc.text.fill"
+                         topRef:self.dataPathCard
+                     valueLabel:&_documentsPathValueLabel];
 }
 
-- (void)setupActionButtons {
-    UIButton *wipeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [wipeBtn setTitle:@"مسح البيانات" forState:UIControlStateNormal];
-    [wipeBtn setTitleColor:[UIColor whiteColor]
-                  forState:UIControlStateNormal];
-    wipeBtn.backgroundColor =
-        [UIColor colorWithRed:0.85 green:0.20 blue:0.20 alpha:1.0];
-    wipeBtn.layer.cornerRadius = 12.0;
-    wipeBtn.titleLabel.font =
-        [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
-    wipeBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [wipeBtn addTarget:self
-                action:@selector(wipeTapped)
-      forControlEvents:UIControlEventTouchUpInside];
+- (void)setupActionButtons
+{
+    UIButton *wipeBtn =
+        [self makeActionButtonWithTitle:@"مسح البيانات"
+                                  color:[UIColor colorWithRed:0.85
+                                                         green:0.20
+                                                          blue:0.20
+                                                         alpha:1.0]
+                                 action:@selector(wipeTapped)];
+
+    UIButton *backupBtn =
+        [self makeActionButtonWithTitle:@"نسخ احتياطي"
+                                  color:[UIColor colorWithRed:0.20
+                                                         green:0.55
+                                                          blue:0.85
+                                                         alpha:1.0]
+                                 action:@selector(backupTapped)];
+
+    UIButton *manageBtn =
+        [self makeActionButtonWithTitle:@"إدارة النسخ"
+                                  color:[UIColor colorWithRed:0.55
+                                                         green:0.45
+                                                          blue:0.95
+                                                         alpha:1.0]
+                                 action:@selector(manageBackupsTapped)];
+
     [self.contentView addSubview:wipeBtn];
-
-    UIButton *backupBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [backupBtn setTitle:@"نسخ احتياطي" forState:UIControlStateNormal];
-    [backupBtn setTitleColor:[UIColor whiteColor]
-                    forState:UIControlStateNormal];
-    backupBtn.backgroundColor =
-        [UIColor colorWithRed:0.20 green:0.55 blue:0.85 alpha:1.0];
-    backupBtn.layer.cornerRadius = 12.0;
-    backupBtn.titleLabel.font =
-        [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
-    backupBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [backupBtn addTarget:self
-                  action:@selector(backupTapped)
-        forControlEvents:UIControlEventTouchUpInside];
     [self.contentView addSubview:backupBtn];
-
-    UIButton *manageBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    [manageBtn setTitle:@"إدارة النسخ" forState:UIControlStateNormal];
-    [manageBtn setTitleColor:[UIColor whiteColor]
-                    forState:UIControlStateNormal];
-    manageBtn.backgroundColor =
-        [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-    manageBtn.layer.cornerRadius = 12.0;
-    manageBtn.titleLabel.font =
-        [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
-    manageBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [manageBtn addTarget:self
-                  action:@selector(manageBackupsTapped)
-        forControlEvents:UIControlEventTouchUpInside];
     [self.contentView addSubview:manageBtn];
 
-    UIView *lastRef = (UIView *)self.documentsPathLabel;
+    UIView *lastRef = self.documentsPathCard;
 
     [NSLayoutConstraint activateConstraints:@[
         [wipeBtn.topAnchor
-            constraintEqualToAnchor:lastRef.bottomAnchor constant:20.0],
+            constraintEqualToAnchor:lastRef.bottomAnchor
+                           constant:20.0],
+
         [wipeBtn.leadingAnchor
             constraintEqualToAnchor:self.contentView.leadingAnchor
-            constant:16.0],
+                           constant:16.0],
+
         [wipeBtn.trailingAnchor
             constraintEqualToAnchor:self.contentView.trailingAnchor
-            constant:-16.0],
-        [wipeBtn.heightAnchor constraintEqualToConstant:50.0],
+                            constant:-16.0],
+
+        [wipeBtn.heightAnchor
+            constraintEqualToConstant:50.0],
 
         [backupBtn.topAnchor
-            constraintEqualToAnchor:wipeBtn.bottomAnchor constant:10.0],
+            constraintEqualToAnchor:wipeBtn.bottomAnchor
+                           constant:10.0],
+
         [backupBtn.leadingAnchor
             constraintEqualToAnchor:wipeBtn.leadingAnchor],
+
         [backupBtn.trailingAnchor
             constraintEqualToAnchor:wipeBtn.trailingAnchor],
-        [backupBtn.heightAnchor constraintEqualToConstant:50.0],
+
+        [backupBtn.heightAnchor
+            constraintEqualToConstant:50.0],
 
         [manageBtn.topAnchor
-            constraintEqualToAnchor:backupBtn.bottomAnchor constant:10.0],
+            constraintEqualToAnchor:backupBtn.bottomAnchor
+                           constant:10.0],
+
         [manageBtn.leadingAnchor
             constraintEqualToAnchor:wipeBtn.leadingAnchor],
+
         [manageBtn.trailingAnchor
             constraintEqualToAnchor:wipeBtn.trailingAnchor],
-        [manageBtn.heightAnchor constraintEqualToConstant:50.0],
+
+        [manageBtn.heightAnchor
+            constraintEqualToConstant:50.0],
+
         [manageBtn.bottomAnchor
             constraintEqualToAnchor:self.contentView.bottomAnchor
-            constant:-30.0]
+                           constant:-30.0]
     ]];
 }
 
-- (void)setupLoadingView {
+- (UIButton *)makeActionButtonWithTitle:(NSString *)title
+                                  color:(UIColor *)color
+                                 action:(SEL)action
+{
+    UIButton *button =
+        [UIButton buttonWithType:UIButtonTypeSystem];
+
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [button setTitle:title ?: @""
+            forState:UIControlStateNormal];
+
+    [button setTitleColor:[UIColor whiteColor]
+                 forState:UIControlStateNormal];
+
+    button.backgroundColor = color;
+
+    button.layer.cornerRadius = 12.0;
+    button.layer.masksToBounds = YES;
+
+    button.titleLabel.font =
+        [UIFont systemFontOfSize:16.0
+                           weight:UIFontWeightSemibold];
+
+    [button addTarget:self
+               action:action
+     forControlEvents:UIControlEventTouchUpInside];
+
+    return button;
+}
+
+- (void)setupLoadingView
+{
     self.loadingIndicator =
         [[UIActivityIndicatorView alloc]
             initWithActivityIndicatorStyle:
                 UIActivityIndicatorViewStyleLarge];
-    self.loadingIndicator.center = self.view.center;
+
+    self.loadingIndicator.translatesAutoresizingMaskIntoConstraints = NO;
     self.loadingIndicator.hidesWhenStopped = YES;
     self.loadingIndicator.color =
-        [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
+        [UIColor colorWithRed:0.55
+                        green:0.45
+                         blue:0.95
+                        alpha:1.0];
+
     [self.view addSubview:self.loadingIndicator];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [self.loadingIndicator.centerXAnchor
+            constraintEqualToAnchor:self.view.centerXAnchor],
+
+        [self.loadingIndicator.centerYAnchor
+            constraintEqualToAnchor:self.view.centerYAnchor]
+    ]];
 }
 
-#pragma mark - Data Loading
+#pragma mark - Icon Loading
 
-- (void)loadDataAsync {
-    [self.loadingIndicator startAnimating];
-
-    NSString *bid = self.appInfo[@"bundleID"];
-    if (!bid || bid.length == 0) {
-        [self.loadingIndicator stopAnimating];
+- (void)loadIconAsyncForBundleID:(NSString *)bundleID
+{
+    if (bundleID.length == 0) {
+        [self applyFallbackIcon];
         return;
     }
 
+    __weak typeof(self) weakSelf = self;
+
     dispatch_async(self.workerQueue, ^{
         @autoreleasepool {
-            NSString *version = @"1.0";
-            unsigned long long dataSize = 0;
-            unsigned long long docsSize = 0;
-            NSUInteger docsCount = 0;
-            NSString *dataPath = nil;
-            NSString *docsPath = nil;
-            NSDate *lastBackup = nil;
-            BOOL isSystem = NO;
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+
+            if (!strongSelf) return;
+
+            UIImage *icon = nil;
 
             @try {
-                version = [self.manager versionForBundleID:bid];
-            } @catch (NSException *e) { }
-
-            @try {
-                dataSize = [self.manager dataSizeForBundleID:bid];
-            } @catch (NSException *e) { }
-
-            @try {
-                dataPath = [self.manager dataPathForBundleID:bid];
-                if (dataPath) {
-                    docsPath = [dataPath
-                        stringByAppendingPathComponent:@"Documents"];
-                    if (![[NSFileManager defaultManager]
-                            fileExistsAtPath:docsPath]) {
-                        docsPath = nil;
-                    }
-                }
-            } @catch (NSException *e) { }
-
-            @try {
-                docsCount = [self.manager documentsCountForBundleID:bid];
-            } @catch (NSException *e) { }
-
-            @try {
-                docsSize = [self.manager
-                    accurateDataSizeForBundleID:bid];
-            } @catch (NSException *e) { }
-
-            @try {
-                lastBackup = [self.manager lastBackupDateForBundleID:bid];
-            } @catch (NSException *e) { }
-
-            @try {
-                isSystem = [self.manager isSystemApp:bid];
-            } @catch (NSException *e) { }
+                icon = [strongSelf.manager iconForBundleID:bundleID];
+            }
+            @catch (NSException *exception) {
+                icon = nil;
+            }
 
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self.loadingIndicator stopAnimating];
+                __strong typeof(weakSelf) self = weakSelf;
 
-                [self updateCard:self.versionLabel
-                           value:version];
-                [self updateCard:self.dataSizeLabel
-                           value:[self.manager formatBytes:dataSize]];
-                [self updateCard:self.documentsSizeLabel
-                           value:[self.manager formatBytes:docsSize]];
-                [self updateCard:self.documentsCountLabel
-                           value:[NSString stringWithFormat:@"%lu",
-                                   (unsigned long)docsCount]];
+                if (!self) return;
 
-                NSDateFormatter *df = [[NSDateFormatter alloc] init];
-                [df setDateFormat:@"yyyy-MM-dd HH:mm"];
-                [self updateCard:self.lastBackupLabel
-                           value:lastBackup ? [df stringFromDate:lastBackup]
-                                            : @"لا توجد"];
-                [self updateCard:self.dataPathLabel
-                           value:dataPath ?: @"غير متاح"];
-                [self updateCard:self.documentsPathLabel
-                           value:docsPath ?: @"غير متاح"];
-
-                self.isSystemApp = isSystem;
+                if (icon) {
+                    self.appIcon.image = icon;
+                    self.appIcon.tintColor = nil;
+                } else {
+                    [self applyFallbackIcon];
+                }
             });
         }
     });
 }
 
-- (void)updateCard:(UIView *)card value:(NSString *)value {
-    for (UIView *sub in card.subviews) {
-        if ([sub isKindOfClass:[UILabel class]]) {
-            UILabel *label = (UILabel *)sub;
-            if (label.font.pointSize >= 14.0) {
-                label.text = value ?: @"—";
-                return;
+- (void)applyFallbackIcon
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self applyFallbackIcon];
+        });
+        return;
+    }
+
+    UIImage *image =
+        [UIImage systemImageNamed:@"app.fill"];
+
+    self.appIcon.image = image;
+    self.appIcon.tintColor =
+        [UIColor colorWithRed:0.55
+                        green:0.45
+                         blue:0.95
+                        alpha:1.0];
+}
+
+#pragma mark - Data Loading
+
+- (void)loadDataAsync
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self loadDataAsync];
+        });
+        return;
+    }
+
+    NSString *bundleID =
+        [self stringValue:self.appInfo[@"bundleID"]
+                  fallback:@""];
+
+    if (bundleID.length == 0) {
+        [self.loadingIndicator stopAnimating];
+
+        [self updateAllCardsForInvalidApplication];
+
+        return;
+    }
+
+    NSUInteger generation = ++self.loadGeneration;
+
+    [self.loadingIndicator startAnimating];
+
+    __weak typeof(self) weakSelf = self;
+
+    dispatch_async(self.workerQueue, ^{
+        @autoreleasepool {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+
+            if (!strongSelf) return;
+
+            NSString *version = @"1.0";
+            unsigned long long dataSize = 0;
+            unsigned long long documentsSize = 0;
+            NSUInteger documentsCount = 0;
+
+            NSString *dataPath = nil;
+            NSString *documentsPath = nil;
+
+            NSDate *lastBackup = nil;
+            BOOL isSystem = NO;
+
+            /*
+             * Every manager call is isolated.
+             * A failure in one metric must not prevent the others
+             * from being collected.
+             */
+
+            @try {
+                NSString *value =
+                    [strongSelf.manager versionForBundleID:bundleID];
+
+                if ([value isKindOfClass:[NSString class]] &&
+                    value.length > 0) {
+                    version = value;
+                }
+            }
+            @catch (NSException *exception) {
+                version = @"غير متاح";
+            }
+
+            @try {
+                dataSize =
+                    [strongSelf.manager
+                        dataSizeForBundleID:bundleID];
+            }
+            @catch (NSException *exception) {
+                dataSize = 0;
+            }
+
+            @try {
+                dataPath =
+                    [strongSelf.manager
+                        dataPathForBundleID:bundleID];
+            }
+            @catch (NSException *exception) {
+                dataPath = nil;
+            }
+
+            @try {
+                documentsPath =
+                    [strongSelf.manager
+                        documentsPathForBundleID:bundleID];
+            }
+            @catch (NSException *exception) {
+                documentsPath = nil;
+            }
+
+            /*
+             * Documents count.
+             */
+            @try {
+                documentsCount =
+                    [strongSelf.manager
+                        documentsCountForBundleID:bundleID];
+            }
+            @catch (NSException *exception) {
+                documentsCount = 0;
+            }
+
+            /*
+             * IMPORTANT:
+             *
+             * Do not use accurateDataSizeForBundleID here.
+             * That method represents application data, not Documents.
+             *
+             * Documents size must be calculated from Documents itself.
+             */
+            if (documentsPath.length > 0) {
+                documentsSize =
+                    [strongSelf directorySizeAtPath:documentsPath];
+            }
+
+            @try {
+                lastBackup =
+                    [strongSelf.manager
+                        lastBackupDateForBundleID:bundleID];
+            }
+            @catch (NSException *exception) {
+                lastBackup = nil;
+            }
+
+            @try {
+                isSystem =
+                    [strongSelf.manager
+                        isSystemApp:bundleID];
+            }
+            @catch (NSException *exception) {
+                /*
+                 * Fail closed for destructive UI.
+                 *
+                 * If classification fails, the app must not be
+                 * treated as a normal user application.
+                 */
+                isSystem = YES;
+            }
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) self = weakSelf;
+
+                if (!self) return;
+
+                /*
+                 * Ignore stale results.
+                 */
+                if (generation != self.loadGeneration) {
+                    return;
+                }
+
+                [self.loadingIndicator stopAnimating];
+
+                self.isSystemApp = isSystem;
+
+                [self updateCardValueLabel:self.versionValueLabel
+                                     value:version];
+
+                [self updateCardValueLabel:self.dataSizeValueLabel
+                                     value:[self.manager
+                                                formatBytes:dataSize]];
+
+                [self updateCardValueLabel:
+                          self.documentsSizeValueLabel
+                                     value:[self.manager
+                                                formatBytes:documentsSize]];
+
+                [self updateCardValueLabel:
+                          self.documentsCountValueLabel
+                                     value:[NSString stringWithFormat:
+                                                @"%lu",
+                                                (unsigned long)documentsCount]];
+
+                NSDateFormatter *formatter =
+                    [[NSDateFormatter alloc] init];
+
+                formatter.locale =
+                    [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+
+                formatter.dateFormat =
+                    @"yyyy-MM-dd HH:mm";
+
+                NSString *backupText =
+                    lastBackup
+                        ? [formatter stringFromDate:lastBackup]
+                        : @"لا توجد";
+
+                [self updateCardValueLabel:
+                          self.lastBackupValueLabel
+                                     value:backupText];
+
+                [self updateCardValueLabel:
+                          self.dataPathValueLabel
+                                     value:dataPath.length > 0
+                                          ? dataPath
+                                          : @"غير متاح"];
+
+                [self updateCardValueLabel:
+                          self.documentsPathValueLabel
+                                     value:documentsPath.length > 0
+                                          ? documentsPath
+                                          : @"غير متاح"];
+
+                /*
+                 * If the app is a system application, keep the
+                 * destructive button visibly disabled.
+                 */
+                [self updateWipeButtonState];
+            });
+        }
+    });
+}
+
+- (void)updateAllCardsForInvalidApplication
+{
+    [self updateCardValueLabel:self.versionValueLabel
+                         value:@"غير متاح"];
+
+    [self updateCardValueLabel:self.dataSizeValueLabel
+                         value:@"غير متاح"];
+
+    [self updateCardValueLabel:self.documentsSizeValueLabel
+                         value:@"غير متاح"];
+
+    [self updateCardValueLabel:self.documentsCountValueLabel
+                         value:@"غير متاح"];
+
+    [self updateCardValueLabel:self.lastBackupValueLabel
+                         value:@"غير متاح"];
+
+    [self updateCardValueLabel:self.dataPathValueLabel
+                         value:@"غير متاح"];
+
+    [self updateCardValueLabel:self.documentsPathValueLabel
+                         value:@"غير متاح"];
+}
+
+#pragma mark - Safe Directory Size
+
+- (unsigned long long)directorySizeAtPath:(NSString *)path
+{
+    if (path.length == 0) return 0;
+
+    NSFileManager *fileManager =
+        [NSFileManager defaultManager];
+
+    if (![fileManager fileExistsAtPath:path]) {
+        return 0;
+    }
+
+    unsigned long long total = 0;
+
+    @try {
+        NSURL *url =
+            [NSURL fileURLWithPath:path
+                       isDirectory:YES];
+
+        NSDirectoryEnumerator *enumerator =
+            [fileManager
+                enumeratorAtURL:url
+                includingPropertiesForKeys:@[
+                    NSURLIsRegularFileKey,
+                    NSURLIsSymbolicLinkKey,
+                    NSURLFileSizeKey
+                ]
+                options:0
+                errorHandler:^BOOL(NSURL *url, NSError *error) {
+                    /*
+                     * Skip inaccessible entries and continue.
+                     */
+                    return YES;
+                }];
+
+        NSMutableSet *visitedInodes =
+            [NSMutableSet set];
+
+        NSUInteger processedFiles = 0;
+
+        for (NSURL *fileURL in enumerator) {
+            @autoreleasepool {
+                @try {
+                    NSNumber *isDirectory = nil;
+                    NSNumber *isRegularFile = nil;
+                    NSNumber *isSymlink = nil;
+
+                    [fileURL getResourceValue:&isDirectory
+                                       forKey:NSURLIsDirectoryKey
+                                        error:nil];
+
+                    [fileURL getResourceValue:&isRegularFile
+                                       forKey:NSURLIsRegularFileKey
+                                        error:nil];
+
+                    [fileURL getResourceValue:&isSymlink
+                                       forKey:NSURLIsSymbolicLinkKey
+                                        error:nil];
+
+                    if ([isSymlink boolValue]) {
+                        continue;
+                    }
+
+                    if (![isRegularFile boolValue]) {
+                        continue;
+                    }
+
+                    const char *filePath =
+                        [fileURL.path fileSystemRepresentation];
+
+                    if (!filePath) {
+                        continue;
+                    }
+
+                    struct stat st;
+
+                    if (lstat(filePath, &st) != 0) {
+                        continue;
+                    }
+
+                    if (!S_ISREG(st.st_mode)) {
+                        continue;
+                    }
+
+                    NSString *inodeKey =
+                        [NSString stringWithFormat:
+                           :@"%llu:%llu",
+                            (unsigned long long)st.st_dev,
+                            (unsigned long long)st.st_ino];
+
+                    if ([visitedInodes containsObject:inodeKey]) {
+                        continue;
+                    }
+
+                    [visitedInodes addObject:inodeKey];
+
+                    total +=
+                        (unsigned long long)st.st_size;
+
+                    processedFiles++;
+
+                    /*
+                     * Give the system a tiny opportunity to schedule
+                     * other work on very large Documents directories.
+                     */
+                    if ((processedFiles % 1000) == 0) {
+                        [NSThread
+                            sleepForTimeInterval:0.001];
+                    }
+                }
+                @catch (NSException *exception) {
+                    continue;
+                }
             }
         }
     }
+    @catch (NSException *exception) {
+        return total;
+    }
+
+    return total;
+}
+
+#pragma mark - Card Updates
+
+- (void)updateCardValueLabel:(UILabel *)label
+                       value:(NSString *)value
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self updateCardValueLabel:label
+                                 value:value];
+        });
+
+        return;
+    }
+
+    if (!label) return;
+
+    label.text =
+        (value.length > 0)
+            ? value
+            : @"—";
 }
 
 #pragma mark - Actions
 
-- (void)wipeTapped {
+- (void)wipeTapped
+{
+    if (self.operationInProgress) {
+        return;
+    }
+
     if (self.isSystemApp) {
         [self showAlert:@"لا يمكن مسح بيانات التطبيقات النظامية"];
         return;
     }
 
+    NSString *bundleID =
+        [self stringValue:self.appInfo[@"bundleID"]
+                  fallback:@""];
+
+    if (bundleID.length == 0) {
+        [self showAlert:@"تعذر تحديد التطبيق"];
+        return;
+    }
+
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"تأكيد"
-                                            message:@"هل أنت متأكد من مسح البيانات؟"
-                                     preferredStyle:UIAlertControllerStyleAlert];
+        [UIAlertController
+            alertControllerWithTitle:@"تأكيد"
+                             message:@"هل أنت متأكد من مسح بيانات التطبيق؟"
+                      preferredStyle:UIAlertControllerStyleAlert];
 
     [alert addAction:
-        [UIAlertAction actionWithTitle:@"إلغاء"
-                                 style:UIAlertActionStyleCancel
-                               handler:nil]];
+        [UIAlertAction
+            actionWithTitle:@"إلغاء"
+                      style:UIAlertActionStyleCancel
+                    handler:nil]];
+
+    __weak typeof(self) weakSelf = self;
 
     [alert addAction:
-        [UIAlertAction actionWithTitle:@"مسح"
-                                 style:UIAlertActionStyleDestructive
-                               handler:^(UIAlertAction *action) {
-            [self performWipe];
-        }]];
+        [UIAlertAction
+            actionWithTitle:@"مسح"
+                      style:UIAlertActionStyleDestructive
+                    handler:^(UIAlertAction *action) {
 
-    [self presentViewController:alert animated:YES completion:nil];
+        __strong typeof(weakSelf) self = weakSelf;
+
+        if (!self) return;
+
+        [self performWipeForBundleID:bundleID];
+    }]];
+
+    [self presentViewController:alert
+                       animated:YES
+                     completion:nil];
 }
 
-- (void)performWipe {
-    NSString *bid = self.appInfo[@"bundleID"];
-    if (!bid) return;
+- (void)performWipeForBundleID:(NSString *)bundleID
+{
+    if (self.operationInProgress) {
+        return;
+    }
 
-    [self.loadingIndicator startAnimating];
+    if (bundleID.length == 0) {
+        [self showAlert:@"تعذر تحديد التطبيق"];
+        return;
+    }
+
+    if (self.isSystemApp) {
+        [self showAlert:@"لا يمكن مسح بيانات التطبيقات النظامية"];
+        return;
+    }
+
+    self.operationInProgress = YES;
+
+    [self setLoading:YES];
+
+    __weak typeof(self) weakSelf = self;
 
     dispatch_async(self.workerQueue, ^{
-        BOOL success = NO;
-        @try {
-            success = [self.manager wipeAppData:bid];
-        } @catch (NSException *e) {
-            success = NO;
-        }
+        @autoreleasepool {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.loadingIndicator stopAnimating];
-            [self showAlert:success
-                ? @"تم مسح البيانات بنجاح"
-                : @"فشل مسح البيانات"];
-            if (success) [self loadDataAsync];
-        });
+            if (!strongSelf) return;
+
+            BOOL success = NO;
+
+            @try {
+                success =
+                    [strongSelf.manager
+                        wipeAppData:bundleID];
+            }
+            @catch (NSException *exception) {
+                success = NO;
+            }
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) self = weakSelf;
+
+                if (!self) return;
+
+                self.operationInProgress = NO;
+
+                [self setLoading:NO];
+
+                if (success) {
+                    [self showAlert:@"تم مسح البيانات بنجاح"];
+
+                    /*
+                     * Reload after the alert has been presented.
+                     * The manager's cache should already have been
+                     * invalidated by the wipe operation.
+                     */
+                    [self loadDataAsync];
+                } else {
+                    [self showAlert:@"فشل مسح البيانات"];
+                }
+            });
+        }
     });
 }
 
-- (void)backupTapped {
-    NSString *bid = self.appInfo[@"bundleID"];
-    if (!bid) return;
+- (void)backupTapped
+{
+    if (self.operationInProgress) {
+        return;
+    }
 
-    [self.loadingIndicator startAnimating];
+    NSString *bundleID =
+        [self stringValue:self.appInfo[@"bundleID"]
+                  fallback:@""];
+
+    if (bundleID.length == 0) {
+        [self showAlert:@"تعذر تحديد التطبيق"];
+        return;
+    }
+
+    self.operationInProgress = YES;
+
+    [self setLoading:YES];
+
+    __weak typeof(self) weakSelf = self;
 
     dispatch_async(self.workerQueue, ^{
-        BOOL success = NO;
-        @try {
-            success = [self.manager backupAppData:bid];
-        } @catch (NSException *e) {
-            success = NO;
-        }
+        @autoreleasepool {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.loadingIndicator stopAnimating];
-            [self showAlert:success
-                ? @"تم إنشاء النسخة الاحتياطية"
-                : @"فشل إنشاء النسخة"];
-            if (success) [self loadDataAsync];
-        });
+            if (!strongSelf) return;
+
+            BOOL success = NO;
+
+            @try {
+                success =
+                    [strongSelf.manager
+                        backupAppData:bundleID];
+            }
+            @catch (NSException *exception) {
+                success = NO;
+            }
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) self = weakSelf;
+
+                if (!self) return;
+
+                self.operationInProgress = NO;
+
+                [self setLoading:NO];
+
+                if (success) {
+                    [self showAlert:@"تم إنشاء النسخة الاحتياطية"];
+
+                    [self loadDataAsync];
+                } else {
+                    [self showAlert:@"فشل إنشاء النسخة الاحتياطية"];
+                }
+            });
+        }
     });
 }
 
-- (void)manageBackupsTapped {
+- (void)manageBackupsTapped
+{
+    if (self.operationInProgress) {
+        return;
+    }
+
     BackupManagerViewController *vc =
         [[BackupManagerViewController alloc] init];
-    [self.navigationController pushViewController:vc animated:YES];
+
+    if (!vc) {
+        [self showAlert:@"تعذر فتح إدارة النسخ"];
+        return;
+    }
+
+    if (!self.navigationController) {
+        [self showAlert:@"تعذر فتح إدارة النسخ"];
+        return;
+    }
+
+    [self.navigationController
+        pushViewController:vc
+                  animated:YES];
 }
 
-- (void)showAlert:(NSString *)message {
+#pragma mark - Loading State
+
+- (void)setLoading:(BOOL)loading
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self setLoading:loading];
+        });
+
+        return;
+    }
+
+    if (loading) {
+        [self.loadingIndicator startAnimating];
+    } else {
+        [self.loadingIndicator stopAnimating];
+    }
+
+    [self updateWipeButtonState];
+}
+
+- (void)updateWipeButtonState
+{
+    /*
+     * Find the first action button matching "مسح البيانات".
+     */
+    for (UIView *subview in self.contentView.subviews) {
+        if (![subview isKindOfClass:[UIButton class]]) {
+            continue;
+        }
+
+        UIButton *button = (UIButton *)subview;
+
+        NSString *title =
+            [button titleForState:UIControlStateNormal];
+
+        if ([title isEqualToString:@"مسح البيانات"]) {
+            BOOL disabled =
+                self.isSystemApp ||
+                self.operationInProgress;
+
+            button.enabled = !disabled;
+            button.alpha = disabled ? 0.45 : 1.0;
+
+            break;
+        }
+    }
+}
+
+#pragma mark - Alerts
+
+- (void)showAlert:(NSString *)message
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self showAlert:message];
+        });
+
+        return;
+    }
+
+    if (!self.viewIfLoaded.window &&
+        !self.presentedViewController) {
+        /*
+         * Controller is not currently visible.
+         * Do not attempt to present UI into a detached hierarchy.
+         */
+        return;
+    }
+
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@""
-                                            message:message
-                                     preferredStyle:UIAlertControllerStyleAlert];
+        [UIAlertController
+            alertControllerWithTitle:@""
+                             message:message ?: @"حدث خطأ"
+                      preferredStyle:UIAlertControllerStyleAlert];
+
     [alert addAction:
-        [UIAlertAction actionWithTitle:@"موافق"
-                                 style:UIAlertActionStyleDefault
-                               handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+        [UIAlertAction
+            actionWithTitle:@"موافق"
+                      style:UIAlertActionStyleDefault
+                    handler:nil]];
+
+    [self presentViewController:alert
+                       animated:YES
+                     completion:nil];
+}
+
+#pragma mark - Helpers
+
+- (NSString *)stringValue:(id)value
+                  fallback:(NSString *)fallback
+{
+    if ([value isKindOfClass:[NSString class]]) {
+        NSString *string = (NSString *)value;
+
+        if (string.length > 0) {
+            return string;
+        }
+    }
+
+    return fallback ?: @"";
 }
 
 @end
