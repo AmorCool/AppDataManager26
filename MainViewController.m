@@ -522,23 +522,25 @@
     self.statsView.appsCountLabel.text = @"—";
     self.statsView.sizeLabel.text = @"—";
 
+    /*
+     * LSApplicationWorkspace and its private proxy methods are main-thread
+     * services. Calling them from workerQueue can terminate the process
+     * during the first launch. Discover the snapshot here on main, then
+     * move only pure data sanitization and filesystem work off-thread.
+     */
+    NSArray *discoveredApps = @[];
+
+    @try {
+        NSArray *result = [self.manager allInstalledApplications];
+        if ([result isKindOfClass:[NSArray class]]) {
+            discoveredApps = result;
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[AppDataManager] discovery exception: %@", exception);
+    }
+
     dispatch_async(self.workerQueue, ^{
         @autoreleasepool {
-            NSArray *discoveredApps = nil;
-
-            @try {
-                discoveredApps =
-                    [self.manager allInstalledApplications];
-            } @catch (NSException *exception) {
-                NSLog(@"[AppDataManager] discovery exception: %@",
-                      exception);
-                discoveredApps = @[];
-            }
-
-            if (![discoveredApps isKindOfClass:[NSArray class]]) {
-                discoveredApps = @[];
-            }
-
             NSMutableArray *sanitized =
                 [NSMutableArray arrayWithCapacity:discoveredApps.count];
 
