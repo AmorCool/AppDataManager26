@@ -1165,10 +1165,23 @@ static NSString * const kBackupDir =
                           bundleID);
                 }
 
+                NSString *primaryPath =
+                    [self dataPathForBundleID:bundleID];
+
+                if (primaryPath.length == 0 ||
+                    ![self pathExists:primaryPath]) {
+                    NSLog(@"[ADM] backup failed: primary data container unavailable for %@",
+                          bundleID);
+                    success = NO;
+                    return;
+                }
+
                 NSArray *dataPaths =
                     [self allDataPathsForBundleID:bundleID];
 
-                if (dataPaths.count == 0) {
+                if (dataPaths.count == 0 ||
+                    ![dataPaths.firstObject isEqualToString:primaryPath]) {
+                    NSLog(@"[ADM] backup failed: primary container is not first in data path snapshot");
                     success = NO;
                     return;
                 }
@@ -1225,9 +1238,16 @@ static NSString * const kBackupDir =
 
                 for (NSString *source in dataPaths) {
                     @autoreleasepool {
+                        BOOL isPrimary = (index == 0);
+
                         if (source.length == 0 ||
                             ![self pathExists:source]) {
-                            success = NO;
+                            NSLog(@"[ADM] backup skipped unavailable %@ container: %@",
+                                  isPrimary ? @"primary" : @"group",
+                                  source);
+                            if (isPrimary) {
+                                success = NO;
+                            }
                             continue;
                         }
 
@@ -1268,12 +1288,14 @@ static NSString * const kBackupDir =
                                          error:&copyError];
 
                         if (!copied) {
-                            success = NO;
-
-                            NSLog(@"[ADM] backup copy failed: %@ -> %@ (%@)",
+                            NSLog(@"[ADM] backup %@ container copy skipped: %@ -> %@ (%@)",
+                                  isPrimary ? @"primary" : @"group",
                                   source,
                                   itemDestination,
                                   copyError.localizedDescription);
+                            if (isPrimary) {
+                                success = NO;
+                            }
                         } else {
                             [manifestContainers addObject:@{
                                 @"name": itemDestination.lastPathComponent,
@@ -1301,13 +1323,17 @@ static NSString * const kBackupDir =
                     };
 
                     if (![manifest writeToFile:manifestPath atomically:YES]) {
-                        NSLog(@"[ADM] backup manifest write failed: %@",
+                        /*
+                         * The copied containers are already a valid backup.
+                         * A manifest is an optimization for future mapping,
+                         * not a reason to discard a complete backup.
+                         */
+                        NSLog(@"[ADM] backup manifest write skipped: %@",
                               manifestPath);
-                        success = NO;
                     }
                 }
 
-                /* Never leave an apparently valid incomplete backup behind. */
+                /* Never leave a backup when the mandatory primary copy failed. */
                 if (!success) {
                     [fm removeItemAtPath:destination
                                    error:nil];
@@ -1536,7 +1562,8 @@ static NSString * const kBackupDir =
                 [remainingDestinations removeObject:mainDestination];
                 [restorePairs addObject:@{
                     @"source": primarySource,
-                    @"destination": mainDestination
+                    @"destination": mainDestination,
+                    @"isPrimary": @(YES)
                 }];
 
                 /* Preserve exact UUID matches for group containers. */
@@ -1554,7 +1581,8 @@ static NSString * const kBackupDir =
                     if (matchingDestination) {
                         [restorePairs addObject:@{
                             @"source": source,
-                            @"destination": matchingDestination
+                            @"destination": matchingDestination,
+                            @"isPrimary": @(NO)
                         }];
                         [remainingDestinations removeObject:matchingDestination];
                     } else {
@@ -1585,7 +1613,8 @@ static NSString * const kBackupDir =
                 for (NSUInteger index = 0; index < pairCount; index++) {
                     [restorePairs addObject:@{
                         @"source": unmatchedSources[index],
-                        @"destination": remainingDestinations[index]
+                        @"destination": remainingDestinations[index],
+                        @"isPrimary": @(NO)
                     }];
                 }
 
@@ -1596,20 +1625,30 @@ static NSString * const kBackupDir =
 
                 [self killApp:bundleID];
 
-                /* Wipe only destinations that have a validated source pair. */
+                /*
+                 * The primary container determines the operation result.
+                 * App Group containers can be unavailable or protected on
+                 * some devices; they must not turn a valid primary restore
+                 * into a generic failure.
+                 */
                 for (NSDictionary *pair in restorePairs) {
                     NSString *destination = pair[@"destination"];
+                    BOOL isPrimary = [pair[@"isPrimary"] boolValue];
                     NSError *contentsError = nil;
                     NSArray *contents =
                         [fm contentsOfDirectoryAtPath:destination
                                                  error:&contentsError];
                     if (![contents isKindOfClass:[NSArray class]]) {
-                        NSLog(@"[ADM] restore wipe failed for %@ (%@)",
+                        NSLog(@"[ADM] restore wipe skipped for %@ (%@)",
                               destination,
                               contentsError.localizedDescription);
-                        return;
+                        if (isPrimary) {
+                            return;
+                        }
+                        continue;
                     }
 
+                    BOOL groupWipeFailed = NO;
                     for (NSString *item in contents) {
                         NSString *fullPath =
                             [destination stringByAppendingPathComponent:item];
@@ -1617,11 +1656,19 @@ static NSString * const kBackupDir =
                         if ([fm fileExistsAtPath:fullPath] &&
                             ![fm removeItemAtPath:fullPath
                                            error:&removeError]) {
+                            groupWipeFailed = YES;
                             NSLog(@"[ADM] restore wipe failed: %@ (%@)",
                                   fullPath,
                                   removeError.localizedDescription);
-                            return;
+                            if (isPrimary) {
+                                return;
+                            }
+                            break;
                         }
+                    }
+                    if (groupWipeFailed && !isPrimary) {
+                        NSLog(@"[ADM] restore continuing without group container: %@",
+                              destination);
                     }
                 }
 
@@ -1629,17 +1676,22 @@ static NSString * const kBackupDir =
                 for (NSDictionary *pair in restorePairs) {
                     NSString *source = pair[@"source"];
                     NSString *destination = pair[@"destination"];
+                    BOOL isPrimary = [pair[@"isPrimary"] boolValue];
                     NSError *contentsError = nil;
                     NSArray *children =
                         [fm contentsOfDirectoryAtPath:source
                                                  error:&contentsError];
                     if (![children isKindOfClass:[NSArray class]]) {
-                        NSLog(@"[ADM] restore read failed for %@ (%@)",
+                        NSLog(@"[ADM] restore read skipped for %@ (%@)",
                               source,
                               contentsError.localizedDescription);
-                        return;
+                        if (isPrimary) {
+                            return;
+                        }
+                        continue;
                     }
 
+                    BOOL groupRestoreFailed = NO;
                     for (NSString *child in children) {
                         NSString *childSource =
                             [source stringByAppendingPathComponent:child];
@@ -1650,22 +1702,34 @@ static NSString * const kBackupDir =
                         if ([fm fileExistsAtPath:childDestination] &&
                             ![fm removeItemAtPath:childDestination
                                            error:&copyError]) {
-                            NSLog(@"[ADM] restore conflict removal failed: %@ (%@)",
+                            groupRestoreFailed = YES;
+                            NSLog(@"[ADM] restore conflict removal skipped: %@ (%@)",
                                   childDestination,
                                   copyError.localizedDescription);
-                            return;
+                            if (isPrimary) {
+                                return;
+                            }
+                            break;
                         }
 
                         copyError = nil;
                         if (![fm copyItemAtPath:childSource
                                          toPath:childDestination
                                           error:&copyError]) {
+                            groupRestoreFailed = YES;
                             NSLog(@"[ADM] restore copy failed: %@ -> %@ (%@)",
                                   childSource,
                                   childDestination,
                                   copyError.localizedDescription);
-                            return;
+                            if (isPrimary) {
+                                return;
+                            }
+                            break;
                         }
+                    }
+                    if (groupRestoreFailed && !isPrimary) {
+                        NSLog(@"[ADM] restore continuing after unavailable group container: %@",
+                              source);
                     }
                 }
 
