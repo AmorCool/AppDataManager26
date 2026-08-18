@@ -2,7 +2,7 @@
 //  MainViewController.m
 //  AppDataManager
 //
-//  v1.6.5 — Stable App Discovery & Size Calculation
+//  v1.7.0 — Stable App Discovery & Size Calculation
 //
 
 #import "MainViewController.h"
@@ -222,7 +222,7 @@
         _sizeTitleLabel.font =
             [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
         _sizeTitleLabel.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
-        _sizeTitleLabel.text = @"الحجم الكلي";
+        _sizeTitleLabel.text = @"بيانات المستخدم";
         _sizeTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_sizeTitleLabel];
 
@@ -611,6 +611,14 @@
                     if (![bundleID isKindOfClass:[NSString class]] ||
                         bundleID.length == 0) {
                         [results addObject:app];
+                        continue;
+                    }
+
+                    if ([app[@"isSystem"] boolValue]) {
+                        NSMutableDictionary *protectedApp = [app mutableCopy];
+                        protectedApp[@"size"] = @0;
+                        protectedApp[@"sizeString"] = @"محمي";
+                        [results addObject:[protectedApp copy]];
                         continue;
                     }
 

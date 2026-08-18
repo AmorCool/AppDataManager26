@@ -2,11 +2,12 @@
 //  BackupManagerViewController.m
 //  AppDataManager
 //
-//  v1.6.5 — Crash-Resilient Backup Manager
+//  v1.7.0 — Crash-Resilient Backup Manager
 //
 
 #import "BackupManagerViewController.h"
 #import "AppDataManager.h"
+#import <limits.h>
 
 #pragma mark - Pie Chart View
 
@@ -636,7 +637,7 @@
                                 green:0.55
                                  blue:0.90
                                 alpha:1.0],
-            @"label": @"بيانات التطبيقات",
+            @"label": @"بيانات تطبيقات المستخدم",
             @"key": @"apps"
         },
 
@@ -919,26 +920,22 @@
                             full[@"bundleID"] = bundleID;
 
                             /*
-                             * AppDataManager v1.6 did not guarantee a
-                             * sizeString field. Calculate it here safely.
+                             * Always derive the displayed size from the
+                             * backup path. A cached label alone is not a
+                             * trustworthy statistic.
                              */
-                            if (![full[@"sizeString"]
-                                    isKindOfClass:[NSString class]]) {
+                            unsigned long long size = 0;
 
-                                unsigned long long size = 0;
-
-                                @try {
-                                    size =
-                                        [self directorySizeForBackupPath:path];
-                                } @catch (NSException *exception) {
-                                    size = 0;
-                                }
-
-                                full[@"size"] = @(size);
-
-                                full[@"sizeString"] =
-                                    [self.manager formatBytes:size];
+                            @try {
+                                size =
+                                    [self directorySizeForBackupPath:path];
+                            } @catch (NSException *exception) {
+                                size = 0;
                             }
+
+                            full[@"size"] = @(size);
+                            full[@"sizeString"] =
+                                [self.manager formatBytes:size];
 
                             [allBackups addObject:[full copy]];
                         }
@@ -973,18 +970,61 @@
             unsigned long long appsSize = 0;
             unsigned long long freeSpace = 0;
 
-            @try {
-                backupsSize =
-                    [self.manager totalBackupsSize];
-            } @catch (NSException *exception) {
-                backupsSize = 0;
+            /*
+             * Sum the exact backup entries already scanned for this screen.
+             * This avoids a second full-tree walk and excludes unrelated
+             * files such as a previously exported ZIP archive.
+             */
+            for (NSDictionary *backup in allBackups) {
+                @autoreleasepool {
+                    NSNumber *sizeNumber = backup[@"size"];
+                    if (![sizeNumber isKindOfClass:[NSNumber class]]) {
+                        continue;
+                    }
+
+                    unsigned long long backupSize =
+                        sizeNumber.unsignedLongLongValue;
+                    if (ULLONG_MAX - backupsSize < backupSize) {
+                        backupsSize = ULLONG_MAX;
+                    } else {
+                        backupsSize += backupSize;
+                    }
+                }
             }
 
-            @try {
-                appsSize =
-                    [self.manager totalAppsDataSize];
-            } @catch (NSException *exception) {
-                appsSize = 0;
+            /*
+             * Sum the same application snapshot already used to build the
+             * backup list. This avoids a second LaunchServices/filesystem
+             * discovery pass and guarantees that the displayed total is
+             * calculated from the exact data set shown in this screen.
+             */
+            for (NSDictionary *app in apps) {
+                @autoreleasepool {
+                    if (![app isKindOfClass:[NSDictionary class]] ||
+                        [app[@"isSystem"] boolValue]) {
+                        continue;
+                    }
+
+                    NSString *bundleID = app[@"bundleID"];
+                    if (![bundleID isKindOfClass:[NSString class]] ||
+                        bundleID.length == 0) {
+                        continue;
+                    }
+
+                    unsigned long long appSize = 0;
+                    @try {
+                        appSize =
+                            [self.manager dataSizeForBundleID:bundleID];
+                    } @catch (NSException *exception) {
+                        appSize = 0;
+                    }
+
+                    if (ULLONG_MAX - appsSize < appSize) {
+                        appsSize = ULLONG_MAX;
+                    } else {
+                        appsSize += appSize;
+                    }
+                }
             }
 
             @try {
@@ -1054,7 +1094,9 @@
     ];
 
     unsigned long long used =
-        backupsSize + appsSize;
+        (ULLONG_MAX - backupsSize < appsSize)
+            ? ULLONG_MAX
+            : backupsSize + appsSize;
 
     NSString *centerText =
         [NSString stringWithFormat:@"%@\nالمستخدم",
@@ -1110,12 +1152,17 @@
         return [attributes[NSFileSize] unsignedLongLongValue];
     }
 
-    /*
-     * Keep the UI and core engine on the same size algorithm. The core
-     * implementation includes hidden files, ignores symlinks, deduplicates
-     * hard links, and saturates on overflow.
-     */
-    return [self.manager fastDirectorySize:path];
+    @try {
+        /*
+         * Keep the UI and core engine on the same size algorithm. The core
+         * implementation includes hidden files, ignores symlinks, and
+         * saturates on overflow.
+         */
+        return [self.manager fastDirectorySize:path];
+    } @catch (NSException *exception) {
+        NSLog(@"[ADM] backup size exception for %@: %@", path, exception);
+        return 0;
+    }
 }
 
 #pragma mark - UITableViewDataSource
