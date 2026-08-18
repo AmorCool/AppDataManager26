@@ -10,11 +10,14 @@
 #import <objc/runtime.h>
 #import <UIKit/UIKit.h>
 #import <sys/stat.h>
+#import <errno.h>
 #import <dlfcn.h>
 #import <stdio.h>
 
 static NSString * const kBackupDir =
     @"/var/mobile/Documents/AppDataManager/Backups";
+static NSString * const kContainerMetadataFile =
+    @".com.apple.mobile_container_manager.metadata.plist";
 
 static void ADMLogFileError(NSString *operation,
                             NSString *path,
@@ -25,6 +28,22 @@ static void ADMLogFileError(NSString *operation,
           error.domain ?: @"<none>",
           (long)error.code,
           error.localizedDescription ?: @"<none>");
+}
+
+static void ADMSetError(NSError **error,
+                        NSInteger code,
+                        NSString *description,
+                        NSString *path) {
+    if (!error) {
+        return;
+    }
+
+    *error = [NSError errorWithDomain:@"AppDataManager"
+                                  code:code
+                              userInfo:@{
+        NSLocalizedDescriptionKey: description ?: @"Restore failed",
+        @"path": path ?: @""
+    }];
 }
 
 @interface AppDataManager ()
@@ -689,7 +708,7 @@ static void ADMLogFileError(NSString *operation,
 
                     NSString *metadata =
                         [container stringByAppendingPathComponent:
-                            @".com.apple.mobile_container_manager.metadata.plist"];
+                            kContainerMetadataFile];
                     NSDictionary *info =
                         [NSDictionary dictionaryWithContentsOfFile:metadata];
                     NSString *identifier = info[@"MCMMetadataIdentifier"];
@@ -1024,6 +1043,11 @@ static void ADMLogFileError(NSString *operation,
         for (NSURL *fileURL in enumerator) {
             @autoreleasepool {
                 @try {
+                    if ([fileURL.lastPathComponent
+                            isEqualToString:kContainerMetadataFile]) {
+                        continue;
+                    }
+
                     NSNumber *isSymlink = nil;
 
                     [fileURL getResourceValue:&isSymlink
@@ -1143,7 +1167,9 @@ static void ADMLogFileError(NSString *operation,
 
                     for (NSString *item in contents) {
                         @autoreleasepool {
-                            if (item.length == 0) {
+                            if (item.length == 0 ||
+                                [item isEqualToString:kContainerMetadataFile]) {
+                                /* Keep MCM metadata so the container remains discoverable. */
                                 continue;
                             }
 
@@ -1555,10 +1581,142 @@ static void ADMLogFileError(NSString *operation,
     return success;
 }
 
+/*
+ * Return a deterministic snapshot of a container. This is used as evidence
+ * for restore verification; a successful copy call alone is not evidence.
+ */
+- (NSDictionary *)filesystemSnapshotAtPath:(NSString *)path
+                                     error:(NSError **)error {
+    if (error) {
+        *error = nil;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDirectory = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDirectory] ||
+        !isDirectory) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataManager"
+                                         code:610
+                                     userInfo:@{
+                NSLocalizedDescriptionKey: @"container path is missing or not a directory",
+                @"path": path ?: @"<nil>"
+            }];
+        }
+        return nil;
+    }
+
+    NSError *listError = nil;
+    NSArray *topLevelItems =
+        [fm contentsOfDirectoryAtPath:path error:&listError];
+    if (![topLevelItems isKindOfClass:[NSArray class]]) {
+        ADMLogFileError(@"snapshot enumerate top level", path, listError);
+        if (error) {
+            *error = listError;
+        }
+        return nil;
+    }
+
+    NSMutableArray *sortedTopLevel = [topLevelItems mutableCopy];
+    [sortedTopLevel sortUsingSelector:@selector(compare:)];
+
+    __block NSError *enumerationError = nil;
+    NSURL *rootURL = [NSURL fileURLWithPath:path isDirectory:YES];
+    NSDirectoryEnumerator *enumerator =
+        [fm enumeratorAtURL:rootURL
+  includingPropertiesForKeys:@[NSURLIsSymbolicLinkKey]
+                     options:0
+                errorHandler:^BOOL(NSURL *url, NSError *enumError) {
+        if (!enumerationError) {
+            enumerationError = enumError;
+        }
+        return YES;
+    }];
+
+    unsigned long long size = 0;
+    NSUInteger fileCount = 0;
+    for (NSURL *fileURL in enumerator) {
+        @autoreleasepool {
+            NSNumber *isSymlink = nil;
+            [fileURL getResourceValue:&isSymlink
+                               forKey:NSURLIsSymbolicLinkKey
+                                error:nil];
+            if (isSymlink.boolValue) {
+                continue;
+            }
+
+            const char *filesystemPath =
+                fileURL.path.fileSystemRepresentation;
+            if (!filesystemPath) {
+                continue;
+            }
+
+            struct stat st;
+            if (lstat(filesystemPath, &st) != 0) {
+                NSError *statError =
+                    [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{
+                    NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                        @"lstat failed for %@", fileURL.path ?: @"<nil>"],
+                    @"path": fileURL.path ?: @"<nil>"
+                }];
+                ADMLogFileError(@"snapshot lstat", fileURL.path, statError);
+                if (error) {
+                    *error = statError;
+                }
+                return nil;
+            }
+
+            if (!S_ISREG(st.st_mode)) {
+                continue;
+            }
+
+            fileCount++;
+            size += (unsigned long long)st.st_size;
+        }
+    }
+
+    if (enumerationError) {
+        ADMLogFileError(@"snapshot recursive enumeration", path, enumerationError);
+        if (error) {
+            *error = enumerationError;
+        }
+        return nil;
+    }
+
+    NSDictionary *attributes =
+        [fm attributesOfItemAtPath:path error:nil];
+    NSLog(@"[ADM] snapshot path=%@ files=%lu bytes=%llu owner=%@ group=%@ mode=%@",
+          path,
+          (unsigned long)fileCount,
+          size,
+          attributes[NSFileOwnerAccountID] ?: @"<unknown>",
+          attributes[NSFileGroupOwnerAccountID] ?: @"<unknown>",
+          attributes[NSFilePosixPermissions] ?: @"<unknown>");
+
+    return @{
+        @"fileCount": @(fileCount),
+        @"bytes": @(size),
+        @"topLevelItems": [sortedTopLevel copy]
+    };
+}
+
 #pragma mark - Restore
 
 - (BOOL)restoreAppData:(NSString *)bundleID
             fromBackup:(NSString *)backupPath {
+    return [self restoreAppData:bundleID
+                      fromBackup:backupPath
+                           error:nil];
+}
+
+- (BOOL)restoreAppData:(NSString *)bundleID
+            fromBackup:(NSString *)backupPath
+                 error:(NSError **)error {
+    if (error) {
+        *error = nil;
+    }
 
     if (![bundleID isKindOfClass:[NSString class]] ||
         bundleID.length == 0) {
@@ -1582,6 +1740,7 @@ static void ADMLogFileError(NSString *operation,
                 NSString *backupRoot = [self backupDirectory];
                 if (backupRoot.length == 0) {
                     NSLog(@"[ADM] restore failed: backup directory unavailable");
+                    ADMSetError(error, 601, @"مجلد النسخ الاحتياطية غير متاح", backupRoot);
                     return;
                 }
 
@@ -1594,6 +1753,7 @@ static void ADMLogFileError(NSString *operation,
 
                 if (![standardSelected hasPrefix:prefix]) {
                     NSLog(@"[ADM] restore rejected: source outside backup directory");
+                    ADMSetError(error, 602, @"مسار النسخة خارج مجلد النسخ الاحتياطية", standardSelected);
                     return;
                 }
 
@@ -1605,6 +1765,7 @@ static void ADMLogFileError(NSString *operation,
                                isDirectory:&selectedIsDirectory] ||
                     !selectedIsDirectory) {
                     NSLog(@"[ADM] restore failed: selected backup is not a directory");
+                    ADMSetError(error, 603, @"النسخة المحددة ليست مجلداً صالحاً", standardSelected);
                     return;
                 }
 
@@ -1647,6 +1808,7 @@ static void ADMLogFileError(NSString *operation,
                 if (![backupItems isKindOfClass:[NSArray class]]) {
                     NSLog(@"[ADM] restore failed: backup cannot be read (%@)",
                           readError.localizedDescription);
+                    ADMSetError(error, 604, readError.localizedDescription ?: @"تعذر قراءة محتوى النسخة", standardSelected);
                     return;
                 }
 
@@ -1678,6 +1840,7 @@ static void ADMLogFileError(NSString *operation,
 
                 if (sourcePaths.count == 0) {
                     NSLog(@"[ADM] restore failed: backup has no containers");
+                    ADMSetError(error, 605, @"النسخة لا تحتوي على حاويات بيانات", standardSelected);
                     return;
                 }
 
@@ -1706,6 +1869,7 @@ static void ADMLogFileError(NSString *operation,
                 if (mainDestination.length == 0) {
                     NSLog(@"[ADM] restore failed: main destination container not found for %@",
                           bundleID);
+                    ADMSetError(error, 606, @"تعذر تحديد Data Container قبل الاستعادة", bundleID);
                     return;
                 }
 
@@ -1737,7 +1901,7 @@ static void ADMLogFileError(NSString *operation,
                     for (NSString *source in sourcePaths) {
                         NSString *metadataPath =
                             [source stringByAppendingPathComponent:
-                                @".com.apple.mobile_container_manager.metadata.plist"];
+                                kContainerMetadataFile];
                         NSDictionary *metadata =
                             [NSDictionary dictionaryWithContentsOfFile:metadataPath];
                         NSString *identifier = metadata[@"MCMMetadataIdentifier"];
@@ -1757,6 +1921,53 @@ static void ADMLogFileError(NSString *operation,
                 if (!primarySource) {
                     NSLog(@"[ADM] restore failed: primary backup container not identified");
                     return;
+                }
+
+                NSError *sourceSnapshotError = nil;
+                NSDictionary *primarySourceSnapshot =
+                    [self filesystemSnapshotAtPath:primarySource
+                                             error:&sourceSnapshotError];
+                if (![primarySourceSnapshot isKindOfClass:[NSDictionary class]]) {
+                    ADMLogFileError(@"snapshot backup primary container",
+                                    primarySource,
+                                    sourceSnapshotError);
+                    ADMSetError(error, 607, sourceSnapshotError.localizedDescription ?: @"تعذر قراءة محتوى النسخة", primarySource);
+                    return;
+                }
+
+                /* Re-discover destinations after the delete/wipe step. */
+                [self killApp:bundleID];
+                [destinationPaths removeAllObjects];
+                NSArray *refreshedDestinations =
+                    [self allDataPathsForBundleID:bundleID];
+                for (NSString *destination in refreshedDestinations) {
+                    BOOL refreshedIsDirectory = NO;
+                    if ([destination isKindOfClass:[NSString class]] &&
+                        destination.length > 0 &&
+                        [fm fileExistsAtPath:destination
+                                  isDirectory:&refreshedIsDirectory] &&
+                        refreshedIsDirectory &&
+                        ![destinationPaths containsObject:destination]) {
+                        [destinationPaths addObject:destination];
+                    }
+                }
+
+                NSString *refreshedMainDestination =
+                    [self dataPathForBundleID:bundleID];
+                if (refreshedMainDestination.length > 0) {
+                    mainDestination = refreshedMainDestination;
+                }
+                if (mainDestination.length == 0 ||
+                    ![fm fileExistsAtPath:mainDestination
+                              isDirectory:&selectedIsDirectory] ||
+                    !selectedIsDirectory) {
+                    NSLog(@"[ADM] restore failed: destination unavailable after re-discovery bundle=%@",
+                          bundleID);
+                    ADMSetError(error, 608, @"تعذر إعادة اكتشاف Data Container بعد الحذف", bundleID);
+                    return;
+                }
+                if (![destinationPaths containsObject:mainDestination]) {
+                    [destinationPaths insertObject:mainDestination atIndex:0];
                 }
 
                 NSMutableArray *restorePairs = [NSMutableArray array];
@@ -1828,8 +2039,6 @@ static void ADMLogFileError(NSString *operation,
                           (unsigned long)(unmatchedSources.count - pairCount));
                 }
 
-                [self killApp:bundleID];
-
                 /*
                  * The primary container determines the operation result.
                  * App Group containers can be unavailable or protected on
@@ -1855,6 +2064,9 @@ static void ADMLogFileError(NSString *operation,
 
                     BOOL groupWipeFailed = NO;
                     for (NSString *item in contents) {
+                        if ([item isEqualToString:kContainerMetadataFile]) {
+                            continue;
+                        }
                         NSString *fullPath =
                             [destination stringByAppendingPathComponent:item];
                         NSError *removeError = nil;
@@ -1900,6 +2112,11 @@ static void ADMLogFileError(NSString *operation,
                     for (NSString *child in children) {
                         NSString *childSource =
                             [source stringByAppendingPathComponent:child];
+                        if ([child isEqualToString:kContainerMetadataFile] &&
+                            [fm fileExistsAtPath:
+                                [destination stringByAppendingPathComponent:child]]) {
+                            continue;
+                        }
                         NSString *childDestination =
                             [destination stringByAppendingPathComponent:child];
                         NSError *copyError = nil;
@@ -1938,10 +2155,105 @@ static void ADMLogFileError(NSString *operation,
                     }
                 }
 
+                NSError *destinationSnapshotError = nil;
+                NSDictionary *destinationSnapshot =
+                    [self filesystemSnapshotAtPath:mainDestination
+                                             error:&destinationSnapshotError];
+                if (![destinationSnapshot isKindOfClass:[NSDictionary class]]) {
+                    ADMLogFileError(@"snapshot restored primary container",
+                                    mainDestination,
+                                    destinationSnapshotError);
+                    return;
+                }
+
+                NSUInteger backupFileCount =
+                    [primarySourceSnapshot[@"fileCount"] unsignedIntegerValue];
+                unsigned long long backupBytes =
+                    [primarySourceSnapshot[@"bytes"] unsignedLongLongValue];
+                NSUInteger restoredFileCount =
+                    [destinationSnapshot[@"fileCount"] unsignedIntegerValue];
+                unsigned long long restoredBytes =
+                    [destinationSnapshot[@"bytes"] unsignedLongLongValue];
+
+                NSLog(@"[ADM] restore verification backupFiles=%lu backupBytes=%llu restoredFiles=%lu restoredBytes=%llu target=%@",
+                      (unsigned long)backupFileCount,
+                      backupBytes,
+                      (unsigned long)restoredFileCount,
+                      restoredBytes,
+                      mainDestination);
+
+                if (backupFileCount > 0 &&
+                    (restoredFileCount == 0 ||
+                     restoredFileCount < backupFileCount ||
+                     restoredBytes < backupBytes)) {
+                    NSLog(@"[ADM] restore verification failed: restored content is smaller than backup");
+                    ADMSetError(error, 609, [NSString stringWithFormat:
+                        @"فشل التحقق: النسخة تحتوي %lu ملفاً و%llu بايت، بينما تمت استعادة %lu ملفاً و%llu بايت",
+                        (unsigned long)backupFileCount,
+                        backupBytes,
+                        (unsigned long)restoredFileCount,
+                        restoredBytes],
+                        mainDestination);
+                    return;
+                }
+
+                NSArray *expectedTopLevel = primarySourceSnapshot[@"topLevelItems"];
+                for (NSString *item in expectedTopLevel) {
+                    NSString *targetItem =
+                        [mainDestination stringByAppendingPathComponent:item];
+                    BOOL targetIsDirectory = NO;
+                    if (![fm fileExistsAtPath:targetItem
+                                  isDirectory:&targetIsDirectory]) {
+                        NSLog(@"[ADM] restore verification missing top-level item: %@",
+                              targetItem);
+                        ADMSetError(error, 610, @"فشل التحقق: ملف أو مجلد متوقع غير موجود بعد الاستعادة", targetItem);
+                        return;
+                    }
+
+                    if ([item isEqualToString:@"Documents"] ||
+                        [item isEqualToString:@"Library"] ||
+                        [item isEqualToString:@"tmp"]) {
+                        if (!targetIsDirectory ||
+                            ![fm isReadableFileAtPath:targetItem]) {
+                            NSLog(@"[ADM] restore verification invalid standard directory: %@",
+                                  targetItem);
+                            ADMSetError(error, 611, @"فشل التحقق: Documents أو Library غير صالح بعد الاستعادة", targetItem);
+                            return;
+                        }
+                    }
+                }
+
+                NSDictionary *destinationAttributes =
+                    [fm attributesOfItemAtPath:mainDestination error:nil];
+                NSLog(@"[ADM] restore target attributes owner=%@ group=%@ mode=%@ readable=%d writable=%d",
+                      destinationAttributes[NSFileOwnerAccountID] ?: @"<unknown>",
+                      destinationAttributes[NSFileGroupOwnerAccountID] ?: @"<unknown>",
+                      destinationAttributes[NSFilePosixPermissions] ?: @"<unknown>",
+                      [fm isReadableFileAtPath:mainDestination],
+                      [fm isWritableFileAtPath:mainDestination]);
+
+                if (![fm isReadableFileAtPath:mainDestination]) {
+                    NSLog(@"[ADM] restore verification failed: target is not readable");
+                    ADMSetError(error, 612, @"فشل التحقق: Data Container غير قابل للقراءة بعد الاستعادة", mainDestination);
+                    return;
+                }
+
+                NSString *verifiedDataPath =
+                    [self dataPathForBundleID:bundleID];
+                if (verifiedDataPath.length == 0 ||
+                    ![verifiedDataPath isEqualToString:mainDestination]) {
+                    NSLog(@"[ADM] restore verification failed: data path mismatch expected=%@ actual=%@",
+                          mainDestination,
+                          verifiedDataPath);
+                    ADMSetError(error, 613, @"فشل التحقق: تم اكتشاف Data Container مختلف بعد الاستعادة", verifiedDataPath ?: mainDestination);
+                    return;
+                }
+
                 success = YES;
             }
             @catch (NSException *exception) {
                 NSLog(@"[ADM] restore exception: %@", exception.reason);
+                ADMSetError(error, 614, exception.reason ?: @"حدث استثناء أثناء الاستعادة", backupPath);
                 success = NO;
             }
         }

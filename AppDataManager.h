@@ -26,6 +26,9 @@
 // نسخ احتياطي (شامل)
 - (BOOL)backupAppData:(NSString *)bundleID;
 - (BOOL)restoreAppData:(NSString *)bundleID fromBackup:(NSString *)backupPath;
+- (BOOL)restoreAppData:(NSString *)bundleID
+            fromBackup:(NSString *)backupPath
+                 error:(NSError **)error;
 
 // قائمة النسخ الاحتياطية المتوفرة
 - (NSArray *)availableBackupsForBundleID:(NSString *)bundleID;

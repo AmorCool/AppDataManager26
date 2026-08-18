@@ -1538,25 +1538,33 @@ heightForHeaderInSection:(NSInteger)section {
 
     dispatch_async(self.workerQueue, ^{
         BOOL success = NO;
+        NSError *restoreError = nil;
 
         @try {
             success =
                 [self.manager
                     restoreAppData:bundleID
-                         fromBackup:path];
+                         fromBackup:path
+                              error:&restoreError];
         } @catch (NSException *exception) {
             NSLog(@"[ADM] restore exception: %@",
                   exception);
+            restoreError = [NSError errorWithDomain:@"AppDataManager"
+                                                code:615
+                                            userInfo:@{
+                NSLocalizedDescriptionKey: exception.reason ?: @"حدث استثناء أثناء الاستعادة"
+            }];
             success = NO;
         }
 
+        NSString *resultMessage = success
+            ? @"تمت الاستعادة والتحقق من البيانات بنجاح"
+            : [NSString stringWithFormat:@"فشلت الاستعادة: %@",
+                restoreError.localizedDescription ?: @"تعذر إثبات عودة البيانات"];
+
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.spinner stopAnimating];
-
-            [self showToast:
-                success
-                    ? @"تمت الاستعادة بنجاح"
-                    : @"فشلت عملية الاستعادة"];
+            [self showToast:resultMessage];
 
             if (success) {
                 [self loadBackups];
