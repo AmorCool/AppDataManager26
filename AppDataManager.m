@@ -1718,6 +1718,8 @@ static void ADMSetError(NSError **error,
         *error = nil;
     }
 
+    __block NSError *restoreError = nil;
+
     if (![bundleID isKindOfClass:[NSString class]] ||
         bundleID.length == 0) {
         return NO;
@@ -1740,7 +1742,7 @@ static void ADMSetError(NSError **error,
                 NSString *backupRoot = [self backupDirectory];
                 if (backupRoot.length == 0) {
                     NSLog(@"[ADM] restore failed: backup directory unavailable");
-                    ADMSetError(error, 601, @"مجلد النسخ الاحتياطية غير متاح", backupRoot);
+                    ADMSetError(&restoreError, 601, @"مجلد النسخ الاحتياطية غير متاح", backupRoot);
                     return;
                 }
 
@@ -1753,7 +1755,7 @@ static void ADMSetError(NSError **error,
 
                 if (![standardSelected hasPrefix:prefix]) {
                     NSLog(@"[ADM] restore rejected: source outside backup directory");
-                    ADMSetError(error, 602, @"مسار النسخة خارج مجلد النسخ الاحتياطية", standardSelected);
+                    ADMSetError(&restoreError, 602, @"مسار النسخة خارج مجلد النسخ الاحتياطية", standardSelected);
                     return;
                 }
 
@@ -1765,7 +1767,7 @@ static void ADMSetError(NSError **error,
                                isDirectory:&selectedIsDirectory] ||
                     !selectedIsDirectory) {
                     NSLog(@"[ADM] restore failed: selected backup is not a directory");
-                    ADMSetError(error, 603, @"النسخة المحددة ليست مجلداً صالحاً", standardSelected);
+                    ADMSetError(&restoreError, 603, @"النسخة المحددة ليست مجلداً صالحاً", standardSelected);
                     return;
                 }
 
@@ -1808,7 +1810,7 @@ static void ADMSetError(NSError **error,
                 if (![backupItems isKindOfClass:[NSArray class]]) {
                     NSLog(@"[ADM] restore failed: backup cannot be read (%@)",
                           readError.localizedDescription);
-                    ADMSetError(error, 604, readError.localizedDescription ?: @"تعذر قراءة محتوى النسخة", standardSelected);
+                    ADMSetError(&restoreError, 604, readError.localizedDescription ?: @"تعذر قراءة محتوى النسخة", standardSelected);
                     return;
                 }
 
@@ -1840,7 +1842,7 @@ static void ADMSetError(NSError **error,
 
                 if (sourcePaths.count == 0) {
                     NSLog(@"[ADM] restore failed: backup has no containers");
-                    ADMSetError(error, 605, @"النسخة لا تحتوي على حاويات بيانات", standardSelected);
+                    ADMSetError(&restoreError, 605, @"النسخة لا تحتوي على حاويات بيانات", standardSelected);
                     return;
                 }
 
@@ -1869,7 +1871,7 @@ static void ADMSetError(NSError **error,
                 if (mainDestination.length == 0) {
                     NSLog(@"[ADM] restore failed: main destination container not found for %@",
                           bundleID);
-                    ADMSetError(error, 606, @"تعذر تحديد Data Container قبل الاستعادة", bundleID);
+                    ADMSetError(&restoreError, 606, @"تعذر تحديد Data Container قبل الاستعادة", bundleID);
                     return;
                 }
 
@@ -1931,7 +1933,7 @@ static void ADMSetError(NSError **error,
                     ADMLogFileError(@"snapshot backup primary container",
                                     primarySource,
                                     sourceSnapshotError);
-                    ADMSetError(error, 607, sourceSnapshotError.localizedDescription ?: @"تعذر قراءة محتوى النسخة", primarySource);
+                    ADMSetError(&restoreError, 607, sourceSnapshotError.localizedDescription ?: @"تعذر قراءة محتوى النسخة", primarySource);
                     return;
                 }
 
@@ -1963,7 +1965,7 @@ static void ADMSetError(NSError **error,
                     !selectedIsDirectory) {
                     NSLog(@"[ADM] restore failed: destination unavailable after re-discovery bundle=%@",
                           bundleID);
-                    ADMSetError(error, 608, @"تعذر إعادة اكتشاف Data Container بعد الحذف", bundleID);
+                    ADMSetError(&restoreError, 608, @"تعذر إعادة اكتشاف Data Container بعد الحذف", bundleID);
                     return;
                 }
                 if (![destinationPaths containsObject:mainDestination]) {
@@ -2187,7 +2189,7 @@ static void ADMSetError(NSError **error,
                      restoredFileCount < backupFileCount ||
                      restoredBytes < backupBytes)) {
                     NSLog(@"[ADM] restore verification failed: restored content is smaller than backup");
-                    ADMSetError(error, 609, [NSString stringWithFormat:
+                    ADMSetError(&restoreError, 609, [NSString stringWithFormat:
                         @"فشل التحقق: النسخة تحتوي %lu ملفاً و%llu بايت، بينما تمت استعادة %lu ملفاً و%llu بايت",
                         (unsigned long)backupFileCount,
                         backupBytes,
@@ -2206,7 +2208,7 @@ static void ADMSetError(NSError **error,
                                   isDirectory:&targetIsDirectory]) {
                         NSLog(@"[ADM] restore verification missing top-level item: %@",
                               targetItem);
-                        ADMSetError(error, 610, @"فشل التحقق: ملف أو مجلد متوقع غير موجود بعد الاستعادة", targetItem);
+                        ADMSetError(&restoreError, 610, @"فشل التحقق: ملف أو مجلد متوقع غير موجود بعد الاستعادة", targetItem);
                         return;
                     }
 
@@ -2217,7 +2219,7 @@ static void ADMSetError(NSError **error,
                             ![fm isReadableFileAtPath:targetItem]) {
                             NSLog(@"[ADM] restore verification invalid standard directory: %@",
                                   targetItem);
-                            ADMSetError(error, 611, @"فشل التحقق: Documents أو Library غير صالح بعد الاستعادة", targetItem);
+                            ADMSetError(&restoreError, 611, @"فشل التحقق: Documents أو Library غير صالح بعد الاستعادة", targetItem);
                             return;
                         }
                     }
@@ -2234,7 +2236,7 @@ static void ADMSetError(NSError **error,
 
                 if (![fm isReadableFileAtPath:mainDestination]) {
                     NSLog(@"[ADM] restore verification failed: target is not readable");
-                    ADMSetError(error, 612, @"فشل التحقق: Data Container غير قابل للقراءة بعد الاستعادة", mainDestination);
+                    ADMSetError(&restoreError, 612, @"فشل التحقق: Data Container غير قابل للقراءة بعد الاستعادة", mainDestination);
                     return;
                 }
 
@@ -2245,7 +2247,7 @@ static void ADMSetError(NSError **error,
                     NSLog(@"[ADM] restore verification failed: data path mismatch expected=%@ actual=%@",
                           mainDestination,
                           verifiedDataPath);
-                    ADMSetError(error, 613, @"فشل التحقق: تم اكتشاف Data Container مختلف بعد الاستعادة", verifiedDataPath ?: mainDestination);
+                    ADMSetError(&restoreError, 613, @"فشل التحقق: تم اكتشاف Data Container مختلف بعد الاستعادة", verifiedDataPath ?: mainDestination);
                     return;
                 }
 
@@ -2253,11 +2255,15 @@ static void ADMSetError(NSError **error,
             }
             @catch (NSException *exception) {
                 NSLog(@"[ADM] restore exception: %@", exception.reason);
-                ADMSetError(error, 614, exception.reason ?: @"حدث استثناء أثناء الاستعادة", backupPath);
+                ADMSetError(&restoreError, 614, exception.reason ?: @"حدث استثناء أثناء الاستعادة", backupPath);
                 success = NO;
             }
         }
     });
+
+    if (error) {
+        *error = restoreError;
+    }
 
     dispatch_barrier_sync(self.cacheQueue, ^{
         [self.sizeCache removeObjectForKey:bundleID];
