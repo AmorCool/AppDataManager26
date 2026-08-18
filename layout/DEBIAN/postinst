@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================="
-echo " 📱 AppData Manager v1.6.7"
+echo " 📱 AppData Manager v1.6.8"
 echo " Dopamine 3.0 / Rootless Compatible"
 echo "=========================================="
 

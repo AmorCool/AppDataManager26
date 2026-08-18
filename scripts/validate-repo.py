@@ -137,8 +137,9 @@ def validate_repo(repo_root):
                     fail(f"Unsafe or invalid Filename field: {filename}")
                     continue
 
-                package_path = os.path.normpath(os.path.join(repo_root, filename))
-                if not package_path.startswith(os.path.normpath(repo_root) + os.sep) or not os.path.isfile(package_path):
+                repo_root_abs = os.path.abspath(repo_root)
+                package_path = os.path.abspath(os.path.join(repo_root, filename))
+                if not package_path.startswith(repo_root_abs + os.sep) or not os.path.isfile(package_path):
                     errors += 1
                     fail(f"Missing package for Packages entry: {filename}")
                     continue
