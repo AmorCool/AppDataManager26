@@ -63,7 +63,7 @@ def main():
         f.write(lzma.compress(packages_text.encode()))
 
     # Generate Release file with proper hashes
-    pkg_size = len(packages_text)
+    pkg_size = len(packages_text.encode("utf-8"))
     pkg_md5 = hashlib.md5(packages_text.encode()).hexdigest()
     pkg_sha1 = hashlib.sha1(packages_text.encode()).hexdigest()
     pkg_sha256 = hashlib.sha256(packages_text.encode()).hexdigest()
