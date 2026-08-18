@@ -2,7 +2,7 @@
 //  AppDataManager.m
 //  AppDataManager
 //
-//  v1.6.4 — Crash-Resilient Core Engine
+//  v1.6.5 — Crash-Resilient Core Engine
 //
 
 #import "AppDataManager.h"
@@ -653,9 +653,35 @@ static NSString * const kBackupDir =
             return nil;
         }
 
-        id proxy =
-            [cls performSelector:selector
-                      withObject:bundleID];
+        NSMethodSignature *signature =
+            [cls methodSignatureForSelector:selector];
+
+        if (!signature) {
+            return nil;
+        }
+
+        NSInvocation *invocation =
+            [NSInvocation invocationWithMethodSignature:signature];
+        [invocation setSelector:selector];
+        [invocation setTarget:cls];
+
+        NSString *identifier = bundleID;
+        [invocation setArgument:&identifier atIndex:2];
+
+        @try {
+            [invocation invoke];
+        }
+        @catch (NSException *exception) {
+            NSLog(@"[ADM] application proxy invocation exception: %@",
+                  exception.reason);
+            return nil;
+        }
+
+        id proxy = nil;
+
+        if (signature.methodReturnLength > 0) {
+            [invocation getReturnValue:&proxy];
+        }
 
         if (!proxy) {
             return nil;
@@ -1026,7 +1052,7 @@ static NSString * const kBackupDir =
 
                     NSString *inodeKey =
                         [NSString stringWithFormat:
-                           :@"%llu:%llu",
+                            @"%llu:%llu",
                             (unsigned long long)st.st_dev,
                             (unsigned long long)st.st_ino];
 

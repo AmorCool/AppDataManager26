@@ -2,7 +2,7 @@
 //  AppDetailViewController.m
 //  AppDataManager
 //
-//  v1.6.4 — Crash-Resilient App Detail
+//  v1.6.5 — Crash-Resilient App Detail
 //  Fixes:
 //  - Correct card/label ownership
 //  - Async lifecycle safety

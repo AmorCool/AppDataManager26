@@ -2,7 +2,7 @@
 //  MainViewController.m
 //  AppDataManager
 //
-//  v1.6.4 — Stable App Discovery & Size Calculation
+//  v1.6.5 — Stable App Discovery & Size Calculation
 //
 
 #import "MainViewController.h"
