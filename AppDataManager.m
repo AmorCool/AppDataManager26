@@ -1011,40 +1011,21 @@ static NSString * const kBackupDir =
             return 0;
         }
 
+        NSMutableSet *visitedInodes =
+            [NSMutableSet set];
+
         NSUInteger fileCount = 0;
 
         for (NSURL *fileURL in enumerator) {
             @autoreleasepool {
                 @try {
-                    NSNumber *isDirectory = nil;
                     NSNumber *isSymlink = nil;
-                    NSNumber *fileSize = nil;
 
-                    [fileURL getResourceValue:&isDirectory
-                                       forKey:NSURLIsDirectoryKey
-                                        error:nil];
                     [fileURL getResourceValue:&isSymlink
                                        forKey:NSURLIsSymbolicLinkKey
                                         error:nil];
 
-                    if (isDirectory.boolValue || isSymlink.boolValue) {
-                        continue;
-                    }
-
-                    [fileURL getResourceValue:&fileSize
-                                       forKey:NSURLFileSizeKey
-                                        error:nil];
-
-                    if ([fileSize isKindOfClass:[NSNumber class]]) {
-                        unsigned long long value =
-                            fileSize.unsignedLongLongValue;
-
-                        if (ULLONG_MAX - total < value) {
-                            total = ULLONG_MAX;
-                        } else {
-                            total += value;
-                        }
-
+                    if (isSymlink.boolValue) {
                         continue;
                     }
 
@@ -1057,19 +1038,32 @@ static NSString * const kBackupDir =
 
                     struct stat st;
 
-                    if (lstat(filesystemPath, &st) != 0 ||
-                        !S_ISREG(st.st_mode)) {
+                    if (lstat(filesystemPath, &st) != 0) {
                         continue;
                     }
 
-                    unsigned long long value =
-                        (unsigned long long)st.st_size;
-
-                    if (ULLONG_MAX - total < value) {
-                        total = ULLONG_MAX;
-                    } else {
-                        total += value;
+                    /*
+                     * Only regular files contribute their logical file
+                     * size. Directory metadata itself is not included.
+                     */
+                    if (!S_ISREG(st.st_mode)) {
+                        continue;
                     }
+
+                    NSString *inodeKey =
+                        [NSString stringWithFormat:
+                            @"%llu:%llu",
+                            (unsigned long long)st.st_dev,
+                            (unsigned long long)st.st_ino];
+
+                    if ([visitedInodes containsObject:inodeKey]) {
+                        continue;
+                    }
+
+                    [visitedInodes addObject:inodeKey];
+
+                    total +=
+                        (unsigned long long)st.st_size;
                 }
                 @catch (NSException *exception) {
                     continue;
