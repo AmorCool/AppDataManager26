@@ -309,6 +309,7 @@
 @property (nonatomic, strong) UILabel *statusLabel;
 
 @property (nonatomic, assign) BOOL isCalculatingSizes;
+@property (nonatomic, assign) BOOL hasStartedInitialLoad;
 @property (nonatomic, assign) NSUInteger operationGeneration;
 
 @property (nonatomic, strong) dispatch_queue_t workerQueue;
@@ -334,12 +335,35 @@
 
     self.operationGeneration = 0;
     self.isCalculatingSizes = NO;
+    self.hasStartedInitialLoad = NO;
 
     [self setupNavigationBar];
     [self setupSearchController];
     [self setupTableView];
     [self setupLoadingView];
-    [self loadApps];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+
+    if (self.hasStartedInitialLoad) {
+        return;
+    }
+
+    self.hasStartedInitialLoad = YES;
+
+    /*
+     * Do not start LaunchServices/private-container discovery from
+     * viewDidLoad. At that point the window and UIKit transition are still
+     * settling, and this expensive/private API path can terminate the app
+     * before the first frame is stable. Start only after the controller is
+     * attached to a visible window.
+     */
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.viewIfLoaded.window) {
+            [self loadApps];
+        }
+    });
 }
 
 - (void)viewDidDisappear:(BOOL)animated {

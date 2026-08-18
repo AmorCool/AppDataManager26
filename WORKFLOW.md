@@ -6,7 +6,7 @@ This repository contains **two** independent tools:
 
 | Tool | Path | Status | Version |
 |------|------|--------|---------|
-| **AppData Manager** | repository root | ✅ Stable | 1.7.1 |
+| **AppData Manager** | repository root | ✅ Stable | 1.7.2 |
 | **IPA Installer Pro** | `IPAInstallerPro/` | 🔄 Active Dev | 2.0.0 |
 
 Both share the same repository but are **separate packages** in Sileo.
@@ -174,6 +174,7 @@ IPAInstallerPro/
 | 1.0.0 | 2026-08-11 | Initial release |
 | 1.0.32 | 2026-08-12 | Operation logging, transaction system |
 | **2.0.0** | **2026-08-13** | **Architecture rewrite: unified provider contract, OperationLog integration, zero-gap verification, live log display, evidence-based results** |
+| **1.7.2** | **2026-08-18** | **AppData Manager: defer LaunchServices discovery until the visible controller is ready** |
 | **1.7.1** | **2026-08-18** | **AppData Manager: restore stable size scanning while retaining unified real statistics** |
 | **1.7.0** | **2026-08-18** | **AppData Manager: stable size scanning, unified real statistics, and protected system-app handling** |
 | **1.6.9** | **2026-08-18** | **AppData Manager: fixed UTF-8 byte-size generation for Release metadata** |
