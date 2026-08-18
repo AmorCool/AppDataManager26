@@ -2,7 +2,7 @@
 //  BackupManagerViewController.h
 //  AppDataManager
 //
-//  v1.6.0 — Crash-Resilient Backup Manager
+//  v1.6.3 — Crash-Resilient Backup Manager
 //
 
 #import <UIKit/UIKit.h>

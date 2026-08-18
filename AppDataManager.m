@@ -2,7 +2,7 @@
 //  AppDataManager.m
 //  AppDataManager
 //
-//  v1.6.1 — Crash-Resilient Core Engine
+//  v1.6.3 — Crash-Resilient Core Engine
 //
 
 #import "AppDataManager.h"
@@ -1218,6 +1218,17 @@ static NSString * const kBackupDir =
                     return;
                 }
 
+                /*
+                 * Ask LaunchServices to terminate the app before reading its
+                 * containers. This is best-effort because an app can already
+                 * be terminated or unavailable while the device is changing
+                 * state, but it prevents most partially-written backups.
+                 */
+                if (![self killApp:bundleID]) {
+                    NSLog(@"[ADM] app was not terminated before backup: %@",
+                          bundleID);
+                }
+
                 NSArray *dataPaths =
                     [self allDataPathsForBundleID:bundleID];
 
@@ -1409,6 +1420,24 @@ static NSString * const kBackupDir =
                 if (![fm fileExistsAtPath:standardSelected
                                isDirectory:&isDirectory] ||
                     !isDirectory) {
+                    success = NO;
+                    return;
+                }
+
+                /*
+                 * A valid path inside the backup directory is not enough:
+                 * reject a backup belonging to a different application.
+                 */
+                NSString *safeBundleID =
+                    [bundleID stringByReplacingOccurrencesOfString:@"/"
+                                                           withString:@"_"];
+                NSString *expectedPrefix =
+                    [safeBundleID stringByAppendingString:@"_"];
+
+                if (![standardSelected.lastPathComponent
+                        hasPrefix:expectedPrefix]) {
+                    NSLog(@"[ADM] rejected backup for another application: %@",
+                          standardSelected.lastPathComponent);
                     success = NO;
                     return;
                 }
@@ -1702,93 +1731,113 @@ static NSString * const kBackupDir =
         return NO;
     }
 
-    @try {
-        NSString *directory =
-            [self backupDirectory];
+    __block BOOL success = NO;
 
-        if (directory.length == 0) {
-            return NO;
-        }
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSString *directory =
+                    [self backupDirectory];
 
-        NSString *root =
-            [directory stringByStandardizingPath];
+                if (directory.length == 0) {
+                    return;
+                }
 
-        NSString *target =
-            [backupPath stringByStandardizingPath];
+                NSString *root =
+                    [directory stringByStandardizingPath];
 
-        NSString *prefix =
-            [root stringByAppendingString:@"/"];
+                NSString *target =
+                    [backupPath stringByStandardizingPath];
 
-        if (![target hasPrefix:prefix]) {
-            return NO;
-        }
+                NSString *prefix =
+                    [root stringByAppendingString:@"/"];
 
-        NSFileManager *fm =
-            [NSFileManager defaultManager];
+                if (![target hasPrefix:prefix]) {
+                    return;
+                }
 
-        if (![fm fileExistsAtPath:target]) {
-            return NO;
-        }
+                NSFileManager *fm =
+                    [NSFileManager defaultManager];
 
-        NSError *error = nil;
-
-        return [fm removeItemAtPath:target
-                              error:&error];
-    }
-    @catch (NSException *exception) {
-        NSLog(@"[ADM] delete backup exception: %@",
-              exception.reason);
-        return NO;
-    }
-}
-
-- (BOOL)deleteAllBackups {
-    @try {
-        NSString *directory =
-            [self backupDirectory];
-
-        if (directory.length == 0) {
-            return NO;
-        }
-
-        NSFileManager *fm =
-            [NSFileManager defaultManager];
-
-        NSArray *contents =
-            [fm contentsOfDirectoryAtPath:directory
-                                     error:nil];
-
-        if (![contents isKindOfClass:[NSArray class]]) {
-            return NO;
-        }
-
-        BOOL success = YES;
-
-        for (NSString *item in contents) {
-            @autoreleasepool {
-                NSString *fullPath =
-                    [directory stringByAppendingPathComponent:item];
+                if (![fm fileExistsAtPath:target]) {
+                    return;
+                }
 
                 NSError *error = nil;
 
-                if (![fm removeItemAtPath:fullPath
-                                    error:&error]) {
-                    success = NO;
+                success =
+                    [fm removeItemAtPath:target
+                                   error:&error];
 
+                if (!success) {
                     NSLog(@"[ADM] delete backup failed: %@ (%@)",
-                          fullPath,
+                          target,
                           error.localizedDescription);
                 }
             }
+            @catch (NSException *exception) {
+                NSLog(@"[ADM] delete backup exception: %@",
+                      exception.reason);
+            }
         }
+    });
 
-        return success;
-    }
-    @catch (NSException *exception) {
-        NSLog(@"[ADM] delete all backups exception: %@",
-              exception.reason);
-        return NO;
-    }
+    return success;
+}
+
+- (BOOL)deleteAllBackups {
+    __block BOOL success = YES;
+
+    dispatch_sync(self.fileQueue, ^{
+        @autoreleasepool {
+            @try {
+                NSString *directory =
+                    [self backupDirectory];
+
+                if (directory.length == 0) {
+                    success = NO;
+                    return;
+                }
+
+                NSFileManager *fm =
+                    [NSFileManager defaultManager];
+
+                NSArray *contents =
+                    [fm contentsOfDirectoryAtPath:directory
+                                             error:nil];
+
+                if (![contents isKindOfClass:[NSArray class]]) {
+                    success = NO;
+                    return;
+                }
+
+                for (NSString *item in contents) {
+                    @autoreleasepool {
+                        NSString *fullPath =
+                            [directory stringByAppendingPathComponent:item];
+
+                        NSError *error = nil;
+
+                        if (![fm removeItemAtPath:fullPath
+                                            error:&error]) {
+                            success = NO;
+
+                            NSLog(@"[ADM] delete backup failed: %@ (%@)",
+                                  fullPath,
+                                  error.localizedDescription);
+                        }
+                    }
+                }
+            }
+            @catch (NSException *exception) {
+                NSLog(@"[ADM] delete all backups exception: %@",
+                      exception.reason);
+                success = NO;
+            }
+        }
+    });
+
+    return success;
 }
 
 #pragma mark - ZIP Export

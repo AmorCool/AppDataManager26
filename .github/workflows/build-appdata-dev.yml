@@ -4,6 +4,30 @@ permissions:
   contents: write
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'AppDataManager.h'
+      - 'AppDataManager.m'
+      - 'AppDelegate.h'
+      - 'AppDelegate.m'
+      - 'AppDetailViewController.h'
+      - 'AppDetailViewController.m'
+      - 'BackupManagerViewController.h'
+      - 'BackupManagerViewController.m'
+      - 'MainViewController.h'
+      - 'MainViewController.m'
+      - 'SettingsViewController.h'
+      - 'SettingsViewController.m'
+      - 'Makefile'
+      - 'control'
+      - 'entitlements.plist'
+      - 'rootless.h'
+      - 'Resources/**'
+      - 'layout/**'
+      - 'scripts/generate-repo.py'
+      - 'scripts/validate-repo.py'
+      - '.github/workflows/build-appdata-dev.yml'
   workflow_dispatch:
 
 env:
@@ -118,6 +142,13 @@ jobs:
           echo "✅ Architecture is iphoneos-arm64"
           dpkg-deb -I "$DEB_FILE" | grep -q "Package: com.aosaid.appdatamgr" || { echo "❌ Wrong package name"; exit 1; }
           echo "✅ Package name correct"
+          EXPECTED_VERSION=$(awk '$1 == "Version:" { print $2; exit }' source/control)
+          ACTUAL_VERSION=$(dpkg-deb -f "$DEB_FILE" Version)
+          test "$ACTUAL_VERSION" = "$EXPECTED_VERSION" || {
+            echo "❌ Version mismatch: expected $EXPECTED_VERSION, got $ACTUAL_VERSION"
+            exit 1
+          }
+          echo "✅ Package version: $ACTUAL_VERSION"
           echo "DEB_FILE=$DEB_FILE" >> $GITHUB_ENV
           echo "✅ .deb validation PASSED"
 
@@ -142,11 +173,17 @@ jobs:
           fi
 
           cd repo-dev
-          python3 scripts/generate-repo.py . --dev 2>/dev/null || python3 scripts/generate-repo.py . || echo "⚠️ generate-repo.py failed, continuing..."
+          python3 scripts/generate-repo.py . --dev
+          python3 ../source/scripts/validate-repo.py .
 
           git add -A
-          git commit -m "AppDataManager v1.6.0 — dev build (crash-resilient)" || true
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "ℹ️ repo-dev is already synchronized"
+          else
+            VERSION=$(awk '$1 == "Version:" { print $2; exit }' ../source/control)
+            git commit -m "AppDataManager v${VERSION} — dev build"
+            git push origin main
+          fi
           echo "✅ Deployed to repo-dev"
 
       - name: Build summary
