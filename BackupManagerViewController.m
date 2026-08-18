@@ -1110,71 +1110,12 @@
         return [attributes[NSFileSize] unsignedLongLongValue];
     }
 
-    unsigned long long total = 0;
-
-    @try {
-        NSURL *url =
-            [NSURL fileURLWithPath:path
-                       isDirectory:YES];
-
-        NSDirectoryEnumerator *enumerator =
-            [fileManager
-                enumeratorAtURL:url
-                includingPropertiesForKeys:@[
-                    NSURLFileSizeKey,
-                    NSURLIsDirectoryKey,
-                    NSURLIsSymbolicLinkKey
-                ]
-                options:NSDirectoryEnumerationSkipsHiddenFiles
-                errorHandler:^BOOL(NSURL *url, NSError *error) {
-                    return YES;
-                }];
-
-        for (NSURL *fileURL in enumerator) {
-            @autoreleasepool {
-                NSNumber *isDirectoryNumber = nil;
-                NSNumber *isSymlinkNumber = nil;
-                NSNumber *fileSize = nil;
-
-                [fileURL getResourceValue:&isDirectoryNumber
-                                   forKey:NSURLIsDirectoryKey
-                                    error:nil];
-
-                [fileURL getResourceValue:&isSymlinkNumber
-                                   forKey:NSURLIsSymbolicLinkKey
-                                    error:nil];
-
-                if ([isSymlinkNumber boolValue]) {
-                    continue;
-                }
-
-                if ([isDirectoryNumber boolValue]) {
-                    continue;
-                }
-
-                [fileURL getResourceValue:&fileSize
-                                   forKey:NSURLFileSizeKey
-                                    error:nil];
-
-                if ([fileSize isKindOfClass:[NSNumber class]]) {
-                    unsigned long long value =
-                        [fileSize unsignedLongLongValue];
-
-                    if (ULLONG_MAX - total < value) {
-                        total = ULLONG_MAX;
-                    } else {
-                        total += value;
-                    }
-                }
-            }
-        }
-    } @catch (NSException *exception) {
-        NSLog(@"[ADM] backup size exception for %@: %@",
-              path,
-              exception);
-    }
-
-    return total;
+    /*
+     * Keep the UI and core engine on the same size algorithm. The core
+     * implementation includes hidden files, ignores symlinks, deduplicates
+     * hard links, and saturates on overflow.
+     */
+    return [self.manager fastDirectorySize:path];
 }
 
 #pragma mark - UITableViewDataSource

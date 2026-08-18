@@ -42,7 +42,7 @@ build_appdatamanager() {
     echo "=========================================="
     echo " 🔨 Building: AppData Manager"
     echo "=========================================="
-    cd "$PROJECT_ROOT/AppDataManager"
+    cd "$PROJECT_ROOT"
 
     make clean 2>/dev/null || true
     make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1
@@ -51,7 +51,7 @@ build_appdatamanager() {
     if [ -f "$DEB" ]; then
         echo "✅ AppData Manager built: $(basename $DEB)"
         BUILT_PACKAGES+=("$DEB")
-        ((BUILD_SUCCESS++))
+        BUILD_SUCCESS=$((BUILD_SUCCESS + 1))
 
         # نسخ إلى pool
         mkdir -p "$PROJECT_ROOT/repo/pool/main/iphoneos-arm64/"
@@ -59,7 +59,7 @@ build_appdatamanager() {
         echo "   → Copied to repo/pool/"
     else
         echo "❌ AppData Manager build failed!"
-        ((BUILD_FAILED++))
+        BUILD_FAILED=$((BUILD_FAILED + 1))
         return 1
     fi
     echo ""
@@ -79,7 +79,7 @@ build_ipainstallerpro() {
     if [ -f "$DEB" ]; then
         echo "✅ IPA Installer Pro built: $(basename $DEB)"
         BUILT_PACKAGES+=("$DEB")
-        ((BUILD_SUCCESS++))
+        BUILD_SUCCESS=$((BUILD_SUCCESS + 1))
 
         # نسخ إلى repo-dev فقط (للاختبار)
         mkdir -p "$PROJECT_ROOT/repo-dev/pool/main/iphoneos-arm64/"
@@ -87,7 +87,7 @@ build_ipainstallerpro() {
         echo "   → Copied to repo-dev/pool/"
     else
         echo "❌ IPA Installer Pro build failed!"
-        ((BUILD_FAILED++))
+        BUILD_FAILED=$((BUILD_FAILED + 1))
         return 1
     fi
     echo ""
@@ -118,6 +118,12 @@ generate_repo() {
 # ========== التثبيت الاختياري عبر SSH ==========
 install_via_ssh() {
     local deb_path="$1"
+
+    # Never block automated builds with an interactive prompt.
+    if [ "${INSTALL_VIA_SSH:-0}" != "1" ]; then
+        return 0
+    fi
+
     read -p "📱 Install $(basename $deb_path) via SSH? (y/n): " choice
     if [ "$choice" = "y" ] || [ "$choice" = "Y" ]; then
         read -p "📱 iPhone IP: " iphone_ip
@@ -178,7 +184,8 @@ else
     # اقتراح التثبيت
     if [ ${#BUILT_PACKAGES[@]} -gt 0 ]; then
         echo ""
-        install_via_ssh "${BUILT_PACKAGES[-1]}"
+        last_index=$((${#BUILT_PACKAGES[@]} - 1))
+        install_via_ssh "${BUILT_PACKAGES[$last_index]}"
     fi
 
     exit 0

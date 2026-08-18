@@ -92,7 +92,7 @@ MIT License
 
 ---
 
-**الإصدار الحالي: 1.6.5** — Stable backup and restore safeguards
+**الإصدار الحالي: 1.6.6** — Stable backup and restore safeguards
 
 **Developed by ZAIN**
 **تم حل بعض المشاكل المعقده بواسطة kimi**

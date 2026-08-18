@@ -1695,8 +1695,11 @@ static NSString * const kBackupDir =
         NSMutableArray *backups =
             [NSMutableArray array];
 
+        NSString *safeBundleID =
+            [bundleID stringByReplacingOccurrencesOfString:@"/"
+                                               withString:@"_"];
         NSString *prefix =
-            [bundleID stringByAppendingString:@"_"];
+            [safeBundleID stringByAppendingString:@"_"];
 
         for (NSString *item in contents) {
             @autoreleasepool {
