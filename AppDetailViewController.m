@@ -2,7 +2,7 @@
 //  AppDetailViewController.m
 //  AppDataManager
 //
-//  v1.6.3 — Crash-Resilient App Detail
+//  v1.6.4 — Crash-Resilient App Detail
 //  Fixes:
 //  - Correct card/label ownership
 //  - Async lifecycle safety
@@ -17,6 +17,7 @@
 #import "AppDetailViewController.h"
 #import "AppDataManager.h"
 #import "BackupManagerViewController.h"
+#import <sys/stat.h>
 
 @interface AppDetailViewController ()
 
@@ -400,55 +401,69 @@
 - (void)setupInfoCards
 {
     UIView *ref = self.bundleIDLabel;
+    UILabel *valueLabel = nil;
 
     self.versionCard =
         [self makeCardWithTitle:@"الإصدار"
                           value:@"جاري القراءة..."
                            icon:@"number"
                          topRef:ref
-                     valueLabel:&_versionValueLabel];
+                     valueLabel:&valueLabel];
+    self.versionValueLabel = valueLabel;
 
+    valueLabel = nil;
     self.dataSizeCard =
         [self makeCardWithTitle:@"حجم البيانات"
                           value:@"جاري الحساب..."
                            icon:@"externaldrive.fill"
                          topRef:self.versionCard
-                     valueLabel:&_dataSizeValueLabel];
+                     valueLabel:&valueLabel];
+    self.dataSizeValueLabel = valueLabel;
 
+    valueLabel = nil;
     self.documentsSizeCard =
         [self makeCardWithTitle:@"حجم المستندات"
                           value:@"جاري الحساب..."
                            icon:@"doc.fill"
                          topRef:self.dataSizeCard
-                     valueLabel:&_documentsSizeValueLabel];
+                     valueLabel:&valueLabel];
+    self.documentsSizeValueLabel = valueLabel;
 
+    valueLabel = nil;
     self.documentsCountCard =
         [self makeCardWithTitle:@"عدد الملفات"
                           value:@"جاري الحساب..."
                            icon:@"folder.fill"
                          topRef:self.documentsSizeCard
-                     valueLabel:&_documentsCountValueLabel];
+                     valueLabel:&valueLabel];
+    self.documentsCountValueLabel = valueLabel;
 
+    valueLabel = nil;
     self.lastBackupCard =
         [self makeCardWithTitle:@"آخر نسخة احتياطية"
                           value:@"جاري القراءة..."
                            icon:@"clock.fill"
                          topRef:self.documentsCountCard
-                     valueLabel:&_lastBackupValueLabel];
+                     valueLabel:&valueLabel];
+    self.lastBackupValueLabel = valueLabel;
 
+    valueLabel = nil;
     self.dataPathCard =
         [self makeCardWithTitle:@"مسار البيانات"
                           value:@"جاري القراءة..."
                            icon:@"arrow.right.doc.fill"
                          topRef:self.lastBackupCard
-                     valueLabel:&_dataPathValueLabel];
+                     valueLabel:&valueLabel];
+    self.dataPathValueLabel = valueLabel;
 
+    valueLabel = nil;
     self.documentsPathCard =
         [self makeCardWithTitle:@"مسار المستندات"
                           value:@"جاري القراءة..."
                            icon:@"doc.text.fill"
                          topRef:self.dataPathCard
-                     valueLabel:&_documentsPathValueLabel];
+                     valueLabel:&valueLabel];
+    self.documentsPathValueLabel = valueLabel;
 }
 
 - (void)setupActionButtons
@@ -976,7 +991,7 @@
 
                     NSString *inodeKey =
                         [NSString stringWithFormat:
-                           :@"%llu:%llu",
+                            @"%llu:%llu",
                             (unsigned long long)st.st_dev,
                             (unsigned long long)st.st_ino];
 

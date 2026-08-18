@@ -2,7 +2,7 @@
 //  AppDataManager.m
 //  AppDataManager
 //
-//  v1.6.3 — Crash-Resilient Core Engine
+//  v1.6.4 — Crash-Resilient Core Engine
 //
 
 #import "AppDataManager.h"
