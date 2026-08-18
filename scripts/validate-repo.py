@@ -62,7 +62,7 @@ def validate_repo(repo_root):
     deb_dir = os.path.join(repo_root, 'pool', 'main', 'iphoneos-arm64')
     debs = []
     if os.path.isdir(deb_dir):
-        debs = [f for f in os.listdir(deb_dir) if f.endswith('.deb')]
+        debs = sorted(f for f in os.listdir(deb_dir) if f.endswith('.deb'))
 
     if not debs:
         errors += 1
@@ -110,44 +110,61 @@ def validate_repo(repo_root):
                 errors += 1
                 fail(f"{name} missing or invalid")
 
-        # Extract values from Packages and compare with actual .deb
-        size_match = re.search(r'^Size:\s+(\d+)$', content, re.MULTILINE)
-        md5_match = re.search(r'^MD5sum:\s+([a-f0-9]{32})$', content, re.MULTILINE)
-        sha256_match = re.search(r'^SHA256:\s+([a-f0-9]{64})$', content, re.MULTILINE)
-        filename_match = re.search(r'^Filename:\s+(\S+)$', content, re.MULTILINE)
+        # Compare every Packages stanza with its corresponding .deb file.
+        # A repository may contain several packages and historical versions;
+        # validating only os.listdir()[0] makes the result filesystem-order
+        # dependent and can hide a stale or corrupted package entry.
+        entries = []
+        for block in re.split(r'\n\s*\n', content.strip()):
+            fields = {}
+            for line in block.splitlines():
+                if ':' not in line or line.startswith(' '):
+                    continue
+                key, value = line.split(':', 1)
+                fields[key.strip()] = value.strip()
+            if fields.get('Filename'):
+                entries.append(fields)
 
-        if size_match:
-            pkg_size = int(size_match.group(1))
-            if pkg_size == actual_size:
-                ok(f"Size matches: {pkg_size} == {actual_size}")
-            else:
-                errors += 1
-                fail(f"Size mismatch: Packages says {pkg_size}, actual is {actual_size}")
+        if not entries:
+            errors += 1
+            fail('No package stanzas found in Packages')
+        else:
+            for entry in entries:
+                filename = entry.get('Filename', '')
+                expected_prefix = 'pool/main/iphoneos-arm64/'
+                if not filename.startswith(expected_prefix):
+                    errors += 1
+                    fail(f"Unsafe or invalid Filename field: {filename}")
+                    continue
 
-        if md5_match:
-            pkg_md5 = md5_match.group(1)
-            if pkg_md5 == actual_md5:
-                ok(f"MD5 matches: {pkg_md5}")
-            else:
-                errors += 1
-                fail(f"MD5 mismatch: Packages says {pkg_md5}, actual is {actual_md5}")
+                package_path = os.path.normpath(os.path.join(repo_root, filename))
+                if not package_path.startswith(os.path.normpath(repo_root) + os.sep) or not os.path.isfile(package_path):
+                    errors += 1
+                    fail(f"Missing package for Packages entry: {filename}")
+                    continue
 
-        if sha256_match:
-            pkg_sha256 = sha256_match.group(1)
-            if pkg_sha256 == actual_sha256:
-                ok(f"SHA256 matches: {pkg_sha256}")
-            else:
-                errors += 1
-                fail(f"SHA256 mismatch: Packages says {pkg_sha256}, actual is {actual_sha256}")
+                actual_entry_size = file_size(package_path)
+                actual_entry_md5 = file_hash(package_path, 'md5')
+                actual_entry_sha256 = file_hash(package_path, 'sha256')
+                entry_name = os.path.basename(package_path)
 
-        if filename_match:
-            pkg_filename = filename_match.group(1)
-            expected = f"pool/main/iphoneos-arm64/{debs[0]}"
-            if pkg_filename == expected:
-                ok(f"Filename correct: {pkg_filename}")
-            else:
-                errors += 1
-                fail(f"Filename mismatch: Packages says {pkg_filename}, expected {expected}")
+                if entry.get('Size') == str(actual_entry_size):
+                    ok(f"Size matches for {entry_name}")
+                else:
+                    errors += 1
+                    fail(f"Size mismatch for {entry_name}: Packages says {entry.get('Size')}, actual is {actual_entry_size}")
+
+                if entry.get('MD5sum') == actual_entry_md5:
+                    ok(f"MD5 matches for {entry_name}")
+                else:
+                    errors += 1
+                    fail(f"MD5 mismatch for {entry_name}")
+
+                if entry.get('SHA256') == actual_entry_sha256:
+                    ok(f"SHA256 matches for {entry_name}")
+                else:
+                    errors += 1
+                    fail(f"SHA256 mismatch for {entry_name}")
 
         # Check for placeholders
         if 'Size: 0' in content or 'Size: 0000' in content:
