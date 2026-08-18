@@ -1316,7 +1316,7 @@ static NSString * const kBackupDir =
         return NO;
     }
 
-    __block BOOL success = YES;
+    __block BOOL success = NO;
 
     dispatch_sync(self.fileQueue, ^{
         @autoreleasepool {
@@ -1325,45 +1325,39 @@ static NSString * const kBackupDir =
                     [self backupDirectory];
 
                 if (backupRoot.length == 0) {
-                    success = NO;
+                    NSLog(@"[ADM] restore failed: backup directory unavailable");
                     return;
                 }
 
                 /*
-                 * Do not allow restore from an arbitrary filesystem path.
-                 * The selected backup must reside inside our backup store.
+                 * Keep the restore source confined to our own backup store.
+                 * The boundary slash prevents a sibling directory with a
+                 * similar prefix from passing this check.
                  */
                 NSString *standardBackup =
                     [backupRoot stringByStandardizingPath];
-
                 NSString *standardSelected =
                     [backupPath stringByStandardizingPath];
-
                 NSString *prefix =
                     [standardBackup stringByAppendingString:@"/"];
 
                 if (![standardSelected hasPrefix:prefix]) {
-                    NSLog(@"[ADM] rejected restore path outside backup directory");
-                    success = NO;
+                    NSLog(@"[ADM] restore rejected: source is outside backup directory");
                     return;
                 }
 
                 NSFileManager *fm =
                     [NSFileManager defaultManager];
-
-                BOOL isDirectory = NO;
+                BOOL selectedIsDirectory = NO;
+                NSError *readError = nil;
 
                 if (![fm fileExistsAtPath:standardSelected
-                               isDirectory:&isDirectory] ||
-                    !isDirectory) {
-                    success = NO;
+                               isDirectory:&selectedIsDirectory] ||
+                    !selectedIsDirectory) {
+                    NSLog(@"[ADM] restore failed: backup source is not a directory");
                     return;
                 }
 
-                /*
-                 * A valid path inside the backup directory is not enough:
-                 * reject a backup belonging to a different application.
-                 */
                 NSString *safeBundleID =
                     [bundleID stringByReplacingOccurrencesOfString:@"/"
                                                            withString:@"_"];
@@ -1372,197 +1366,260 @@ static NSString * const kBackupDir =
 
                 if (![standardSelected.lastPathComponent
                         hasPrefix:expectedPrefix]) {
-                    NSLog(@"[ADM] rejected backup for another application: %@",
+                    NSLog(@"[ADM] restore rejected: backup belongs to another app (%@)",
                           standardSelected.lastPathComponent);
-                    success = NO;
+                    return;
+                }
+
+                NSArray *backupItems =
+                    [fm contentsOfDirectoryAtPath:standardSelected
+                                             error:&readError];
+
+                if (![backupItems isKindOfClass:[NSArray class]] ||
+                    backupItems.count == 0) {
+                    NSLog(@"[ADM] restore failed: backup is empty or unreadable (%@)",
+                          readError.localizedDescription);
                     return;
                 }
 
                 /*
-                 * Terminate the application before changing its container.
+                 * A backup contains one top-level directory per source
+                 * container. Build every source/destination pair before
+                 * deleting current data. The old implementation mapped only
+                 * by UUID basename and could therefore fail after an app
+                 * reinstall or container regeneration.
                  */
-                [self killApp:bundleID];
+                NSMutableArray *sourcePaths =
+                    [NSMutableArray arrayWithCapacity:backupItems.count];
 
-                /*
-                 * Wipe current data.
-                 */
+                for (NSString *item in backupItems) {
+                    if (![item isKindOfClass:[NSString class]] ||
+                        item.length == 0) {
+                        continue;
+                    }
+
+                    NSString *source =
+                        [standardSelected stringByAppendingPathComponent:item];
+                    BOOL sourceIsDirectory = NO;
+
+                    if (![fm fileExistsAtPath:source
+                                   isDirectory:&sourceIsDirectory] ||
+                        !sourceIsDirectory) {
+                        NSLog(@"[ADM] restore failed: invalid container entry %@",
+                              source);
+                        return;
+                    }
+
+                    [sourcePaths addObject:source];
+                }
+
+                if (sourcePaths.count == 0) {
+                    NSLog(@"[ADM] restore failed: no container directories found");
+                    return;
+                }
+
                 NSArray *destinationPaths =
                     [self allDataPathsForBundleID:bundleID];
 
-                if (destinationPaths.count == 0) {
-                    success = NO;
+                if (![destinationPaths isKindOfClass:[NSArray class]] ||
+                    destinationPaths.count == 0) {
+                    NSLog(@"[ADM] restore failed: no destination containers found for %@",
+                          bundleID);
                     return;
                 }
 
-                for (NSString *destination in destinationPaths) {
-                    @autoreleasepool {
-                        if (destination.length == 0) {
-                            continue;
+                if (sourcePaths.count > destinationPaths.count) {
+                    NSLog(@"[ADM] restore failed: backup has %lu containers but device has %lu",
+                          (unsigned long)sourcePaths.count,
+                          (unsigned long)destinationPaths.count);
+                    return;
+                }
+
+                NSMutableArray *unusedDestinations =
+                    [destinationPaths mutableCopy];
+                NSMutableArray *unmatchedSources =
+                    [NSMutableArray array];
+                NSMutableArray *restorePairs =
+                    [NSMutableArray arrayWithCapacity:sourcePaths.count];
+
+                /* First prefer stable UUID/basename matches. */
+                for (NSString *source in sourcePaths) {
+                    NSString *sourceName = source.lastPathComponent;
+                    NSString *matchingDestination = nil;
+
+                    for (NSString *destination in unusedDestinations) {
+                        if ([[destination lastPathComponent]
+                                isEqualToString:sourceName]) {
+                            matchingDestination = destination;
+                            break;
                         }
+                    }
 
-                        NSArray *contents =
-                            [fm contentsOfDirectoryAtPath:
-                                destination
-                                                   error:nil];
-
-                        for (NSString *item in contents) {
-                            @autoreleasepool {
-                                NSString *full =
-                                    [destination stringByAppendingPathComponent:
-                                        item];
-
-                                NSError *removeError = nil;
-
-                                if (![fm removeItemAtPath:full
-                                                    error:&removeError]) {
-                                    success = NO;
-
-                                    NSLog(@"[ADM] restore wipe failed: %@ (%@)",
-                                          full,
-                                          removeError.localizedDescription);
-                                }
-                            }
-                        }
+                    if (matchingDestination) {
+                        [restorePairs addObject:@{
+                            @"source": source,
+                            @"destination": matchingDestination
+                        }];
+                        [unusedDestinations removeObject:matchingDestination];
+                    } else {
+                        [unmatchedSources addObject:source];
                     }
                 }
 
-                /*
-                 * Restore each backed-up container by copying its CONTENTS
-                 * into the existing destination container.
-                 *
-                 * The old implementation attempted to copy the entire
-                 * directory onto an already-existing container, which can
-                 * fail because the destination directory already exists.
-                 */
-                NSArray *backupItems =
-                    [fm contentsOfDirectoryAtPath:
-                        standardSelected
-                                                   error:nil];
+                /* Then identify the main app container using its metadata. */
+                NSMutableArray *stillUnmatchedSources =
+                    [NSMutableArray array];
 
-                if (![backupItems isKindOfClass:[NSArray class]]) {
-                    success = NO;
-                    return;
-                }
+                for (NSString *source in unmatchedSources) {
+                    NSString *metadataPath =
+                        [source stringByAppendingPathComponent:
+                            @".com.apple.mobile_container_manager.metadata.plist"];
+                    NSDictionary *metadata =
+                        [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+                    NSString *identifier = metadata[@"MCMMetadataIdentifier"];
+                    NSString *matchingDestination = nil;
 
-                for (NSString *item in backupItems) {
-                    @autoreleasepool {
-                        NSString *source =
-                            [standardSelected stringByAppendingPathComponent:
-                                item];
-
-                        BOOL isDirectory = NO;
-
-                        if (![fm fileExistsAtPath:source
-                                       isDirectory:&isDirectory]) {
-                            continue;
-                        }
-
-                        /*
-                         * Match a backup container by basename.
-                         */
-                        NSString *matchingDestination = nil;
-
-                        NSString *sourceName =
-                            source.lastPathComponent;
-
-                        for (NSString *destination in destinationPaths) {
-                            if ([[destination lastPathComponent]
-                                    isEqualToString:sourceName]) {
+                    if ([identifier isKindOfClass:[NSString class]] &&
+                        [identifier isEqualToString:bundleID]) {
+                        for (NSString *destination in unusedDestinations) {
+                            if ([destination isEqualToString:destinationPaths.firstObject]) {
                                 matchingDestination = destination;
                                 break;
                             }
                         }
+                    }
 
-                        /*
-                         * If no exact basename match exists, use the first
-                         * available destination only when there is a single
-                         * destination. This keeps normal-app restoration
-                         * compatible with the common case.
-                         */
-                        if (!matchingDestination &&
-                            destinationPaths.count == 1) {
-                            matchingDestination =
-                                destinationPaths.firstObject;
-                        }
+                    if (matchingDestination) {
+                        [restorePairs addObject:@{
+                            @"source": source,
+                            @"destination": matchingDestination
+                        }];
+                        [unusedDestinations removeObject:matchingDestination];
+                    } else {
+                        [stillUnmatchedSources addObject:source];
+                    }
+                }
 
-                        if (!matchingDestination ||
-                            ![self pathExists:matchingDestination]) {
-                            success = NO;
-                            continue;
-                        }
+                /*
+                 * Finally pair remaining regenerated group containers
+                 * deterministically. This is only used when exact names are
+                 * unavailable; it also supports older backups without a
+                 * readable metadata plist.
+                 */
+                [stillUnmatchedSources sortUsingComparator:
+                    ^NSComparisonResult(NSString *a, NSString *b) {
+                    return [a.lastPathComponent
+                        compare:b.lastPathComponent
+                        options:NSCaseInsensitiveSearch];
+                }];
+                [unusedDestinations sortUsingComparator:
+                    ^NSComparisonResult(NSString *a, NSString *b) {
+                    return [a.lastPathComponent
+                        compare:b.lastPathComponent
+                        options:NSCaseInsensitiveSearch];
+                }];
 
-                        if (isDirectory) {
-                            NSArray *children =
-                                [fm contentsOfDirectoryAtPath:
-                                    source
-                                                       error:nil];
+                if (stillUnmatchedSources.count > unusedDestinations.count) {
+                    NSLog(@"[ADM] restore failed: could not map all backup containers");
+                    return;
+                }
 
-                            for (NSString *child in children) {
-                                @autoreleasepool {
-                                    NSString *childSource =
-                                        [source stringByAppendingPathComponent:
-                                            child];
+                for (NSUInteger index = 0;
+                     index < stillUnmatchedSources.count;
+                     index++) {
+                    [restorePairs addObject:@{
+                        @"source": stillUnmatchedSources[index],
+                        @"destination": unusedDestinations[index]
+                    }];
+                }
 
-                                    NSString *childDestination =
-                                        [matchingDestination
-                                            stringByAppendingPathComponent:
-                                                child];
+                if (restorePairs.count != sourcePaths.count) {
+                    NSLog(@"[ADM] restore failed: incomplete container mapping");
+                    return;
+                }
 
-                                    NSError *copyError = nil;
+                /* Terminate the app before changing its live containers. */
+                [self killApp:bundleID];
 
-                                    /*
-                                     * Remove conflicting items first.
-                                     */
-                                    if ([fm fileExistsAtPath:
-                                            childDestination]) {
+                /* Wipe existing contents only after the complete mapping is valid. */
+                for (NSString *destination in destinationPaths) {
+                    NSError *contentsError = nil;
+                    NSArray *contents =
+                        [fm contentsOfDirectoryAtPath:destination
+                                                 error:&contentsError];
 
-                                        if (![fm removeItemAtPath:
-                                                childDestination
-                                                              error:&copyError]) {
-                                            success = NO;
-                                            continue;
-                                        }
-                                    }
+                    if (![contents isKindOfClass:[NSArray class]]) {
+                        NSLog(@"[ADM] restore wipe failed for %@ (%@)",
+                              destination,
+                              contentsError.localizedDescription);
+                        return;
+                    }
 
-                                    copyError = nil;
+                    for (NSString *item in contents) {
+                        NSString *fullPath =
+                            [destination stringByAppendingPathComponent:item];
+                        NSError *removeError = nil;
 
-                                    if (![fm copyItemAtPath:childSource
-                                                     toPath:childDestination
-                                                      error:&copyError]) {
-                                        success = NO;
-
-                                        NSLog(@"[ADM] restore copy failed: %@ -> %@ (%@)",
-                                              childSource,
-                                              childDestination,
-                                              copyError.localizedDescription);
-                                    }
-                                }
-                            }
-                        } else {
-                            NSString *destinationFile =
-                                [matchingDestination
-                                    stringByAppendingPathComponent:
-                                        source.lastPathComponent];
-
-                            NSError *copyError = nil;
-
-                            if ([fm fileExistsAtPath:destinationFile]) {
-                                [fm removeItemAtPath:destinationFile
-                                               error:nil];
-                            }
-
-                            if (![fm copyItemAtPath:source
-                                              toPath:destinationFile
-                                               error:&copyError]) {
-                                success = NO;
-                            }
+                        if ([fm fileExistsAtPath:fullPath] &&
+                            ![fm removeItemAtPath:fullPath
+                                           error:&removeError]) {
+                            NSLog(@"[ADM] restore wipe failed: %@ (%@)",
+                                  fullPath,
+                                  removeError.localizedDescription);
+                            return;
                         }
                     }
                 }
+
+                /* Copy each backed-up container's contents into its destination. */
+                for (NSDictionary *pair in restorePairs) {
+                    NSString *source = pair[@"source"];
+                    NSString *destination = pair[@"destination"];
+                    NSError *contentsError = nil;
+                    NSArray *children =
+                        [fm contentsOfDirectoryAtPath:source
+                                                 error:&contentsError];
+
+                    if (![children isKindOfClass:[NSArray class]]) {
+                        NSLog(@"[ADM] restore read failed for %@ (%@)",
+                              source,
+                              contentsError.localizedDescription);
+                        return;
+                    }
+
+                    for (NSString *child in children) {
+                        NSString *childSource =
+                            [source stringByAppendingPathComponent:child];
+                        NSString *childDestination =
+                            [destination stringByAppendingPathComponent:child];
+                        NSError *copyError = nil;
+
+                        if ([fm fileExistsAtPath:childDestination] &&
+                            ![fm removeItemAtPath:childDestination
+                                           error:&copyError]) {
+                            NSLog(@"[ADM] restore conflict removal failed: %@ (%@)",
+                                  childDestination,
+                                  copyError.localizedDescription);
+                            return;
+                        }
+
+                        copyError = nil;
+                        if (![fm copyItemAtPath:childSource
+                                         toPath:childDestination
+                                          error:&copyError]) {
+                            NSLog(@"[ADM] restore copy failed: %@ -> %@ (%@)",
+                                  childSource,
+                                  childDestination,
+                                  copyError.localizedDescription);
+                            return;
+                        }
+                    }
+                }
+
+                success = YES;
             }
             @catch (NSException *exception) {
-                NSLog(@"[ADM] restore exception: %@",
-                      exception.reason);
+                NSLog(@"[ADM] restore exception: %@", exception.reason);
                 success = NO;
             }
         }
