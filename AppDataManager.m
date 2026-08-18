@@ -16,6 +16,17 @@
 static NSString * const kBackupDir =
     @"/var/mobile/Documents/AppDataManager/Backups";
 
+static void ADMLogFileError(NSString *operation,
+                            NSString *path,
+                            NSError *error) {
+    NSLog(@"[ADM] %@ failed path=%@ domain=%@ code=%ld description=%@",
+          operation ?: @"filesystem operation",
+          path ?: @"<nil>",
+          error.domain ?: @"<none>",
+          (long)error.code,
+          error.localizedDescription ?: @"<none>");
+}
+
 @interface AppDataManager ()
 @property (nonatomic, strong) dispatch_queue_t fileQueue;
 @property (nonatomic, strong) dispatch_queue_t cacheQueue;
@@ -625,58 +636,63 @@ static NSString * const kBackupDir =
     }
 
     @try {
-        NSFileManager *fm =
-            [NSFileManager defaultManager];
+        NSFileManager *fm = [NSFileManager defaultManager];
 
-        NSArray *paths = @[
+        /*
+         * User data containers are on the mobile data volume. Rootless does
+         * not mean that /var/mobile must be prefixed with /var/jb; doing so
+         * points at a different, usually nonexistent tree. Keep the real
+         * paths first and retain prefixed paths only for unusual layouts.
+         */
+        NSArray *dataBases = @[
             @"/var/mobile/Containers/Data/Application",
             @"/private/var/mobile/Containers/Data/Application",
             ROOT_PATH_NS(@"/var/mobile/Containers/Data/Application"),
             ROOT_PATH_NS(@"/private/var/mobile/Containers/Data/Application")
         ];
+        NSMutableSet *visitedBases = [NSMutableSet set];
 
-        NSMutableSet *visitedBases =
-            [NSMutableSet set];
-
-        for (NSString *basePath in paths) {
+        /* Primary match: the container metadata remains authoritative. */
+        for (NSString *basePath in dataBases) {
             if (![basePath isKindOfClass:[NSString class]] ||
-                basePath.length == 0) {
+                basePath.length == 0 ||
+                [visitedBases containsObject:basePath]) {
                 continue;
             }
-
-            if ([visitedBases containsObject:basePath]) {
-                continue;
-            }
-
             [visitedBases addObject:basePath];
 
-            if (![self pathExists:basePath]) {
+            BOOL baseIsDirectory = NO;
+            if (![fm fileExistsAtPath:basePath
+                           isDirectory:&baseIsDirectory] ||
+                !baseIsDirectory) {
                 continue;
             }
 
+            NSError *listError = nil;
             NSArray *directories =
-                [fm contentsOfDirectoryAtPath:basePath error:nil];
-
+                [fm contentsOfDirectoryAtPath:basePath error:&listError];
             if (![directories isKindOfClass:[NSArray class]]) {
+                ADMLogFileError(@"enumerate data base", basePath, listError);
                 continue;
             }
 
             for (NSString *directory in directories) {
                 @autoreleasepool {
                     NSString *container =
-                        [basePath stringByAppendingPathComponent:
-                            directory];
+                        [basePath stringByAppendingPathComponent:directory];
+                    BOOL isDirectory = NO;
+                    if (![fm fileExistsAtPath:container
+                                   isDirectory:&isDirectory] ||
+                        !isDirectory) {
+                        continue;
+                    }
 
                     NSString *metadata =
                         [container stringByAppendingPathComponent:
                             @".com.apple.mobile_container_manager.metadata.plist"];
-
                     NSDictionary *info =
-                        [NSDictionary dictionaryWithContentsOfFile:
-                            metadata];
-
-                    NSString *identifier =
-                        info[@"MCMMetadataIdentifier"];
+                        [NSDictionary dictionaryWithContentsOfFile:metadata];
+                    NSString *identifier = info[@"MCMMetadataIdentifier"];
 
                     if ([identifier isKindOfClass:[NSString class]] &&
                         [identifier isEqualToString:bundleID]) {
@@ -685,9 +701,88 @@ static NSString * const kBackupDir =
                 }
             }
         }
+
+        /*
+         * Compatibility match: some jailbreak/iOS combinations omit or
+         * relocate the metadata plist. The installed app's bundle container
+         * and data container share the same UUID, so derive the data path from
+         * the real installed bundle rather than guessing a path.
+         */
+        NSArray *bundleBases = @[
+            @"/var/containers/Bundle/Application",
+            @"/private/var/containers/Bundle/Application",
+            ROOT_PATH_NS(@"/var/containers/Bundle/Application"),
+            ROOT_PATH_NS(@"/private/var/containers/Bundle/Application")
+        ];
+
+        for (NSString *bundleBase in bundleBases) {
+            BOOL bundleBaseIsDirectory = NO;
+            if (![fm fileExistsAtPath:bundleBase
+                           isDirectory:&bundleBaseIsDirectory] ||
+                !bundleBaseIsDirectory) {
+                continue;
+            }
+
+            NSArray *uuidDirectories =
+                [fm contentsOfDirectoryAtPath:bundleBase error:nil];
+            if (![uuidDirectories isKindOfClass:[NSArray class]]) {
+                continue;
+            }
+
+            for (NSString *uuidDirectory in uuidDirectories) {
+                @autoreleasepool {
+                    NSString *bundleContainer =
+                        [bundleBase stringByAppendingPathComponent:uuidDirectory];
+                    NSArray *items =
+                        [fm contentsOfDirectoryAtPath:bundleContainer error:nil];
+                    if (![items isKindOfClass:[NSArray class]]) {
+                        continue;
+                    }
+
+                    BOOL matchingBundle = NO;
+                    for (NSString *item in items) {
+                        if (![item hasSuffix:@".app"]) {
+                            continue;
+                        }
+                        NSString *infoPath =
+                            [[bundleContainer stringByAppendingPathComponent:item]
+                                stringByAppendingPathComponent:@"Info.plist"];
+                        NSDictionary *info =
+                            [NSDictionary dictionaryWithContentsOfFile:infoPath];
+                        if ([info[@"CFBundleIdentifier"] isKindOfClass:[NSString class]] &&
+                            [info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
+                            matchingBundle = YES;
+                            break;
+                        }
+                    }
+
+                    if (!matchingBundle) {
+                        continue;
+                    }
+
+                    for (NSString *dataBase in dataBases) {
+                        NSString *candidate =
+                            [dataBase stringByAppendingPathComponent:uuidDirectory];
+                        BOOL candidateIsDirectory = NO;
+                        if ([fm fileExistsAtPath:candidate
+                                      isDirectory:&candidateIsDirectory] &&
+                            candidateIsDirectory) {
+                            NSLog(@"[ADM] data path resolved by bundle UUID %@: %@",
+                                  uuidDirectory,
+                                  candidate);
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+
+        NSLog(@"[ADM] data path unavailable for bundle %@; searched real data roots",
+              bundleID);
     }
     @catch (NSException *exception) {
-        NSLog(@"[ADM] filesystem data search exception: %@",
+        NSLog(@"[ADM] filesystem data search exception for %@: %@",
+              bundleID,
               exception.reason);
     }
 
@@ -1092,40 +1187,111 @@ static NSString * const kBackupDir =
 #pragma mark - Backup Directory
 
 - (NSString *)backupDirectory {
-    NSString *path =
-        ROOT_PATH_NS(kBackupDir);
+    /*
+     * This is user data, not a rootless package path. Never apply
+     * ROOT_PATH_NS to /var/mobile/Documents. v1.7.x accidentally created a
+     * different /var/jb/var/mobile tree while postinst created the real tree.
+     */
+    NSString *path = [kBackupDir stringByStandardizingPath];
+    NSString *legacyPath =
+        [ROOT_PATH_NS(kBackupDir) stringByStandardizingPath];
+    NSFileManager *fm = [NSFileManager defaultManager];
 
-    if (![path isKindOfClass:[NSString class]] ||
-        path.length == 0) {
+    if (path.length == 0) {
+        NSLog(@"[ADM] backup directory unavailable: canonical path is empty");
         return nil;
     }
 
-    NSFileManager *fm =
-        [NSFileManager defaultManager];
+    @try {
+        BOOL pathIsDirectory = NO;
+        BOOL exists = [fm fileExistsAtPath:path isDirectory:&pathIsDirectory];
 
-    if (![fm fileExistsAtPath:path]) {
-        @try {
-            NSError *error = nil;
-
-            BOOL created =
-                [fm createDirectoryAtPath:path
-              withIntermediateDirectories:YES
-                               attributes:nil
-                                    error:&error];
-
-            if (!created) {
-                NSLog(@"[ADM] backup directory creation failed: %@",
-                      error.localizedDescription);
-                return nil;
+        /* Migrate backups created by the incorrect v1.7.x rootless path. */
+        if (!exists &&
+            legacyPath.length > 0 &&
+            ![legacyPath isEqualToString:path]) {
+            BOOL legacyIsDirectory = NO;
+            if ([fm fileExistsAtPath:legacyPath
+                          isDirectory:&legacyIsDirectory] &&
+                legacyIsDirectory) {
+                NSError *legacyListError = nil;
+                NSArray *legacyItems =
+                    [fm contentsOfDirectoryAtPath:legacyPath
+                                             error:&legacyListError];
+                if ([legacyItems isKindOfClass:[NSArray class]]) {
+                    NSError *parentError = nil;
+                    NSString *parent = [path stringByDeletingLastPathComponent];
+                    if (![fm createDirectoryAtPath:parent
+                       withIntermediateDirectories:YES
+                                        attributes:nil
+                                             error:&parentError]) {
+                        ADMLogFileError(@"create canonical backup parent", parent, parentError);
+                    } else {
+                        for (NSString *item in legacyItems) {
+                            NSString *source =
+                                [legacyPath stringByAppendingPathComponent:item];
+                            NSString *target =
+                                [path stringByAppendingPathComponent:item];
+                            if ([fm fileExistsAtPath:target]) {
+                                continue;
+                            }
+                            NSError *moveError = nil;
+                            if (![fm moveItemAtPath:source
+                                              toPath:target
+                                               error:&moveError]) {
+                                ADMLogFileError(@"migrate legacy backup", source, moveError);
+                            }
+                        }
+                    }
+                } else {
+                    ADMLogFileError(@"enumerate legacy backup directory", legacyPath, legacyListError);
+                }
             }
         }
-        @catch (NSException *exception) {
-            NSLog(@"[ADM] backup directory exception: %@",
-                  exception.reason);
+
+        exists = [fm fileExistsAtPath:path isDirectory:&pathIsDirectory];
+        if (!exists) {
+            NSError *createError = nil;
+            if (![fm createDirectoryAtPath:path
+                withIntermediateDirectories:YES
+                                 attributes:@{NSFilePosixPermissions: @(0755)}
+                                      error:&createError]) {
+                ADMLogFileError(@"create backup directory", path, createError);
+                return nil;
+            }
+            pathIsDirectory = YES;
+        }
+
+        if (!pathIsDirectory) {
+            NSLog(@"[ADM] backup directory invalid: not a directory path=%@", path);
+            return nil;
+        }
+
+        if (![fm isReadableFileAtPath:path] ||
+            ![fm isWritableFileAtPath:path]) {
+            NSLog(@"[ADM] backup directory permission failure path=%@ readable=%d writable=%d",
+                  path,
+                  [fm isReadableFileAtPath:path],
+                  [fm isWritableFileAtPath:path]);
+            return nil;
+        }
+
+        NSError *verifyError = nil;
+        NSArray *contents =
+            [fm contentsOfDirectoryAtPath:path error:&verifyError];
+        if (![contents isKindOfClass:[NSArray class]]) {
+            ADMLogFileError(@"verify backup directory", path, verifyError);
             return nil;
         }
     }
+    @catch (NSException *exception) {
+        NSLog(@"[ADM] backup directory exception path=%@ reason=%@",
+              path,
+              exception.reason);
+        return nil;
+    }
 
+    NSLog(@"[ADM] backup directory ready path=%@", path);
     return path;
 }
 
@@ -1222,17 +1388,31 @@ static NSString * const kBackupDir =
 
                 if (![fm createDirectoryAtPath:destination
                     withIntermediateDirectories:YES
-                                     attributes:nil
+                                     attributes:@{NSFilePosixPermissions: @(0755)}
                                           error:&directoryError]) {
 
-                    NSLog(@"[ADM] backup directory failed: %@",
-                          directoryError.localizedDescription);
+                    ADMLogFileError(@"create backup destination", destination, directoryError);
+                    success = NO;
+                    return;
+                }
 
+                BOOL destinationIsDirectory = NO;
+                if (![fm fileExistsAtPath:destination
+                              isDirectory:&destinationIsDirectory] ||
+                    !destinationIsDirectory ||
+                    ![fm isReadableFileAtPath:destination] ||
+                    ![fm isWritableFileAtPath:destination]) {
+                    NSLog(@"[ADM] backup destination validation failed path=%@ directory=%d readable=%d writable=%d",
+                          destination,
+                          destinationIsDirectory,
+                          [fm isReadableFileAtPath:destination],
+                          [fm isWritableFileAtPath:destination]);
                     success = NO;
                     return;
                 }
 
                 NSUInteger index = 0;
+                BOOL primaryCopied = NO;
                 NSMutableArray *manifestContainers =
                     [NSMutableArray arrayWithCapacity:dataPaths.count];
 
@@ -1297,10 +1477,25 @@ static NSString * const kBackupDir =
                                 success = NO;
                             }
                         } else {
-                            [manifestContainers addObject:@{
-                                @"name": itemDestination.lastPathComponent,
-                                @"isPrimary": @(index == 0)
-                            }];
+                            BOOL copiedDirectory = NO;
+                            BOOL outputExists =
+                                [fm fileExistsAtPath:itemDestination
+                                          isDirectory:&copiedDirectory];
+                            if (!outputExists || !copiedDirectory) {
+                                NSLog(@"[ADM] backup output verification failed path=%@",
+                                      itemDestination);
+                                if (isPrimary) {
+                                    success = NO;
+                                }
+                            } else {
+                                if (isPrimary) {
+                                    primaryCopied = YES;
+                                }
+                                [manifestContainers addObject:@{
+                                    @"name": itemDestination.lastPathComponent,
+                                    @"isPrimary": @(isPrimary)
+                                }];
+                            }
                         }
 
                         index++;
@@ -1333,10 +1528,20 @@ static NSString * const kBackupDir =
                     }
                 }
 
-                /* Never leave a backup when the mandatory primary copy failed. */
+                if (!primaryCopied || manifestContainers.count == 0) {
+                    NSLog(@"[ADM] backup final verification failed path=%@ primaryCopied=%d containers=%lu",
+                          destination,
+                          primaryCopied,
+                          (unsigned long)manifestContainers.count);
+                    success = NO;
+                }
+
+                /* Never leave a backup when final verification failed. */
                 if (!success) {
-                    [fm removeItemAtPath:destination
-                                   error:nil];
+                    NSError *cleanupError = nil;
+                    if (![fm removeItemAtPath:destination error:&cleanupError]) {
+                        ADMLogFileError(@"remove incomplete backup", destination, cleanupError);
+                    }
                 }
             }
             @catch (NSException *exception) {
@@ -2497,8 +2702,27 @@ static NSString * const kBackupDir =
 
     NSString *documents =
         [dataPath stringByAppendingPathComponent:@"Documents"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDirectory = NO;
 
-    return [self pathExists:documents] ? documents : nil;
+    if (![fm fileExistsAtPath:documents isDirectory:&isDirectory]) {
+        NSLog(@"[ADM] documents unavailable: path does not exist bundle=%@ data=%@ documents=%@",
+              bundleID,
+              dataPath,
+              documents);
+        return nil;
+    }
+
+    if (!isDirectory || ![fm isReadableFileAtPath:documents]) {
+        NSLog(@"[ADM] documents unavailable: invalid permissions/type bundle=%@ path=%@ directory=%d readable=%d",
+              bundleID,
+              documents,
+              isDirectory,
+              [fm isReadableFileAtPath:documents]);
+        return nil;
+    }
+
+    return documents;
 }
 
 - (NSUInteger)documentsCountForBundleID:(NSString *)bundleID {
@@ -2510,10 +2734,15 @@ static NSString * const kBackupDir =
     }
 
     @try {
+        NSError *error = nil;
         NSArray *contents =
             [[NSFileManager defaultManager]
                 contentsOfDirectoryAtPath:documents
-                                    error:nil];
+                                    error:&error];
+        if (![contents isKindOfClass:[NSArray class]]) {
+            ADMLogFileError(@"enumerate Documents", documents, error);
+            return 0;
+        }
 
         return contents.count;
     }

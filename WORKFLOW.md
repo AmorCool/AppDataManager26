@@ -6,7 +6,7 @@ This repository contains **two** independent tools:
 
 | Tool | Path | Status | Version |
 |------|------|--------|---------|
-| **AppData Manager** | repository root | ✅ Stable | 1.7.8 |
+| **AppData Manager** | repository root | ✅ Stable | 1.7.9 |
 | **IPA Installer Pro** | `IPAInstallerPro/` | 🔄 Active Dev | 2.0.0 |
 
 Both share the same repository but are **separate packages** in Sileo.
@@ -174,6 +174,7 @@ IPAInstallerPro/
 | 1.0.0 | 2026-08-11 | Initial release |
 | 1.0.32 | 2026-08-12 | Operation logging, transaction system |
 | **2.0.0** | **2026-08-13** | **Architecture rewrite: unified provider contract, OperationLog integration, zero-gap verification, live log display, evidence-based results** |
+| **1.7.9** | **2026-08-19** | **AppData Manager: fix Rootless user-data paths, unify backup directory with postinst, resolve data containers by metadata or bundle UUID, and verify every backup stage** |
 | **1.7.8** | **2026-08-19** | **AppData Manager: require the primary container for backup success while treating unavailable App Group copies as optional** |
 | **1.7.7** | **2026-08-19** | **AppData Manager: make complete container copies valid without a manifest and make secondary App Group failures non-fatal** |
 | **1.7.6** | **2026-08-19** | **AppData Manager: trace the full restore flow, add backup manifests, and restore the primary container when group containers are unavailable** |

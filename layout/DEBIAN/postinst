@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================="
-echo " 📱 AppData Manager v1.7.8"
+echo " 📱 AppData Manager v1.7.9"
 echo " Dopamine 3.0 / Rootless Compatible"
 echo "=========================================="
 
@@ -13,7 +13,7 @@ fi
 
 APP_PATH="${JB_ROOT}/Applications/AppDataManager.app"
 
-BACKUP_DIR="/var/mobile/Documents/AppDataBackups"
+BACKUP_DIR="/var/mobile/Documents/AppDataManager/Backups"
 if [ ! -d "$BACKUP_DIR" ]; then
     mkdir -p "$BACKUP_DIR"
     chown mobile:mobile "$BACKUP_DIR"
