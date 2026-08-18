@@ -129,107 +129,24 @@ static NSString * const kBackupDir =
 #pragma mark - Application Discovery
 
 - (NSArray *)allInstalledApplications {
-    NSMutableArray *applications =
-        [NSMutableArray array];
-
-    @try {
-        Class workspaceClass =
-            NSClassFromString(@"LSApplicationWorkspace");
-
-        if (workspaceClass) {
-            id workspace = nil;
-
-            @try {
-                if ([workspaceClass respondsToSelector:
-                        @selector(defaultWorkspace)]) {
-                    workspace =
-                        [workspaceClass performSelector:
-                            @selector(defaultWorkspace)];
-                }
-            }
-            @catch (NSException *exception) {
-                NSLog(@"[ADM] workspace exception: %@",
-                      exception.reason);
-            }
-
-            if (workspace) {
-                NSArray *proxies = nil;
-
-                @try {
-                    if ([workspace respondsToSelector:
-                            @selector(allInstalledApplications)]) {
-                        proxies =
-                            [workspace performSelector:
-                                @selector(allInstalledApplications)];
-                    }
-                }
-                @catch (NSException *exception) {
-                    NSLog(@"[ADM] installed applications exception: %@",
-                          exception.reason);
-                }
-
-                if (![proxies isKindOfClass:[NSArray class]]) {
-                    @try {
-                        if ([workspace respondsToSelector:
-                                @selector(allApplications)]) {
-                            proxies =
-                                [workspace performSelector:
-                                    @selector(allApplications)];
-                        }
-                    }
-                    @catch (NSException *exception) {
-                        NSLog(@"[ADM] allApplications exception: %@",
-                              exception.reason);
-                    }
-                }
-
-                if ([proxies isKindOfClass:[NSArray class]]) {
-                    for (id proxy in proxies) {
-                        @autoreleasepool {
-                            NSDictionary *info =
-                                [self extractInfoFromProxy:proxy];
-
-                            if (info) {
-                                [applications addObject:info];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /*
-         * Filesystem discovery is used only when LaunchServices
-         * did not return anything. This prevents duplicate entries.
-         */
-        if (applications.count == 0) {
-            NSArray *fallback =
-                [self discoverAppsFromFilesystem];
-
-            if (fallback.count > 0) {
-                [applications addObjectsFromArray:fallback];
-            }
-        }
-    }
-    @catch (NSException *exception) {
-        NSLog(@"[ADM] discovery exception: %@",
-              exception.reason);
+    /*
+     * Startup-safe discovery deliberately uses the filesystem only.
+     * LSApplicationWorkspace is a private LaunchServices service and is not
+     * a safe dependency for the first frame or the first background scan.
+     * The filesystem snapshot contains the real installed bundle metadata
+     * and is sufficient for the list and for subsequent data-path lookup.
+     */
+    NSArray *applications = [self discoverAppsFromFilesystem];
+    if (![applications isKindOfClass:[NSArray class]]) {
+        return @[];
     }
 
     return [applications sortedArrayUsingComparator:
         ^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-
         NSString *nameA = a[@"name"];
         NSString *nameB = b[@"name"];
-
-        if (![nameA isKindOfClass:[NSString class]]) {
-            nameA = @"";
-        }
-
-        if (![nameB isKindOfClass:[NSString class]]) {
-            nameB = @"";
-        }
-
+        if (![nameA isKindOfClass:[NSString class]]) nameA = @"";
+        if (![nameB isKindOfClass:[NSString class]]) nameB = @"";
         return [nameA localizedCaseInsensitiveCompare:nameB];
     }];
 }
@@ -478,33 +395,20 @@ static NSString * const kBackupDir =
         return nil;
     }
 
+    /*
+     * The normal read-only path is filesystem based and safe from any
+     * LaunchServices/MCM private API side effects. It is also the source
+     * used by the real size statistics, so the displayed value matches the
+     * files that are actually measured.
+     */
     @try {
-        NSString *path =
-            [self dataPathViaContainerManager:bundleID];
-
-        if (path.length > 0 &&
-            [self pathExists:path]) {
-            return path;
-        }
-
-        path =
-            [self dataPathViaProxy:bundleID];
-
-        if (path.length > 0 &&
-            [self pathExists:path]) {
-            return path;
-        }
-
-        path =
-            [self dataPathViaFilesystemSearch:bundleID];
-
-        if (path.length > 0 &&
-            [self pathExists:path]) {
+        NSString *path = [self dataPathViaFilesystemSearch:bundleID];
+        if (path.length > 0 && [self pathExists:path]) {
             return path;
         }
     }
     @catch (NSException *exception) {
-        NSLog(@"[ADM] data path exception for %@: %@",
+        NSLog(@"[ADM] filesystem data path exception for %@: %@",
               bundleID,
               exception.reason);
     }
@@ -904,8 +808,11 @@ static NSString * const kBackupDir =
 
     @autoreleasepool {
         @try {
-            NSArray *paths =
-                [self allDataPathsForBundleID:bundleID];
+            NSString *primaryPath =
+                [self dataPathForBundleID:bundleID];
+            NSArray *paths = primaryPath.length > 0
+                ? @[primaryPath]
+                : @[];
 
             for (NSString *path in paths) {
                 @autoreleasepool {
@@ -946,8 +853,11 @@ static NSString * const kBackupDir =
 
     @autoreleasepool {
         @try {
-            NSArray *paths =
-                [self allDataPathsForBundleID:bundleID];
+            NSString *primaryPath =
+                [self dataPathForBundleID:bundleID];
+            NSArray *paths = primaryPath.length > 0
+                ? @[primaryPath]
+                : @[];
 
             for (NSString *path in paths) {
                 @autoreleasepool {
