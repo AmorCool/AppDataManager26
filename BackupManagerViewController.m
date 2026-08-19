@@ -6,9 +6,7 @@ static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.082 
 static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.105 green:0.115 blue:0.145 alpha:1.0]; }
 static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
 static UIColor *ADMMuted(void) { return [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]; }
-static UIColor *ADMBlue(void) { return [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]; }
-static UIColor *ADMGreen(void) { return [UIColor colorWithRed:0.24 green:0.82 blue:0.58 alpha:1.0]; }
-static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue:0.40 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
 
 #pragma mark - Storage map
 
@@ -74,7 +72,6 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
 
 @interface BackupCell : UITableViewCell
 @property (nonatomic, strong) UIView *cardView;
-@property (nonatomic, strong) UIView *statusRail;
 @property (nonatomic, strong) UIImageView *appIcon;
 @property (nonatomic, strong) UILabel *nameLabel;
 @property (nonatomic, strong) UILabel *dateLabel;
@@ -98,11 +95,6 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
         _cardView.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_cardView];
 
-        _statusRail = [[UIView alloc] init];
-        _statusRail.backgroundColor = ADMGreen();
-        _statusRail.translatesAutoresizingMaskIntoConstraints = NO;
-        [_cardView addSubview:_statusRail];
-
         _appIcon = [[UIImageView alloc] init];
         _appIcon.layer.cornerRadius = 12;
         _appIcon.layer.masksToBounds = YES;
@@ -125,13 +117,13 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
 
         _sizeLabel = [[UILabel alloc] init];
         _sizeLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
-        _sizeLabel.textColor = ADMBlue();
+        _sizeLabel.textColor = ADMAccent();
         _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [_cardView addSubview:_sizeLabel];
 
-        _deleteButton = [self makeButtonWithIcon:@"trash.fill" color:ADMRed() background:[UIColor colorWithRed:0.28 green:0.08 blue:0.12 alpha:1.0]];
+        _deleteButton = [self makeButtonWithIcon:@"trash.fill" color:ADMAccent() background:ADMPanelRaised()];
         [_cardView addSubview:_deleteButton];
-        _restoreButton = [self makeButtonWithIcon:@"arrow.counterclockwise" color:ADMBlue() background:[UIColor colorWithRed:0.08 green:0.19 blue:0.29 alpha:1.0]];
+        _restoreButton = [self makeButtonWithIcon:@"arrow.counterclockwise" color:ADMAccent() background:ADMPanelRaised()];
         [_cardView addSubview:_restoreButton];
 
         [NSLayoutConstraint activateConstraints:@[
@@ -140,10 +132,6 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
             [_cardView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16],
             [_cardView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-5],
             [_cardView.heightAnchor constraintEqualToConstant:82],
-            [_statusRail.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor],
-            [_statusRail.topAnchor constraintEqualToAnchor:_cardView.topAnchor constant:16],
-            [_statusRail.bottomAnchor constraintEqualToAnchor:_cardView.bottomAnchor constant:-16],
-            [_statusRail.widthAnchor constraintEqualToConstant:4],
             [_appIcon.leadingAnchor constraintEqualToAnchor:_cardView.leadingAnchor constant:15],
             [_appIcon.centerYAnchor constraintEqualToAnchor:_cardView.centerYAnchor],
             [_appIcon.widthAnchor constraintEqualToConstant:46],
@@ -228,7 +216,7 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
     self.navigationController.navigationBar.titleTextAttributes = @{NSForegroundColorAttributeName: ADMInk()};
     self.navigationController.navigationBar.largeTitleTextAttributes = @{NSForegroundColorAttributeName: ADMInk(), NSFontAttributeName: [UIFont systemFontOfSize:34 weight:UIFontWeightBold]};
     UIBarButtonItem *add = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"plus"] style:UIBarButtonItemStylePlain target:self action:@selector(addBackupTapped)];
-    add.tintColor = ADMBlue();
+    add.tintColor = ADMAccent();
     self.navigationItem.rightBarButtonItem = add;
 }
 
@@ -243,7 +231,7 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
     UILabel *eyebrow = [[UILabel alloc] init];
     eyebrow.text = @"STORAGE MAP  /  BACKUP ARCHIVE";
     eyebrow.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightSemibold];
-    eyebrow.textColor = ADMBlue();
+    eyebrow.textColor = ADMAccent();
     eyebrow.translatesAutoresizingMaskIntoConstraints = NO;
     [self.statsContainer addSubview:eyebrow];
 
@@ -252,8 +240,8 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
     [self.statsContainer addSubview:self.pieChart];
 
     NSArray *items = @[
-        @{ @"color": ADMBlue(), @"title": @"النسخ الاحتياطية" },
-        @{ @"color": ADMGreen(), @"title": @"بيانات التطبيقات" },
+        @{ @"color": ADMAccent(), @"title": @"النسخ الاحتياطية" },
+        @{ @"color": [UIColor colorWithWhite:0.50 alpha:1.0], @"title": @"بيانات التطبيقات" },
         @{ @"color": [UIColor colorWithWhite:0.30 alpha:1.0], @"title": @"المساحة الحرة" }
     ];
     UIView *lastDot = nil;
@@ -352,8 +340,8 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
     unsigned long long total = backupsSize + appsSize + freeSpace;
     if (total == 0) total = 1;
     self.pieChart.segments = @[
-        @{ @"value": @(backupsSize), @"color": ADMBlue() },
-        @{ @"value": @(appsSize), @"color": ADMGreen() },
+        @{ @"value": @(backupsSize), @"color": ADMAccent() },
+        @{ @"value": @(appsSize), @"color": [UIColor colorWithWhite:0.50 alpha:1.0] },
         @{ @"value": @(freeSpace), @"color": [UIColor colorWithWhite:0.30 alpha:1.0] }
     ];
     self.pieChart.centerLabel.attributedText = [[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@\nالمستخدم", [self.manager formatBytes:backupsSize + appsSize]] attributes:@{NSFontAttributeName: [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightSemibold], NSForegroundColorAttributeName: ADMMuted()}];
@@ -412,7 +400,7 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
     cell.sizeLabel.text = backup[@"sizeString"];
     UIImage *icon = [self.manager iconForBundleID:backup[@"bundleID"]];
     if (icon) { cell.appIcon.image = icon; cell.appIcon.tintColor = nil; }
-    else { cell.appIcon.image = [UIImage systemImageNamed:@"app.fill"]; cell.appIcon.tintColor = ADMBlue(); }
+    else { cell.appIcon.image = [UIImage systemImageNamed:@"app.fill"];         cell.appIcon.tintColor = ADMAccent(); }
     cell.restoreButton.tag = indexPath.row;
     [cell.restoreButton addTarget:self action:@selector(restoreTapped:) forControlEvents:UIControlEventTouchUpInside];
     cell.deleteButton.tag = indexPath.row;
@@ -471,7 +459,7 @@ static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue
 - (void)showSpinner {
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     spinner.tag = 999;
-    spinner.color = ADMBlue();
+    spinner.color = ADMAccent();
     spinner.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:spinner];
     [NSLayoutConstraint activateConstraints:@[[spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor], [spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor]]];

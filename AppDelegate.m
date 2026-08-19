@@ -4,7 +4,7 @@
 #import "SettingsViewController.h"
 
 static UIColor *ADMAppBackground(void) { return [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]; }
-static UIColor *ADMAppAccent(void) { return [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]; }
+static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
 
 @interface AppDelegate ()
 @end
@@ -75,7 +75,7 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithRed:0.20 green:0.6
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults boolForKey:@"HasLaunchedBefore"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSString *message = @"AppData Manager v1.4.3\n\n"
+            NSString *message = @"AppData Manager v1.4.4\n\n"
                 @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
                 @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
                 @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"

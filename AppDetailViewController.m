@@ -5,16 +5,16 @@
 #define C_BG [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]
 #define C_CARD [UIColor colorWithRed:0.075 green:0.082 blue:0.105 alpha:1.0]
 #define C_CARD_HOVER [UIColor colorWithRed:0.105 green:0.115 blue:0.145 alpha:1.0]
-#define C_ACCENT [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]
-#define C_DANGER [UIColor colorWithRed:0.98 green:0.34 blue:0.40 alpha:1.0]
+#define C_ACCENT [UIColor colorWithWhite:0.78 alpha:1.0]
+#define C_DANGER [UIColor colorWithWhite:0.72 alpha:1.0]
 #define C_TEXT_PRI [UIColor whiteColor]
 #define C_TEXT_SEC [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]
 #define C_TEXT_TER [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:0.72]
 
 // Category colors
-#define C_DOC [UIColor colorWithRed:0.24 green:0.82 blue:0.58 alpha:1.0]
-#define C_LIB [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]
-#define C_CACHE [UIColor colorWithRed:0.98 green:0.63 blue:0.25 alpha:1.0]
+#define C_DOC [UIColor colorWithWhite:0.78 alpha:1.0]
+#define C_LIB [UIColor colorWithWhite:0.62 alpha:1.0]
+#define C_CACHE [UIColor colorWithWhite:0.45 alpha:1.0]
 
 // MARK: - Smooth Storage Ring
 @interface StorageRingView : UIView

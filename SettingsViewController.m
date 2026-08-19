@@ -5,9 +5,7 @@ static UIColor *ADMCanvas(void) { return [UIColor colorWithRed:0.025 green:0.027
 static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.082 blue:0.105 alpha:1.0]; }
 static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
 static UIColor *ADMMuted(void) { return [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]; }
-static UIColor *ADMBlue(void) { return [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]; }
-static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue:0.40 alpha:1.0]; }
-static UIColor *ADMOrange(void) { return [UIColor colorWithRed:0.98 green:0.63 blue:0.25 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
 
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
@@ -78,23 +76,23 @@ static UIColor *ADMOrange(void) { return [UIColor colorWithRed:0.98 green:0.63 b
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"حالة الأداة";
-        cell.detailTextLabel.text = @"v1.4.3  /  READY";
-        cell.imageView.image = [[UIImage systemImageNamed:@"checkmark.shield.fill"] imageWithTintColor:ADMBlue()];
+        cell.detailTextLabel.text = @"v1.4.4  /  READY";
+        cell.imageView.image = [[UIImage systemImageNamed:@"checkmark.shield.fill"] imageWithTintColor:ADMAccent()];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"مسح كل النسخ", @"تصدير النسخ", @"استيراد النسخ"];
         NSArray *icons = @[@"trash.circle.fill", @"square.and.arrow.up.fill", @"square.and.arrow.down.fill"];
-        NSArray *colors = @[ADMRed(), ADMBlue(), [UIColor colorWithRed:0.24 green:0.82 blue:0.58 alpha:1.0]];
+        NSArray *colors = @[ADMAccent(), ADMAccent(), ADMAccent()];
         cell.textLabel.text = titles[indexPath.row];
         cell.imageView.image = [[UIImage systemImageNamed:icons[indexPath.row]] imageWithTintColor:colors[indexPath.row]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else if (indexPath.row == 0) {
         cell.textLabel.text = @"عن الأداة";
         cell.detailTextLabel.text = @"ZAIN / @Zainqkvd";
-        cell.imageView.image = [[UIImage systemImageNamed:@"person.crop.circle.fill"] imageWithTintColor:ADMOrange()];
+        cell.imageView.image = [[UIImage systemImageNamed:@"person.crop.circle.fill"] imageWithTintColor:ADMAccent()];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
         cell.textLabel.text = @"حول AppData Manager";
-        cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:ADMBlue()];
+        cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:ADMAccent()];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
@@ -154,7 +152,7 @@ static UIColor *ADMOrange(void) { return [UIColor colorWithRed:0.98 green:0.63 b
         }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
-            NSString *info = @"AppData Manager v1.4.3\n\n"
+            NSString *info = @"AppData Manager v1.4.4\n\n"
                 @"أداة احترافية لإدارة بيانات التطبيقات\n"
                 @"لأجهزة iOS Jailbreak.\n\n"
                 @"• متوافق مع Dopamine 3.0\n"
