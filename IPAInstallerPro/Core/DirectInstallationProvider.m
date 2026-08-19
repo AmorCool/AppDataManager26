@@ -35,6 +35,7 @@ extern char **environ;
 @property (nonatomic, strong) NSString *mkdirPath;
 @property (nonatomic, strong) NSString *mvPath;
 @property (nonatomic, strong) NSString *statPath;
+@property (nonatomic, strong) NSMutableSet<NSString *> *signedPaths;
 @end
 
 @implementation DirectInstallationProvider
@@ -58,6 +59,7 @@ extern char **environ;
         self.mkdirPath = [rm resolvePath:@"/bin/mkdir"];
         self.mvPath = [rm resolvePath:@"/bin/mv"];
         self.statPath = [rm resolvePath:@"/usr/bin/stat"];
+        self.signedPaths = [NSMutableSet set];
         [self findWorkingHelper];
     }
     return self;
@@ -424,6 +426,7 @@ extern char **environ;
 - (void)installIPA:(NSString *)ipaPath transactionID:(NSString *)txnID operationLog:(OperationLog *)opLog completion:(void (^)(InstallationResult *))completion {
     NSFileManager *fm = [NSFileManager defaultManager];
     BOOL hasH = [self hasRootHelper];
+    [self.signedPaths removeAllObjects];
 
     // Extract REAL Bundle ID from IPA before anything else
     NSString *realBundleID = [self extractBundleIDFromIPA:ipaPath];
@@ -655,15 +658,13 @@ extern char **environ;
     // PHASE 7: FRAMEWORK
     [self fixFrameworks:destApp hasHelper:hasH opLog:opLog txnID:txnID];
 
-    // PHASE 8: UICACHE
+    // PHASE 8: UICACHE — register the target only; use the resolved path only as fallback.
     NSString *rec14a = [opLog beginPhase:OperationPhaseUICache operation:@"uicache -p logical" target:logicalDest input:@"" transactionID:txnID];
-    [self runRoot:self.uicachePath args:@[@"-p", logicalDest] opLog:opLog recordID:rec14a];
-
-    NSString *rec14b = [opLog beginPhase:OperationPhaseUICache operation:@"uicache -p resolved" target:destApp input:@"" transactionID:txnID];
-    [self runRoot:self.uicachePath args:@[@"-p", destApp] opLog:opLog recordID:rec14b];
-
-    NSString *rec14c = [opLog beginPhase:OperationPhaseUICache operation:@"uicache -a" target:@"" input:@"" transactionID:txnID];
-    [self runRoot:self.uicachePath args:@[@"-a"] opLog:opLog recordID:rec14c];
+    BOOL logicalUICacheOK = [self runRoot:self.uicachePath args:@[@"-p", logicalDest] opLog:opLog recordID:rec14a];
+    if (!logicalUICacheOK) {
+        NSString *rec14b = [opLog beginPhase:OperationPhaseUICache operation:@"uicache -p resolved fallback" target:destApp input:@"" transactionID:txnID];
+        [self runRoot:self.uicachePath args:@[@"-p", destApp] opLog:opLog recordID:rec14b];
+    }
 
     // PHASE 9: VERIFY (comprehensive)
     NSString *rec15 = [opLog beginPhase:OperationPhaseVerify operation:@"final verify" target:destApp input:bundleID transactionID:txnID];
@@ -740,9 +741,7 @@ extern char **environ;
         if (isDir) {
             [self signAllAt:ip hasHelper:hasH opLog:opLog txnID:txnID];
             if ([item hasSuffix:@".app"]) {
-                NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[ip stringByAppendingPathComponent:@"Info.plist"]];
-                NSString *en = info[@"CFBundleExecutable"];
-                if (en) [self signBin:[ip stringByAppendingPathComponent:en] hasHelper:hasH label:[@"app:" stringByAppendingString:en] opLog:opLog txnID:txnID];
+                // The main executable is signed exactly once by signExe:, which preserves its original entitlements.
             } else if ([item hasSuffix:@".framework"]) {
                 NSString *fn = [item stringByDeletingPathExtension];
                 [self signBin:[ip stringByAppendingPathComponent:fn] hasHelper:hasH label:[@"fw:" stringByAppendingString:fn] opLog:opLog txnID:txnID];
@@ -755,6 +754,8 @@ extern char **environ;
 
 - (void)signBin:(NSString *)path hasHelper:(BOOL)hasH label:(NSString *)label opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
     if (!path || ![[NSFileManager defaultManager] fileExistsAtPath:path]) return;
+    if ([self.signedPaths containsObject:path]) return;
+
     NSString *rec = [opLog beginPhase:OperationPhaseSign operation:[NSString stringWithFormat:@"ldid -S (%@)", label] target:path input:@"" transactionID:txnID];
     if (hasH) [self runRoot:self.chmodPath args:@[@"755", path] opLog:opLog recordID:nil];
     else [self runCmd:self.chmodPath args:@[@"755", path] opLog:opLog recordID:nil];
@@ -765,8 +766,10 @@ extern char **environ;
         NSString *ep = [NSTemporaryDirectory() stringByAppendingPathComponent:@"min.ent"];
         [@{@"get-task-allow":@YES, @"platform-application":@YES} writeToFile:ep atomically:YES];
         NSString *sf = [NSString stringWithFormat:@"-S%@", ep];
-        [self runCmd:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec];
+        ok = hasH ? [self runRoot:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec]
+                  : [self runCmd:self.ldidPath args:@[sf, path] opLog:opLog recordID:rec];
     }
+    if (ok) [self.signedPaths addObject:path];
 }
 
 - (void)signExe:(NSString *)path hasHelper:(BOOL)hasH opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
