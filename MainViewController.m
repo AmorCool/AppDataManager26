@@ -234,7 +234,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
         [self addSubview:_appsValueLabel];
 
         _sizeValueLabel = [[UILabel alloc] init];
-        _sizeValueLabel.text = @"—";
+        _sizeValueLabel.text = @"0 B";
         _sizeValueLabel.font = [UIFont monospacedDigitSystemFontOfSize:18 weight:UIFontWeightSemibold];
         _sizeValueLabel.textColor = UIColor.whiteColor;
         _sizeValueLabel.textAlignment = NSTextAlignmentLeft;
@@ -533,7 +533,8 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
             [self.stateView.spinner stopAnimating];
             [self updateStateAfterLoad];
             self.statsView.appsValueLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.allApps.count];
-            self.statsView.sizeValueLabel.text = @"—";
+            self.statsView.sizeValueLabel.text = @"0 B";
+            self.statsView.sizeValueLabel.alpha = 1.0;
             [self.tableView reloadData];
             [self calculateSizesInBackground];
         });
@@ -600,7 +601,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     if (self.isCalculatingSizes || self.allApps.count == 0) return;
     self.isCalculatingSizes = YES;
     NSArray *snapshot = [self.allApps copy];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSMutableArray *updated = [NSMutableArray arrayWithCapacity:snapshot.count];
         unsigned long long total = 0;
         for (NSDictionary *app in snapshot) {
@@ -616,6 +617,10 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
             self.allApps = updated;
             [self rebuildSectionsForSearchText:self.searchController.searchBar.text];
             self.statsView.sizeValueLabel.text = [self.manager formatBytes:total];
+            self.statsView.sizeValueLabel.alpha = 0.0;
+            [UIView animateWithDuration:0.24 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+                self.statsView.sizeValueLabel.alpha = 1.0;
+            } completion:nil];
             [self.tableView reloadData];
             self.isCalculatingSizes = NO;
         });
@@ -653,9 +658,13 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
-    // Keep scrolling fully under the user's control; transitions are handled at the scope level.
-    cell.alpha = 1.0;
-    cell.transform = CGAffineTransformIdentity;
+    // Subtle entrance only: it does not modify scroll physics or follow every scroll frame.
+    cell.alpha = 0.96;
+    cell.transform = CGAffineTransformMakeTranslation(0.0, 4.0);
+    [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
+        cell.alpha = 1.0;
+        cell.transform = CGAffineTransformIdentity;
+    } completion:nil];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
