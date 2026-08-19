@@ -4,7 +4,7 @@
 #import "SettingsViewController.h"
 
 static UIColor *ADMAppBackground(void) { return [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]; }
-static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
+static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.96 alpha:1.0]; }
 
 @interface AppDelegate ()
 @end
@@ -30,7 +30,7 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1
 
     tabBarController.viewControllers = @[mainNav, backupNav, settingsNav];
     tabBarController.tabBar.tintColor = ADMAppAccent();
-    tabBarController.tabBar.unselectedItemTintColor = [UIColor colorWithWhite:0.48 alpha:1.0];
+    tabBarController.tabBar.unselectedItemTintColor = [UIColor colorWithWhite:0.64 alpha:1.0];
     tabBarController.tabBar.backgroundColor = ADMAppBackground();
     tabBarController.tabBar.barTintColor = ADMAppBackground();
 
@@ -39,8 +39,8 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1
         [appearance configureWithOpaqueBackground];
         appearance.backgroundColor = ADMAppBackground();
         appearance.shadowColor = [UIColor colorWithWhite:0.12 alpha:0.85];
-        appearance.stackedLayoutAppearance.normal.iconColor = [UIColor colorWithWhite:0.48 alpha:1.0];
-        appearance.stackedLayoutAppearance.normal.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.48 alpha:1.0], NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightMedium]};
+        appearance.stackedLayoutAppearance.normal.iconColor = [UIColor colorWithWhite:0.64 alpha:1.0];
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.64 alpha:1.0], NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightMedium]};
         appearance.stackedLayoutAppearance.selected.iconColor = ADMAppAccent();
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = @{NSForegroundColorAttributeName: ADMAppAccent(), NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold]};
         tabBarController.tabBar.standardAppearance = appearance;
@@ -75,7 +75,7 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults boolForKey:@"HasLaunchedBefore"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSString *message = @"AppData Manager v1.4.5\n\n"
+            NSString *message = @"AppData Manager v1.4.6\n\n"
                 @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
                 @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
                 @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"

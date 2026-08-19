@@ -193,7 +193,7 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
         self.layer.masksToBounds = YES;
 
         UILabel *title = [[UILabel alloc] init];
-        title.text = @"ملخص البيانات";
+        title.text = @"ملخص التطبيقات";
         title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
         title.textColor = ADMMuted();
         title.translatesAutoresizingMaskIntoConstraints = NO;
@@ -417,7 +417,10 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
     self.tableView.directionalLockEnabled = YES;
     self.tableView.delaysContentTouches = NO;
     self.tableView.canCancelContentTouches = YES;
-    self.tableView.decelerationRate = UIScrollViewDecelerationRateNormal;
+    self.tableView.decelerationRate = UIScrollViewDecelerationRateFast;
+    self.tableView.bounces = YES;
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    self.tableView.scrollsToTop = YES;
     self.tableView.showsVerticalScrollIndicator = YES;
     self.tableView.rowHeight = 86;
     self.tableView.estimatedRowHeight = 86;
@@ -436,9 +439,9 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
     [self.refreshControl addTarget:self action:@selector(loadApps) forControlEvents:UIControlEventValueChanged];
     self.tableView.refreshControl = self.refreshControl;
 
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 224)];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 198)];
     header.backgroundColor = ADMCanvas();
-    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 12, self.view.bounds.size.width - 32, 112)];
+    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 10, self.view.bounds.size.width - 32, 96)];
     self.statsView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [header addSubview:self.statsView];
 
@@ -458,8 +461,8 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
     [NSLayoutConstraint activateConstraints:@[
         [self.scopeControl.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
         [self.scopeControl.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
-        [self.scopeControl.topAnchor constraintEqualToAnchor:self.statsView.bottomAnchor constant:14],
-        [self.scopeControl.heightAnchor constraintEqualToConstant:44]
+        [self.scopeControl.topAnchor constraintEqualToAnchor:self.statsView.bottomAnchor constant:12],
+        [self.scopeControl.heightAnchor constraintEqualToConstant:42]
     ]];
     self.tableView.tableHeaderView = header;
 }
@@ -614,6 +617,26 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
     // Keep scrolling fully under the user's control; transitions are handled at the scope level.
     cell.alpha = 1.0;
     cell.transform = CGAffineTransformIdentity;
+}
+
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
+    [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
+        self.scopeControl.alpha = 0.92;
+    } completion:nil];
+}
+
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+    if (!decelerate) {
+        [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
+            self.scopeControl.alpha = 1.0;
+        } completion:nil];
+    }
+}
+
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
+        self.scopeControl.alpha = 1.0;
+    } completion:nil];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -76,7 +76,7 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"حالة الأداة";
-        cell.detailTextLabel.text = @"v1.4.5  /  READY";
+        cell.detailTextLabel.text = @"v1.4.6  /  READY";
         cell.imageView.image = [[UIImage systemImageNamed:@"checkmark.shield.fill"] imageWithTintColor:ADMAccent()];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"مسح كل النسخ", @"تصدير النسخ", @"استيراد النسخ"];
@@ -152,7 +152,7 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
         }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
-            NSString *info = @"AppData Manager v1.4.5\n\n"
+            NSString *info = @"AppData Manager v1.4.6\n\n"
                 @"أداة احترافية لإدارة بيانات التطبيقات\n"
                 @"لأجهزة iOS Jailbreak.\n\n"
                 @"• متوافق مع Dopamine 3.0\n"

@@ -12,9 +12,9 @@
 #define C_TEXT_TER [UIColor colorWithWhite:0.58 alpha:1.0]
 
 // Category colors
-#define C_DOC [UIColor colorWithWhite:0.78 alpha:1.0]
-#define C_LIB [UIColor colorWithWhite:0.62 alpha:1.0]
-#define C_CACHE [UIColor colorWithWhite:0.45 alpha:1.0]
+#define C_DOC [UIColor colorWithWhite:0.90 alpha:1.0]
+#define C_LIB [UIColor colorWithWhite:0.78 alpha:1.0]
+#define C_CACHE [UIColor colorWithWhite:0.64 alpha:1.0]
 
 // MARK: - Smooth Storage Ring
 @interface StorageRingView : UIView
