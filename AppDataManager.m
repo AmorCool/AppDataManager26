@@ -1585,6 +1585,10 @@ static void ADMSetError(NSError **error,
 
     NSMutableArray *paths = [NSMutableArray arrayWithObject:path];
     for (NSURL *url in enumerator) {
+        /* MCM metadata is container state, not app-owned data. */
+        if ([url.lastPathComponent isEqualToString:kContainerMetadataFile]) {
+            continue;
+        }
         if (url.path.length > 0) {
             [paths addObject:url.path];
         }

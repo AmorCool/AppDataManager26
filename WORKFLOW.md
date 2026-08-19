@@ -6,7 +6,7 @@ This repository contains **two** independent tools:
 
 | Tool | Path | Status | Version |
 |------|------|--------|---------|
-| **AppData Manager** | repository root | ✅ Stable | 1.7.16 |
+| **AppData Manager** | repository root | ✅ Stable | 1.7.17 |
 | **IPA Installer Pro** | `IPAInstallerPro/` | 🔄 Active Dev | 2.0.0 |
 
 Both share the same repository but are **separate packages** in Sileo.
@@ -174,6 +174,7 @@ IPAInstallerPro/
 | 1.0.0 | 2026-08-11 | Initial release |
 | 1.0.32 | 2026-08-12 | Operation logging, transaction system |
 | **2.0.0** | **2026-08-13** | **Architecture rewrite: unified provider contract, OperationLog integration, zero-gap verification, live log display, evidence-based results** |
+| **1.7.17** | **2026-08-19** | **AppData Manager: preserve MCM container metadata ownership while normalizing restored app data** |
 | **1.7.16** | **2026-08-19** | **AppData Manager: marshal container SPI to main, serialize Restore/Delete, improve errors, and make local builds AppData-only by default** |
 | **1.7.15** | **2026-08-19** | **AppData Manager: exclude preserved MCM metadata from source/target content verification** |
 | **1.7.14** | **2026-08-19** | **AppData Manager: normalize restored ownership, reject bundle/data UUID inference, and verify every restored relative file** |
