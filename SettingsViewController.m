@@ -1,10 +1,14 @@
 #import "SettingsViewController.h"
 #import "AppDataManager.h"
 
-static UIColor *ADMSettingsBackground(void) { return [UIColor colorWithRed:0.035 green:0.035 blue:0.055 alpha:1.0]; }
-static UIColor *ADMSettingsCard(void) { return [UIColor colorWithRed:0.085 green:0.085 blue:0.125 alpha:1.0]; }
-static UIColor *ADMSettingsSecondary(void) { return [UIColor colorWithWhite:0.56 alpha:1.0]; }
-static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 green:0.42 blue:0.98 alpha:1.0]; }
+static UIColor *ADMCanvas(void) { return [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]; }
+static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.082 blue:0.105 alpha:1.0]; }
+static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.105 green:0.115 blue:0.145 alpha:1.0]; }
+static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
+static UIColor *ADMMuted(void) { return [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]; }
+static UIColor *ADMBlue(void) { return [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]; }
+static UIColor *ADMRed(void) { return [UIColor colorWithRed:0.98 green:0.34 blue:0.40 alpha:1.0]; }
+static UIColor *ADMOrange(void) { return [UIColor colorWithRed:0.98 green:0.63 blue:0.25 alpha:1.0]; }
 
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
@@ -15,7 +19,7 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"الإعدادات";
-    self.view.backgroundColor = ADMSettingsBackground();
+    self.view.backgroundColor = ADMCanvas();
     self.view.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
     [self setupNavigationBar];
     [self setupTableView];
@@ -24,11 +28,11 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
 - (void)setupNavigationBar {
     self.navigationController.navigationBar.prefersLargeTitles = YES;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
-    self.navigationController.navigationBar.tintColor = UIColor.whiteColor;
-    self.navigationController.navigationBar.barTintColor = ADMSettingsBackground();
-    self.navigationController.navigationBar.backgroundColor = ADMSettingsBackground();
-    self.navigationController.navigationBar.titleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor};
-    self.navigationController.navigationBar.largeTitleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:34 weight:UIFontWeightBold]};
+    self.navigationController.navigationBar.tintColor = ADMInk();
+    self.navigationController.navigationBar.barTintColor = ADMCanvas();
+    self.navigationController.navigationBar.backgroundColor = ADMCanvas();
+    self.navigationController.navigationBar.titleTextAttributes = @{NSForegroundColorAttributeName: ADMInk()};
+    self.navigationController.navigationBar.largeTitleTextAttributes = @{NSForegroundColorAttributeName: ADMInk(), NSFontAttributeName: [UIFont systemFontOfSize:34 weight:UIFontWeightBold]};
 }
 
 - (void)setupTableView {
@@ -36,10 +40,10 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.tableView.backgroundColor = ADMSettingsBackground();
+    self.tableView.backgroundColor = ADMCanvas();
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 36, 0);
-    self.tableView.sectionHeaderHeight = 36;
+    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 30, 0);
+    self.tableView.sectionHeaderHeight = 38;
     self.tableView.sectionFooterHeight = 10;
     [self.view addSubview:self.tableView];
 }
@@ -57,13 +61,13 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellID];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cellID];
-        cell.backgroundColor = ADMSettingsCard();
-        cell.layer.cornerRadius = 16;
+        cell.backgroundColor = ADMPanel();
+        cell.layer.cornerRadius = 15;
         cell.layer.masksToBounds = YES;
-        cell.textLabel.textColor = UIColor.whiteColor;
+        cell.textLabel.textColor = ADMInk();
         cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        cell.detailTextLabel.textColor = ADMSettingsSecondary();
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+        cell.detailTextLabel.textColor = ADMMuted();
+        cell.detailTextLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
 
@@ -71,68 +75,60 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
     cell.textLabel.text = nil;
     cell.detailTextLabel.text = nil;
     cell.imageView.image = nil;
+    cell.imageView.tintColor = nil;
 
     if (indexPath.section == 0) {
-        cell.textLabel.text = @"الإصدار";
-        cell.detailTextLabel.text = @"1.4.2";
-        cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:ADMSettingsAccent()];
+        cell.textLabel.text = @"حالة الأداة";
+        cell.detailTextLabel.text = @"v1.4.3  /  READY";
+        cell.imageView.image = [[UIImage systemImageNamed:@"checkmark.shield.fill"] imageWithTintColor:ADMBlue()];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"مسح كل النسخ", @"تصدير النسخ", @"استيراد النسخ"];
         NSArray *icons = @[@"trash.circle.fill", @"square.and.arrow.up.fill", @"square.and.arrow.down.fill"];
-        NSArray *colors = @[
-            [UIColor colorWithRed:0.98 green:0.34 blue:0.40 alpha:1.0],
-            [UIColor colorWithRed:0.30 green:0.66 blue:0.96 alpha:1.0],
-            [UIColor colorWithRed:0.30 green:0.82 blue:0.55 alpha:1.0]
-        ];
+        NSArray *colors = @[ADMRed(), ADMBlue(), [UIColor colorWithRed:0.24 green:0.82 blue:0.58 alpha:1.0]];
         cell.textLabel.text = titles[indexPath.row];
         cell.imageView.image = [[UIImage systemImageNamed:icons[indexPath.row]] imageWithTintColor:colors[indexPath.row]];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    } else if (indexPath.row == 0) {
+        cell.textLabel.text = @"عن الأداة";
+        cell.detailTextLabel.text = @"ZAIN / @Zainqkvd";
+        cell.imageView.image = [[UIImage systemImageNamed:@"person.crop.circle.fill"] imageWithTintColor:ADMOrange()];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
-        if (indexPath.row == 0) {
-            cell.textLabel.text = @"عن الأداة";
-            cell.detailTextLabel.text = @"@Zainqkvd";
-            cell.imageView.image = [[UIImage systemImageNamed:@"person.fill"] imageWithTintColor:ADMSettingsAccent()];
-        } else {
-            cell.textLabel.text = @"حول AppData Manager";
-            cell.imageView.image = [[UIImage systemImageNamed:@"hand.raised.fill"] imageWithTintColor:[UIColor colorWithRed:0.98 green:0.62 blue:0.28 alpha:1.0]];
-        }
+        cell.textLabel.text = @"حول AppData Manager";
+        cell.imageView.image = [[UIImage systemImageNamed:@"info.circle.fill"] imageWithTintColor:ADMBlue()];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return 58; }
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return 60; }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     UIView *header = [[UIView alloc] init];
-    header.backgroundColor = ADMSettingsBackground();
+    header.backgroundColor = ADMCanvas();
     UILabel *label = [[UILabel alloc] init];
-    label.text = @[@"معلومات الأداة", @"إدارة النسخ الاحتياطية", @"المطور"][section];
-    label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-    label.textColor = [UIColor colorWithWhite:0.45 alpha:1.0];
+    label.text = @[@"SYSTEM STATUS", @"BACKUP OPERATIONS", @"ABOUT"][section];
+    label.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightSemibold];
+    label.textColor = ADMMuted();
     label.translatesAutoresizingMaskIntoConstraints = NO;
     [header addSubview:label];
     [NSLayoutConstraint activateConstraints:@[
         [label.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:20],
         [label.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-20],
-        [label.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-7]
+        [label.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-8]
     ]];
     return header;
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 34; }
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 36; }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (cell.layer.presentationLayer) return;
     cell.alpha = 0.0;
-    cell.transform = CGAffineTransformMakeTranslation(0, 8);
-    [UIView animateWithDuration:0.28 delay:MIN(indexPath.row * 0.04, 0.16) options:UIViewAnimationOptionCurveEaseOut animations:^{
-        cell.alpha = 1.0;
-        cell.transform = CGAffineTransformIdentity;
-    } completion:nil];
+    cell.transform = CGAffineTransformMakeTranslation(0, 7);
+    [UIView animateWithDuration:0.24 delay:MIN(indexPath.row * 0.035, 0.14) options:UIViewAnimationOptionCurveEaseOut animations:^{ cell.alpha = 1.0; cell.transform = CGAffineTransformIdentity; } completion:nil];
 }
 
-#pragma mark - Existing actions preserved
+#pragma mark - Actions (preserved)
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
@@ -154,12 +150,12 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
             UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
             pasteboard.string = path;
             [self showToast:[NSString stringWithFormat:@"تم نسخ المسار: %@", path]];
-        } else if (indexPath.row == 2) {
+        } else {
             [self showToast:@"انسخ ملفات النسخ إلى مجلد النسخ الاحتياطية"];
         }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
-            NSString *info = @"AppData Manager v1.4.2\n\n"
+            NSString *info = @"AppData Manager v1.4.3\n\n"
                 @"أداة احترافية لإدارة بيانات التطبيقات\n"
                 @"لأجهزة iOS Jailbreak.\n\n"
                 @"• متوافق مع Dopamine 3.0\n"
@@ -171,12 +167,7 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
             [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
         } else {
-            NSString *aboutText = @"\n"
-                @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
-                @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
-                @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"
-                @"X: @Zainqkvd\n\n"
-                @"المطور: ZAIN";
+            NSString *aboutText = @"\nمجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\nإذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\nللإبلاغ عن أي حالة بيع أو استغلال للأداة:\nX: @Zainqkvd\n\nالمطور: ZAIN";
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حول AppData Manager" message:aboutText preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:alert animated:YES completion:nil];
@@ -187,11 +178,11 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
 - (void)showToast:(NSString *)message {
     UILabel *toast = [[UILabel alloc] init];
     toast.text = message;
-    toast.textColor = UIColor.whiteColor;
-    toast.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.96];
+    toast.textColor = ADMInk();
+    toast.backgroundColor = [UIColor colorWithWhite:0.04 alpha:0.97];
     toast.textAlignment = NSTextAlignmentCenter;
     toast.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    toast.layer.cornerRadius = 15;
+    toast.layer.cornerRadius = 14;
     toast.layer.masksToBounds = YES;
     toast.numberOfLines = 0;
     CGSize size = [message boundingRectWithSize:CGSizeMake(self.view.bounds.size.width - 60, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName: toast.font} context:nil].size;
@@ -199,8 +190,8 @@ static UIColor *ADMSettingsAccent(void) { return [UIColor colorWithRed:0.54 gree
     toast.center = CGPointMake(self.view.center.x, self.view.bounds.size.height - 120);
     toast.alpha = 0.0;
     [self.view addSubview:toast];
-    [UIView animateWithDuration:0.22 animations:^{ toast.alpha = 1.0; } completion:^(BOOL finished) {
-        [UIView animateWithDuration:0.28 delay:2.2 options:UIViewAnimationOptionCurveEaseOut animations:^{ toast.alpha = 0.0; } completion:^(BOOL done) { [toast removeFromSuperview]; }];
+    [UIView animateWithDuration:0.2 animations:^{ toast.alpha = 1.0; } completion:^(BOOL finished) {
+        [UIView animateWithDuration:0.25 delay:2.2 options:UIViewAnimationOptionCurveEaseOut animations:^{ toast.alpha = 0.0; } completion:^(BOOL done) { [toast removeFromSuperview]; }];
     }];
 }
 
