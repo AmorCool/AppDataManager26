@@ -11,6 +11,9 @@
 #import <UIKit/UIKit.h>
 #import <sys/stat.h>
 #import <errno.h>
+#import <unistd.h>
+#import <pwd.h>
+#import <grp.h>
 #import <dlfcn.h>
 #import <stdio.h>
 
@@ -722,80 +725,11 @@ static void ADMSetError(NSError **error,
         }
 
         /*
-         * Compatibility match: some jailbreak/iOS combinations omit or
-         * relocate the metadata plist. The installed app's bundle container
-         * and data container share the same UUID, so derive the data path from
-         * the real installed bundle rather than guessing a path.
+         * Do not infer a data-container UUID from the bundle-container UUID.
+         * Those UUIDs are independent on iOS. If metadata cannot identify a
+         * data container, fail explicitly instead of writing to a plausible
+         * but wrong directory.
          */
-        NSArray *bundleBases = @[
-            @"/var/containers/Bundle/Application",
-            @"/private/var/containers/Bundle/Application",
-            ROOT_PATH_NS(@"/var/containers/Bundle/Application"),
-            ROOT_PATH_NS(@"/private/var/containers/Bundle/Application")
-        ];
-
-        for (NSString *bundleBase in bundleBases) {
-            BOOL bundleBaseIsDirectory = NO;
-            if (![fm fileExistsAtPath:bundleBase
-                           isDirectory:&bundleBaseIsDirectory] ||
-                !bundleBaseIsDirectory) {
-                continue;
-            }
-
-            NSArray *uuidDirectories =
-                [fm contentsOfDirectoryAtPath:bundleBase error:nil];
-            if (![uuidDirectories isKindOfClass:[NSArray class]]) {
-                continue;
-            }
-
-            for (NSString *uuidDirectory in uuidDirectories) {
-                @autoreleasepool {
-                    NSString *bundleContainer =
-                        [bundleBase stringByAppendingPathComponent:uuidDirectory];
-                    NSArray *items =
-                        [fm contentsOfDirectoryAtPath:bundleContainer error:nil];
-                    if (![items isKindOfClass:[NSArray class]]) {
-                        continue;
-                    }
-
-                    BOOL matchingBundle = NO;
-                    for (NSString *item in items) {
-                        if (![item hasSuffix:@".app"]) {
-                            continue;
-                        }
-                        NSString *infoPath =
-                            [[bundleContainer stringByAppendingPathComponent:item]
-                                stringByAppendingPathComponent:@"Info.plist"];
-                        NSDictionary *info =
-                            [NSDictionary dictionaryWithContentsOfFile:infoPath];
-                        if ([info[@"CFBundleIdentifier"] isKindOfClass:[NSString class]] &&
-                            [info[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
-                            matchingBundle = YES;
-                            break;
-                        }
-                    }
-
-                    if (!matchingBundle) {
-                        continue;
-                    }
-
-                    for (NSString *dataBase in dataBases) {
-                        NSString *candidate =
-                            [dataBase stringByAppendingPathComponent:uuidDirectory];
-                        BOOL candidateIsDirectory = NO;
-                        if ([fm fileExistsAtPath:candidate
-                                      isDirectory:&candidateIsDirectory] &&
-                            candidateIsDirectory) {
-                            NSLog(@"[ADM] data path resolved by bundle UUID %@: %@",
-                                  uuidDirectory,
-                                  candidate);
-                            return candidate;
-                        }
-                    }
-                }
-            }
-        }
-
         NSLog(@"[ADM] data path unavailable for bundle %@; searched real data roots",
               bundleID);
     }
@@ -1582,6 +1516,195 @@ static void ADMSetError(NSError **error,
 }
 
 /*
+ * Data copied by a root-privileged jailbreak utility can inherit root:wheel
+ * ownership. The target application normally runs as mobile, so existence
+ * alone is not enough: normalize and verify ownership before declaring a
+ * restore usable by the app.
+ */
+- (BOOL)normalizeDataOwnershipAtPath:(NSString *)path
+                               error:(NSError **)error {
+    if (error) {
+        *error = nil;
+    }
+
+    struct passwd *mobileUser = getpwnam("mobile");
+    struct group *mobileGroup = getgrnam("mobile");
+    if (!mobileUser || !mobileGroup) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataManager"
+                                         code:620
+                                     userInfo:@{
+                NSLocalizedDescriptionKey: @"تعذر تحديد مالك mobile أو مجموعته",
+                @"path": path ?: @"<nil>"
+            }];
+        }
+        return NO;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL rootIsDirectory = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&rootIsDirectory] ||
+        !rootIsDirectory) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataManager"
+                                         code:621
+                                     userInfo:@{
+                NSLocalizedDescriptionKey: @"مسار Data Container غير موجود لتصحيح الملكية",
+                @"path": path ?: @"<nil>"
+            }];
+        }
+        return NO;
+    }
+
+    NSURL *rootURL = [NSURL fileURLWithPath:path isDirectory:YES];
+    __block NSError *enumerationError = nil;
+    NSDirectoryEnumerator *enumerator =
+        [fm enumeratorAtURL:rootURL
+  includingPropertiesForKeys:@[NSURLIsSymbolicLinkKey]
+                     options:0
+                errorHandler:^BOOL(NSURL *url, NSError *enumError) {
+        if (!enumerationError) {
+            enumerationError = enumError;
+        }
+        return YES;
+    }];
+
+    NSMutableArray *paths = [NSMutableArray arrayWithObject:path];
+    for (NSURL *url in enumerator) {
+        if (url.path.length > 0) {
+            [paths addObject:url.path];
+        }
+    }
+
+    if (enumerationError) {
+        ADMLogFileError(@"enumerate target for ownership", path, enumerationError);
+        if (error) {
+            *error = enumerationError;
+        }
+        return NO;
+    }
+
+    for (NSString *itemPath in paths) {
+        @autoreleasepool {
+            const char *filesystemPath = itemPath.fileSystemRepresentation;
+            if (!filesystemPath) {
+                continue;
+            }
+
+            struct stat st;
+            if (lstat(filesystemPath, &st) != 0) {
+                NSError *statError =
+                    [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{
+                    NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                        @"تعذر فحص ملكية %@", itemPath],
+                    @"path": itemPath
+                }];
+                ADMLogFileError(@"lstat target ownership", itemPath, statError);
+                if (error) {
+                    *error = statError;
+                }
+                return NO;
+            }
+
+            if (S_ISLNK(st.st_mode)) {
+                continue;
+            }
+
+            if (lchown(filesystemPath,
+                       mobileUser->pw_uid,
+                       mobileGroup->gr_gid) != 0) {
+                NSError *ownerError =
+                    [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{
+                    NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                        @"تعذر تغيير مالك %@ إلى mobile", itemPath],
+                    @"path": itemPath
+                }];
+                ADMLogFileError(@"chown restored item", itemPath, ownerError);
+                if (error) {
+                    *error = ownerError;
+                }
+                return NO;
+            }
+
+            mode_t mode = st.st_mode & 07777;
+            if (S_ISDIR(st.st_mode)) {
+                mode |= S_IRUSR | S_IWUSR | S_IXUSR;
+            } else if (S_ISREG(st.st_mode)) {
+                mode |= S_IRUSR | S_IWUSR;
+            }
+
+            if (chmod(filesystemPath, mode) != 0) {
+                NSError *modeError =
+                    [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{
+                    NSLocalizedDescriptionKey: [NSString stringWithFormat:
+                        @"تعذر ضبط صلاحيات %@", itemPath],
+                    @"path": itemPath
+                }];
+                ADMLogFileError(@"chmod restored item", itemPath, modeError);
+                if (error) {
+                    *error = modeError;
+                }
+                return NO;
+            }
+        }
+    }
+
+    for (NSString *itemPath in paths) {
+        @autoreleasepool {
+            struct stat st;
+            if (lstat(itemPath.fileSystemRepresentation, &st) != 0) {
+                continue;
+            }
+            if (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode)) {
+                continue;
+            }
+            if (st.st_uid != mobileUser->pw_uid ||
+                st.st_gid != mobileGroup->gr_gid) {
+                NSLog(@"[ADM] ownership verification failed path=%@ uid=%u gid=%u expectedUid=%u expectedGid=%u",
+                      itemPath,
+                      st.st_uid,
+                      st.st_gid,
+                      mobileUser->pw_uid,
+                      mobileGroup->gr_gid);
+                if (error) {
+                    *error = [NSError errorWithDomain:@"AppDataManager"
+                                                 code:622
+                                             userInfo:@{
+                        NSLocalizedDescriptionKey: @"ملكية الملفات المستعادة ليست mobile",
+                        @"path": itemPath
+                    }];
+                }
+                return NO;
+            }
+            if (![fm isReadableFileAtPath:itemPath]) {
+                NSLog(@"[ADM] restored item is not readable path=%@", itemPath);
+                if (error) {
+                    *error = [NSError errorWithDomain:@"AppDataManager"
+                                                 code:623
+                                             userInfo:@{
+                        NSLocalizedDescriptionKey: @"الملف المستعاد غير قابل للقراءة من النظام",
+                        @"path": itemPath
+                    }];
+                }
+                return NO;
+            }
+        }
+    }
+
+    NSLog(@"[ADM] restored ownership normalized path=%@ uid=%u gid=%u",
+          path,
+          mobileUser->pw_uid,
+          mobileGroup->gr_gid);
+    return YES;
+}
+
+/*
  * Return a deterministic snapshot of a container. This is used as evidence
  * for restore verification; a successful copy call alone is not evidence.
  */
@@ -1635,6 +1758,7 @@ static void ADMSetError(NSError **error,
 
     unsigned long long size = 0;
     NSUInteger fileCount = 0;
+    NSMutableArray *relativeFiles = [NSMutableArray array];
     for (NSURL *fileURL in enumerator) {
         @autoreleasepool {
             NSNumber *isSymlink = nil;
@@ -1674,6 +1798,14 @@ static void ADMSetError(NSError **error,
 
             fileCount++;
             size += (unsigned long long)st.st_size;
+            NSString *relativePath = fileURL.path;
+            if ([relativePath hasPrefix:[path stringByAppendingString:@"/"]]) {
+                relativePath = [relativePath substringFromIndex:path.length + 1];
+            }
+            [relativeFiles addObject:@{
+                @"path": relativePath ?: @"",
+                @"bytes": @((unsigned long long)st.st_size)
+            }];
         }
     }
 
@@ -1695,10 +1827,16 @@ static void ADMSetError(NSError **error,
           attributes[NSFileGroupOwnerAccountID] ?: @"<unknown>",
           attributes[NSFilePosixPermissions] ?: @"<unknown>");
 
+    [relativeFiles sortUsingComparator:
+        ^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"path"] compare:b[@"path"]];
+    }];
+
     return @{
         @"fileCount": @(fileCount),
         @"bytes": @(size),
-        @"topLevelItems": [sortedTopLevel copy]
+        @"topLevelItems": [sortedTopLevel copy],
+        @"files": [relativeFiles copy]
     };
 }
 
@@ -2157,6 +2295,18 @@ static void ADMSetError(NSError **error,
                     }
                 }
 
+                NSError *ownershipError = nil;
+                if (![self normalizeDataOwnershipAtPath:mainDestination
+                                                  error:&ownershipError]) {
+                    ADMLogFileError(@"normalize restored ownership",
+                                    mainDestination,
+                                    ownershipError);
+                    ADMSetError(&restoreError, 624,
+                                ownershipError.localizedDescription ?: @"تعذر جعل البيانات قابلة للقراءة من التطبيق",
+                                mainDestination);
+                    return;
+                }
+
                 NSError *destinationSnapshotError = nil;
                 NSDictionary *destinationSnapshot =
                     [self filesystemSnapshotAtPath:mainDestination
@@ -2197,6 +2347,38 @@ static void ADMSetError(NSError **error,
                         restoredBytes],
                         mainDestination);
                     return;
+                }
+
+                /*
+                 * Compare every source relative file and byte count with the
+                 * target. A non-empty target with unrelated files is not a
+                 * successful restore of this backup.
+                 */
+                NSMutableDictionary *targetMap = [NSMutableDictionary dictionary];
+                for (NSDictionary *entry in destinationSnapshot[@"files"]) {
+                    NSString *relativePath = entry[@"path"];
+                    if ([relativePath isKindOfClass:[NSString class]]) {
+                        targetMap[relativePath] = entry[@"bytes"] ?: @0;
+                    }
+                }
+                for (NSDictionary *entry in primarySourceSnapshot[@"files"]) {
+                    NSString *relativePath = entry[@"path"];
+                    NSNumber *expectedBytes = entry[@"bytes"];
+                    NSNumber *actualBytes = targetMap[relativePath];
+                    if (![actualBytes isKindOfClass:[NSNumber class]] ||
+                        actualBytes.unsignedLongLongValue != expectedBytes.unsignedLongLongValue) {
+                        NSString *targetFile =
+                            [mainDestination stringByAppendingPathComponent:relativePath ?: @""];
+                        NSLog(@"[ADM] restore verification file mismatch relative=%@ expectedBytes=%@ actualBytes=%@ target=%@",
+                              relativePath,
+                              expectedBytes,
+                              actualBytes,
+                              targetFile);
+                        ADMSetError(&restoreError, 625,
+                                    @"فشل التحقق: ملف مستعاد مفقود أو حجمه مختلف عن النسخة",
+                                    targetFile);
+                        return;
+                    }
                 }
 
                 NSArray *expectedTopLevel = primarySourceSnapshot[@"topLevelItems"];
@@ -2249,6 +2431,11 @@ static void ADMSetError(NSError **error,
                           verifiedDataPath);
                     ADMSetError(&restoreError, 613, @"فشل التحقق: تم اكتشاف Data Container مختلف بعد الاستعادة", verifiedDataPath ?: mainDestination);
                     return;
+                }
+
+                if (![self killApp:bundleID]) {
+                    NSLog(@"[ADM] restore completed but target app termination was not confirmed: %@",
+                          bundleID);
                 }
 
                 success = YES;
