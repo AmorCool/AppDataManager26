@@ -666,6 +666,10 @@ extern char **environ;
         [self runRoot:self.uicachePath args:@[@"-p", destApp] opLog:opLog recordID:rec14b];
     }
 
+    // uicache may return success before Launch Services exposes the application.
+    // Request registration explicitly, then verify the actual application registry.
+    [self registerApplicationAtPath:destApp logicalPath:logicalDest bundleID:bundleID opLog:opLog txnID:txnID];
+
     // PHASE 9: VERIFY (comprehensive)
     NSString *rec15 = [opLog beginPhase:OperationPhaseVerify operation:@"final verify" target:destApp input:bundleID transactionID:txnID];
     BOOL finalOk = [self verifyInstallation:destApp bundleID:bundleID exeName:exeName opLog:opLog txnID:txnID];
@@ -837,6 +841,93 @@ extern char **environ;
     }
 }
 
+#pragma mark - Launch Services Registration
+
+- (BOOL)registerApplicationAtPath:(NSString *)resolvedPath
+                      logicalPath:(NSString *)logicalPath
+                         bundleID:(NSString *)bundleID
+                            opLog:(OperationLog *)opLog
+                             txnID:(NSString *)txnID {
+    NSString *rec = [opLog beginPhase:OperationPhaseUICache
+                             operation:@"LSApplicationWorkspace registerApplication"
+                                target:resolvedPath
+                                 input:logicalPath ?: @""
+                         transactionID:txnID];
+    BOOL accepted = NO;
+    @try {
+        Class LS = objc_getClass("LSApplicationWorkspace");
+        id workspace = LS ? [LS performSelector:@selector(defaultWorkspace)] : nil;
+        SEL registerSelector = NSSelectorFromString(@"registerApplication:");
+        if (workspace && [workspace respondsToSelector:registerSelector]) {
+            NSMutableArray<NSString *> *paths = [NSMutableArray array];
+            if (resolvedPath.length > 0) [paths addObject:resolvedPath];
+            if (logicalPath.length > 0 && ![paths containsObject:logicalPath]) [paths addObject:logicalPath];
+
+            for (NSString *path in paths) {
+                NSURL *url = [NSURL fileURLWithPath:path];
+                NSMethodSignature *signature = [workspace methodSignatureForSelector:registerSelector];
+                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+                invocation.target = workspace;
+                invocation.selector = registerSelector;
+                [invocation setArgument:&url atIndex:2];
+                [invocation invoke];
+                BOOL result = NO;
+                [invocation getReturnValue:&result];
+                if (result) { accepted = YES; break; }
+            }
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[IPAInstallerPro] registerApplication exception: %@", exception.reason);
+    }
+
+    [opLog endPhase:rec
+           exitCode:accepted ? 0 : 1
+          rawOutput:@""
+           rawError:accepted ? @"" : @"Launch Services rejected registration request"
+       verification:accepted ? @"Registration request accepted" : @"Registration request not accepted"
+           verified:accepted
+           duration:0];
+    return accepted;
+}
+
+- (BOOL)isApplicationRegisteredWithBundleID:(NSString *)bundleID {
+    if (bundleID.length == 0) return NO;
+    @try {
+        Class LS = objc_getClass("LSApplicationWorkspace");
+        id workspace = LS ? [LS performSelector:@selector(defaultWorkspace)] : nil;
+        if (!workspace) return NO;
+
+        SEL directSelector = NSSelectorFromString(@"applicationForIdentifier:");
+        if ([workspace respondsToSelector:directSelector]) {
+            id application = [workspace performSelector:directSelector withObject:bundleID];
+            if (application != nil) return YES;
+        }
+
+        NSArray<NSString *> *selectors = @[@"allInstalledApplications", @"allApplications"];
+        for (NSString *selectorName in selectors) {
+            SEL selector = NSSelectorFromString(selectorName);
+            if (![workspace respondsToSelector:selector]) continue;
+            NSArray *applications = [workspace performSelector:selector];
+            for (id application in applications) {
+                if (![application respondsToSelector:@selector(bundleIdentifier)]) continue;
+                NSString *candidate = [application performSelector:@selector(bundleIdentifier)];
+                if ([candidate isEqualToString:bundleID]) return YES;
+            }
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[IPAInstallerPro] registration lookup exception: %@", exception.reason);
+    }
+    return NO;
+}
+
+- (BOOL)waitForApplicationRegistration:(NSString *)bundleID {
+    for (NSUInteger attempt = 0; attempt < 8; attempt++) {
+        if ([self isApplicationRegisteredWithBundleID:bundleID]) return YES;
+        usleep(250000);
+    }
+    return NO;
+}
+
 #pragma mark - Verification
 
 - (BOOL)verifyInstallation:(NSString *)appPath bundleID:(NSString *)bid exeName:(NSString *)en opLog:(OperationLog *)opLog txnID:(NSString *)txnID {
@@ -884,22 +975,17 @@ extern char **environ;
         }
     }
 
-    // Check if app is registered in LSApplicationWorkspace (best effort)
-    Class LS = objc_getClass("LSApplicationWorkspace");
-    if (LS) {
-        id ws = [LS performSelector:@selector(defaultWorkspace)];
-        if ([ws respondsToSelector:@selector(applicationForIdentifier:)]) {
-            id a = [ws performSelector:@selector(applicationForIdentifier:) withObject:bid];
-            BOOL registered = (a != nil);
-            NSString *recLS = [opLog beginPhase:OperationPhaseVerify operation:@"LSApplicationWorkspace check" target:bid input:@"" transactionID:txnID];
-            [opLog endPhase:recLS exitCode:registered ? 0 : 1 rawOutput:@"" rawError:registered ? @"" : @"Not registered"
-             verification:[NSString stringWithFormat:@"registered=%@", registered ? @"YES" : @"NO"] verified:registered duration:0];
-            if (!registered) {
-                // Not critical — uicache may need time
-                NSLog(@"[IPAInstallerPro] App not yet registered in LS, but uicache was run");
-            }
-        }
-    }
+    // Registration is mandatory for installation success.
+    BOOL registered = [self waitForApplicationRegistration:bid];
+    NSString *recLS = [opLog beginPhase:OperationPhaseVerify operation:@"Launch Services registration check" target:bid input:@"" transactionID:txnID];
+    [opLog endPhase:recLS
+           exitCode:registered ? 0 : 1
+          rawOutput:@""
+           rawError:registered ? @"" : @"Application is not visible in Launch Services"
+       verification:[NSString stringWithFormat:@"registered=%@", registered ? @"YES" : @"NO"]
+           verified:registered
+           duration:2.0];
+    if (!registered) ok = NO;
 
     // Dopamine-specific: verify app is in correct rootless path
     NSString *expectedPrefix = @"/var/jb/Applications/";
