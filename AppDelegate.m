@@ -3,6 +3,9 @@
 #import "BackupManagerViewController.h"
 #import "SettingsViewController.h"
 
+static UIColor *ADMAppBackground(void) { return [UIColor colorWithRed:0.035 green:0.035 blue:0.055 alpha:1.0]; }
+static UIColor *ADMAppAccent(void) { return [UIColor colorWithRed:0.54 green:0.42 blue:0.98 alpha:1.0]; }
+
 @interface AppDelegate ()
 @end
 
@@ -11,32 +14,55 @@
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     UITabBarController *tabBarController = [[UITabBarController alloc] init];
+    tabBarController.view.backgroundColor = ADMAppBackground();
 
     MainViewController *mainVC = [[MainViewController alloc] init];
     UINavigationController *mainNav = [[UINavigationController alloc] initWithRootViewController:mainVC];
-    mainNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"التطبيقات"
-        image:[UIImage systemImageNamed:@"square.grid.2x2"] selectedImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];
+    mainNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"التطبيقات" image:[UIImage systemImageNamed:@"square.grid.2x2"] selectedImage:[UIImage systemImageNamed:@"square.grid.2x2.fill"]];
 
     BackupManagerViewController *backupVC = [[BackupManagerViewController alloc] init];
     UINavigationController *backupNav = [[UINavigationController alloc] initWithRootViewController:backupVC];
-    backupNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"النسخ"
-        image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] selectedImage:[UIImage systemImageNamed:@"clock.arrow.circlepath"]];
+    backupNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"النسخ" image:[UIImage systemImageNamed:@"clock.arrow.circlepath"] selectedImage:[UIImage systemImageNamed:@"clock.arrow.circlepath"]];
 
     SettingsViewController *settingsVC = [[SettingsViewController alloc] init];
     UINavigationController *settingsNav = [[UINavigationController alloc] initWithRootViewController:settingsVC];
-    settingsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"الإعدادات"
-        image:[UIImage systemImageNamed:@"gearshape"] selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
+    settingsNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"الإعدادات" image:[UIImage systemImageNamed:@"gearshape"] selectedImage:[UIImage systemImageNamed:@"gearshape.fill"]];
 
     tabBarController.viewControllers = @[mainNav, backupNav, settingsNav];
-    tabBarController.tabBar.tintColor = [UIColor colorWithRed:0.55 green:0.45 blue:0.95 alpha:1.0];
-    tabBarController.tabBar.barTintColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-    tabBarController.tabBar.unselectedItemTintColor = [UIColor colorWithWhite:0.3 alpha:1.0];
-    tabBarController.tabBar.backgroundColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.08 alpha:1.0];
+    tabBarController.tabBar.tintColor = ADMAppAccent();
+    tabBarController.tabBar.unselectedItemTintColor = [UIColor colorWithWhite:0.42 alpha:1.0];
+    tabBarController.tabBar.backgroundColor = ADMAppBackground();
+    tabBarController.tabBar.barTintColor = ADMAppBackground();
+
+    if (@available(iOS 13.0, *)) {
+        UITabBarAppearance *appearance = [[UITabBarAppearance alloc] init];
+        [appearance configureWithOpaqueBackground];
+        appearance.backgroundColor = ADMAppBackground();
+        appearance.shadowColor = [UIColor colorWithWhite:0.15 alpha:0.65];
+        appearance.stackedLayoutAppearance.normal.iconColor = [UIColor colorWithWhite:0.42 alpha:1.0];
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.42 alpha:1.0], NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightMedium]};
+        appearance.stackedLayoutAppearance.selected.iconColor = ADMAppAccent();
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = @{NSForegroundColorAttributeName: ADMAppAccent(), NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold]};
+        tabBarController.tabBar.standardAppearance = appearance;
+        if (@available(iOS 15.0, *)) tabBarController.tabBar.scrollEdgeAppearance = appearance;
+    }
 
     for (UINavigationController *nav in tabBarController.viewControllers) {
-        nav.navigationBar.barTintColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
-        nav.navigationBar.backgroundColor = [UIColor colorWithRed:0.02 green:0.02 blue:0.04 alpha:1.0];
+        nav.view.backgroundColor = ADMAppBackground();
+        nav.navigationBar.barTintColor = ADMAppBackground();
+        nav.navigationBar.backgroundColor = ADMAppBackground();
+        nav.navigationBar.tintColor = UIColor.whiteColor;
         nav.navigationBar.translucent = NO;
+        if (@available(iOS 13.0, *)) {
+            UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+            [appearance configureWithOpaqueBackground];
+            appearance.backgroundColor = ADMAppBackground();
+            appearance.shadowColor = UIColor.clearColor;
+            appearance.titleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor};
+            appearance.largeTitleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor};
+            nav.navigationBar.standardAppearance = appearance;
+            if (@available(iOS 15.0, *)) nav.navigationBar.scrollEdgeAppearance = appearance;
+        }
     }
 
     self.window.rootViewController = tabBarController;
@@ -49,15 +75,16 @@
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults boolForKey:@"HasLaunchedBefore"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSString *message = @"AppData Manager v1.4.1\n\n"
+            NSString *message = @"AppData Manager v1.4.2\n\n"
                 @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
                 @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
                 @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"
                 @"X: @Zainqkvd\n\n"
                 @"المطور: ZAIN";
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"حول AppData Manager" message:message preferredStyle:UIAlertControllerStyleAlert];
-            UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _) {
-                [defaults setBool:YES forKey:@"HasLaunchedBefore"]; [defaults synchronize];
+            UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"حسناً" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+                [defaults setBool:YES forKey:@"HasLaunchedBefore"];
+                [defaults synchronize];
             }];
             [alert addAction:okAction];
             UIViewController *topVC = self.window.rootViewController;

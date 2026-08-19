@@ -2,19 +2,19 @@
 #import "AppDataManager.h"
 
 // MARK: - Color Palette
-#define C_BG [UIColor colorWithRed:0.039 green:0.039 blue:0.047 alpha:1.0]
-#define C_CARD [UIColor colorWithRed:0.078 green:0.078 blue:0.086 alpha:1.0]
-#define C_CARD_HOVER [UIColor colorWithRed:0.10 green:0.10 blue:0.14 alpha:1.0]
-#define C_ACCENT [UIColor colorWithRed:0.769 green:0.655 blue:0.490 alpha:1.0]
-#define C_DANGER [UIColor colorWithRed:0.85 green:0.25 blue:0.25 alpha:1.0]
+#define C_BG [UIColor colorWithRed:0.035 green:0.035 blue:0.055 alpha:1.0]
+#define C_CARD [UIColor colorWithRed:0.085 green:0.085 blue:0.125 alpha:1.0]
+#define C_CARD_HOVER [UIColor colorWithRed:0.11 green:0.11 blue:0.16 alpha:1.0]
+#define C_ACCENT [UIColor colorWithRed:0.54 green:0.42 blue:0.98 alpha:1.0]
+#define C_DANGER [UIColor colorWithRed:0.98 green:0.34 blue:0.40 alpha:1.0]
 #define C_TEXT_PRI [UIColor whiteColor]
-#define C_TEXT_SEC [UIColor colorWithRed:0.60 green:0.60 blue:0.60 alpha:1.0]
-#define C_TEXT_TER [UIColor colorWithRed:0.35 green:0.35 blue:0.35 alpha:1.0]
+#define C_TEXT_SEC [UIColor colorWithWhite:0.58 alpha:1.0]
+#define C_TEXT_TER [UIColor colorWithWhite:0.42 alpha:1.0]
 
 // Category colors
-#define C_DOC [UIColor colorWithRed:0.35 green:0.75 blue:0.55 alpha:1.0]
-#define C_LIB [UIColor colorWithRed:0.45 green:0.55 blue:0.95 alpha:1.0]
-#define C_CACHE [UIColor colorWithRed:0.95 green:0.65 blue:0.25 alpha:1.0]
+#define C_DOC [UIColor colorWithRed:0.30 green:0.82 blue:0.55 alpha:1.0]
+#define C_LIB [UIColor colorWithRed:0.30 green:0.66 blue:0.96 alpha:1.0]
+#define C_CACHE [UIColor colorWithRed:0.98 green:0.62 blue:0.28 alpha:1.0]
 
 // MARK: - Smooth Storage Ring
 @interface StorageRingView : UIView
