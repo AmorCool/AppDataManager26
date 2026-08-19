@@ -17,6 +17,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <copyfile.h>
+#include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -865,23 +866,59 @@ extern char **environ;
     @try {
         Class LS = objc_getClass("LSApplicationWorkspace");
         id workspace = LS ? [LS performSelector:@selector(defaultWorkspace)] : nil;
-        SEL registerSelector = NSSelectorFromString(@"registerApplication:");
-        if (workspace && [workspace respondsToSelector:registerSelector]) {
-            NSMutableArray<NSString *> *paths = [NSMutableArray array];
-            if (resolvedPath.length > 0) [paths addObject:resolvedPath];
-            if (logicalPath.length > 0 && ![paths containsObject:logicalPath]) [paths addObject:logicalPath];
+        SEL dictionarySelector = NSSelectorFromString(@"registerApplicationDictionary:");
+        if (workspace && [workspace respondsToSelector:dictionarySelector]) {
+            dlopen("/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager", RTLD_NOW);
+            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[resolvedPath stringByAppendingPathComponent:@"Info.plist"]];
+            NSString *containerPath = nil;
+            Class containerClass = objc_getClass("MCMAppDataContainer");
+            SEL containerSelector = NSSelectorFromString(@"containerWithIdentifier:createIfNecessary:existed:error:");
+            if (containerClass && [containerClass respondsToSelector:containerSelector] && bundleID.length > 0) {
+                BOOL existed = NO;
+                NSError *containerError = nil;
+                id (*createContainer)(id, SEL, NSString *, BOOL, BOOL *, NSError **) = (id (*)(id, SEL, NSString *, BOOL, BOOL *, NSError **))objc_msgSend;
+                id container = createContainer((id)containerClass, containerSelector, bundleID, YES, &existed, &containerError);
+                SEL urlSelector = NSSelectorFromString(@"url");
+                if (container && [container respondsToSelector:urlSelector]) {
+                    id (*getURL)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+                    NSURL *containerURL = getURL(container, urlSelector);
+                    containerPath = containerURL.path;
+                }
+            }
+            NSMutableDictionary *registration = [NSMutableDictionary dictionary];
+            registration[@"ApplicationType"] = @"System";
+            registration[@"BundleNameIsLocalized"] = @1;
+            registration[@"CFBundleIdentifier"] = bundleID ?: @"";
+            registration[@"CompatibilityState"] = @0;
+            if (containerPath.length > 0) registration[@"Container"] = containerPath;
+            registration[@"IsDeletable"] = @0;
+            registration[@"Path"] = resolvedPath ?: logicalPath ?: @"";
+            if (info[@"CFBundleDisplayName"]) registration[@"CFBundleDisplayName"] = info[@"CFBundleDisplayName"];
+            if (info[@"CFBundleName"]) registration[@"CFBundleName"] = info[@"CFBundleName"];
 
-            for (NSString *path in paths) {
-                NSURL *url = [NSURL fileURLWithPath:path];
-                NSMethodSignature *signature = [workspace methodSignatureForSelector:registerSelector];
-                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                invocation.target = workspace;
-                invocation.selector = registerSelector;
-                [invocation setArgument:&url atIndex:2];
-                [invocation invoke];
-                BOOL result = NO;
-                [invocation getReturnValue:&result];
-                if (result) { accepted = YES; break; }
+            id (*sendDictionary)(id, SEL, NSDictionary *) = (id (*)(id, SEL, NSDictionary *))objc_msgSend;
+            accepted = sendDictionary(workspace, dictionarySelector, registration);
+        }
+
+        if (!accepted) {
+            SEL registerSelector = NSSelectorFromString(@"registerApplication:");
+            if (workspace && [workspace respondsToSelector:registerSelector]) {
+                NSMutableArray<NSString *> *paths = [NSMutableArray array];
+                if (resolvedPath.length > 0) [paths addObject:resolvedPath];
+                if (logicalPath.length > 0 && ![paths containsObject:logicalPath]) [paths addObject:logicalPath];
+
+                for (NSString *path in paths) {
+                    NSURL *url = [NSURL fileURLWithPath:path];
+                    NSMethodSignature *signature = [workspace methodSignatureForSelector:registerSelector];
+                    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+                    invocation.target = workspace;
+                    invocation.selector = registerSelector;
+                    [invocation setArgument:&url atIndex:2];
+                    [invocation invoke];
+                    BOOL result = NO;
+                    [invocation getReturnValue:&result];
+                    if (result) { accepted = YES; break; }
+                }
             }
         }
     } @catch (NSException *exception) {
