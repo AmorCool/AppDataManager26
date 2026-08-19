@@ -121,11 +121,23 @@
         if (LSApplicationProxy_class && [LSApplicationProxy_class respondsToSelector:@selector(applicationProxyForIdentifier:)]) {
             id proxy = [LSApplicationProxy_class performSelector:@selector(applicationProxyForIdentifier:) withObject:bundleID];
             if (proxy) {
-                NSArray *variants = @[@(0), @(1), @(2), @(10)];
-                for (NSNumber *variant in variants) {
-                    if ([proxy respondsToSelector:@selector(iconDataForVariant:)]) {
-                        NSData *iconData = [proxy performSelector:@selector(iconDataForVariant:) withObject:variant];
-                        if (iconData) {
+                NSArray<NSNumber *> *variants = @[@(0), @(1), @(2), @(10)];
+                SEL iconSelector = @selector(iconDataForVariant:);
+                if ([proxy respondsToSelector:iconSelector]) {
+                    NSMethodSignature *signature = [proxy methodSignatureForSelector:iconSelector];
+                    for (NSNumber *variant in variants) {
+                        if (!signature || signature.numberOfArguments < 3) continue;
+
+                        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+                        [invocation setTarget:proxy];
+                        [invocation setSelector:iconSelector];
+                        int variantValue = variant.intValue;
+                        [invocation setArgument:&variantValue atIndex:2];
+                        [invocation invoke];
+
+                        __unsafe_unretained NSData *iconData = nil;
+                        [invocation getReturnValue:&iconData];
+                        if (iconData.length > 0) {
                             icon = [UIImage imageWithData:iconData];
                             if (icon) break;
                         }
