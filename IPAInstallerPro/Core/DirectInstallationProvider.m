@@ -747,6 +747,13 @@ extern char **environ;
             [self signAllAt:ip hasHelper:hasH opLog:opLog txnID:txnID];
             if ([item hasSuffix:@".app"]) {
                 // The main executable is signed exactly once by signExe:, which preserves its original entitlements.
+            } else if ([item hasSuffix:@".appex"] || [item hasSuffix:@".xpc"]) {
+                // Extensions have their own executable and entitlements; sign them independently.
+                NSDictionary *extensionInfo = [NSDictionary dictionaryWithContentsOfFile:[ip stringByAppendingPathComponent:@"Info.plist"]];
+                NSString *extensionExecutable = extensionInfo[@"CFBundleExecutable"];
+                if ([extensionExecutable isKindOfClass:[NSString class]] && extensionExecutable.length > 0) {
+                    [self signExe:[ip stringByAppendingPathComponent:extensionExecutable] hasHelper:hasH opLog:opLog txnID:txnID];
+                }
             } else if ([item hasSuffix:@".framework"]) {
                 NSString *fn = [item stringByDeletingPathExtension];
                 [self signBin:[ip stringByAppendingPathComponent:fn] hasHelper:hasH label:[@"fw:" stringByAppendingString:fn] opLog:opLog txnID:txnID];
