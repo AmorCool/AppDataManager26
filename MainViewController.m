@@ -379,6 +379,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
 @property (nonatomic, strong) NSArray *systemApps;
 @property (nonatomic, strong) NSArray *visibleApps;
 @property (nonatomic, strong) AppDataManager *manager;
+@property (nonatomic, strong) UIView *topContainer;
 @property (nonatomic, strong) StatsHeaderView *statsView;
 @property (nonatomic, strong) UIRefreshControl *refreshControl;
 @property (nonatomic, strong) ADMStateView *stateView;
@@ -430,43 +431,14 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
 }
 
 - (void)setupTableView {
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
-    self.tableView.delegate = self;
-    self.tableView.dataSource = self;
-    self.tableView.backgroundColor = ADMCanvas();
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 30, 0);
-    self.tableView.alwaysBounceVertical = YES;
-    self.tableView.directionalLockEnabled = YES;
-    self.tableView.delaysContentTouches = NO;
-    self.tableView.canCancelContentTouches = YES;
-    self.tableView.decelerationRate = UIScrollViewDecelerationRateFast;
-    self.tableView.bounces = YES;
-    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
-    self.tableView.scrollsToTop = YES;
-    self.tableView.showsVerticalScrollIndicator = YES;
-    self.tableView.rowHeight = 86;
-    self.tableView.estimatedRowHeight = 86;
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.tableView];
-    [self.tableView registerClass:[AppScopeHeaderView class] forHeaderFooterViewReuseIdentifier:@"AppScopeHeader"];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
-    ]];
+    self.topContainer = [[UIView alloc] init];
+    self.topContainer.backgroundColor = ADMCanvas();
+    self.topContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.topContainer];
 
-    self.refreshControl = [[UIRefreshControl alloc] init];
-    self.refreshControl.tintColor = ADMAccent();
-    [self.refreshControl addTarget:self action:@selector(loadApps) forControlEvents:UIControlEventValueChanged];
-    self.tableView.refreshControl = self.refreshControl;
-
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 168)];
-    header.backgroundColor = ADMCanvas();
-    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 8, self.view.bounds.size.width - 32, 94)];
-    self.statsView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    [header addSubview:self.statsView];
+    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectZero];
+    self.statsView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.topContainer addSubview:self.statsView];
 
     self.scopeControl = [[UISegmentedControl alloc] initWithItems:@[@"تطبيقات المستخدم", @"تطبيقات النظام"]];
     self.scopeControl.selectedSegmentIndex = 0;
@@ -476,18 +448,55 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     self.scopeControl.layer.borderWidth = 0.5;
     self.scopeControl.layer.borderColor = [ADMAccent() colorWithAlphaComponent:0.38].CGColor;
     self.scopeControl.clipsToBounds = YES;
-    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ADMMuted(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ADMAccent(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
+    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [self.scopeControl addTarget:self action:@selector(scopeChanged:) forControlEvents:UIControlEventValueChanged];
     self.scopeControl.translatesAutoresizingMaskIntoConstraints = NO;
-    [header addSubview:self.scopeControl];
+    [self.topContainer addSubview:self.scopeControl];
+
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    self.tableView.delegate = self;
+    self.tableView.dataSource = self;
+    self.tableView.backgroundColor = ADMCanvas();
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 30, 0);
+    self.tableView.alwaysBounceVertical = YES;
+    self.tableView.directionalLockEnabled = NO;
+    self.tableView.delaysContentTouches = NO;
+    self.tableView.canCancelContentTouches = YES;
+    self.tableView.decelerationRate = UIScrollViewDecelerationRateNormal;
+    self.tableView.bounces = YES;
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
+    self.tableView.scrollsToTop = YES;
+    self.tableView.showsVerticalScrollIndicator = YES;
+    self.tableView.rowHeight = 86;
+    self.tableView.estimatedRowHeight = 86;
+    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.tableView];
+    [self.tableView registerClass:[AppScopeHeaderView class] forHeaderFooterViewReuseIdentifier:@"AppScopeHeader"];
+    self.refreshControl = [[UIRefreshControl alloc] init];
+    self.refreshControl.tintColor = ADMAccent();
+    [self.refreshControl addTarget:self action:@selector(loadApps) forControlEvents:UIControlEventValueChanged];
+    self.tableView.refreshControl = self.refreshControl;
+
     [NSLayoutConstraint activateConstraints:@[
-        [self.scopeControl.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
-        [self.scopeControl.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
+        [self.topContainer.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [self.topContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.topContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.topContainer.heightAnchor constraintEqualToConstant:154],
+        [self.statsView.topAnchor constraintEqualToAnchor:self.topContainer.topAnchor constant:8],
+        [self.statsView.leadingAnchor constraintEqualToAnchor:self.topContainer.leadingAnchor constant:16],
+        [self.statsView.trailingAnchor constraintEqualToAnchor:self.topContainer.trailingAnchor constant:-16],
+        [self.statsView.heightAnchor constraintEqualToConstant:94],
         [self.scopeControl.topAnchor constraintEqualToAnchor:self.statsView.bottomAnchor constant:10],
-        [self.scopeControl.heightAnchor constraintEqualToConstant:40]
+        [self.scopeControl.leadingAnchor constraintEqualToAnchor:self.topContainer.leadingAnchor constant:16],
+        [self.scopeControl.trailingAnchor constraintEqualToAnchor:self.topContainer.trailingAnchor constant:-16],
+        [self.scopeControl.heightAnchor constraintEqualToConstant:40],
+        [self.tableView.topAnchor constraintEqualToAnchor:self.topContainer.bottomAnchor],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
-    self.tableView.tableHeaderView = header;
 }
 
 - (void)setupStateView {
@@ -580,6 +589,13 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     } completion:nil];
 }
 
+- (NSString *)displaySizeForApp:(NSDictionary *)app {
+    NSString *value = [app[@"sizeString"] isKindOfClass:[NSString class]] ? app[@"sizeString"] : @"";
+    NSString *normalized = [value lowercaseString];
+    if (value.length == 0 || [normalized containsString:@"calculating"] || [value containsString:@"جار"] || [value containsString:@"حساب"]) return @"—";
+    return value;
+}
+
 - (void)calculateSizesInBackground {
     if (self.isCalculatingSizes || self.allApps.count == 0) return;
     self.isCalculatingSizes = YES;
@@ -629,7 +645,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     NSDictionary *app = self.visibleApps[indexPath.row];
     cell.nameLabel.text = app[@"name"];
     cell.bundleLabel.text = app[@"bundleID"];
-    cell.sizeLabel.text = app[@"sizeString"] ?: @"—";
+    cell.sizeLabel.text = [self displaySizeForApp:app];
     UIImage *icon = [self.manager iconForBundleID:app[@"bundleID"]];
     if (icon) { cell.appIcon.image = icon; cell.appIcon.tintColor = nil; }
     else { cell.appIcon.image = [UIImage systemImageNamed:@"app.fill"]; cell.appIcon.tintColor = ADMAccent(); }
@@ -640,29 +656,6 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     // Keep scrolling fully under the user's control; transitions are handled at the scope level.
     cell.alpha = 1.0;
     cell.transform = CGAffineTransformIdentity;
-}
-
-- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
-    [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
-        self.scopeControl.alpha = 0.94;
-        self.statsView.alpha = 0.94;
-    } completion:nil];
-}
-
-- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
-    if (!decelerate) {
-        [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
-            self.scopeControl.alpha = 1.0;
-        self.statsView.alpha = 1.0;
-        } completion:nil];
-    }
-}
-
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
-    [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
-        self.scopeControl.alpha = 1.0;
-        self.statsView.alpha = 1.0;
-    } completion:nil];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -676,7 +669,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     [self rebuildSectionsForSearchText:searchController.searchBar.text];
-    [UIView transitionWithView:self.tableView duration:0.18 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{ [self.tableView reloadData]; } completion:nil];
+    [self.tableView reloadData];
 }
 
 @end
