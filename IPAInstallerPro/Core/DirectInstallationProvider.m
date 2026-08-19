@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <copyfile.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 
 extern char **environ;
@@ -132,6 +133,35 @@ extern char **environ;
          verification:[NSString stringWithFormat:@"cmd=%@ args=%@", cmd, [args componentsJoinedByString:@" "]] verified:ok duration:0];
     }
     return ok;
+}
+
+- (BOOL)runCmd:(NSString *)cmd args:(NSArray *)args stdoutPath:(NSString *)stdoutPath {
+    if (!cmd || cmd.length == 0 || !stdoutPath || stdoutPath.length == 0) return NO;
+
+    int fd = open([stdoutPath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return NO;
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, fd, STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, fd);
+
+    pid_t pid;
+    const char *c = [cmd UTF8String];
+    char **argv = malloc((args.count + 2) * sizeof(char *));
+    argv[0] = (char *)c;
+    for (NSUInteger i = 0; i < args.count; i++) argv[i + 1] = (char *)[args[i] UTF8String];
+    argv[args.count + 1] = NULL;
+
+    int spawnStatus = posix_spawn(&pid, c, &actions, NULL, argv, environ);
+    free(argv);
+    posix_spawn_file_actions_destroy(&actions);
+    close(fd);
+    if (spawnStatus != 0) return NO;
+
+    int waitStatus = 0;
+    waitpid(pid, &waitStatus, 0);
+    return WIFEXITED(waitStatus) && WEXITSTATUS(waitStatus) == 0;
 }
 
 - (BOOL)runRoot:(NSString *)cmd args:(NSArray *)args opLog:(OperationLog *)opLog recordID:(NSString *)recID {
@@ -672,18 +702,31 @@ extern char **environ;
 
 - (NSString *)extractBundleIDFromIPA:(NSString *)ipaPath {
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
-    [fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
+    if (!ipaPath || ![fm isReadableFileAtPath:ipaPath]) return nil;
 
-    // Quick unzip of Info.plist only
-    [self runCmd:self.unzipPath args:@[@"-j", @"-o", ipaPath, @"Payload/*/Info.plist", @"-d", tmp] opLog:nil recordID:nil];
+    // Read the archive directory only. This avoids wildcard matching and avoids unpacking a large IPA.
+    NSString *listing = [self runCmdOutput:self.unzipPath args:@[@"-Z1", ipaPath]];
+    NSString *infoEntry = nil;
+    for (NSString *rawLine in [listing componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+        NSString *entry = [rawLine stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *lowerEntry = entry.lowercaseString;
+        if ([lowerEntry hasPrefix:@"payload/"] && [lowerEntry hasSuffix:@".app/info.plist"] && ![self containsDangerousPaths:entry]) {
+            infoEntry = entry;
+            break;
+        }
+    }
+    if (!infoEntry) return nil;
+
+    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+    if (![fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil]) return nil;
 
     NSString *infoPath = [tmp stringByAppendingPathComponent:@"Info.plist"];
-    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-    NSString *bundleID = info[@"CFBundleIdentifier"];
+    BOOL extracted = [self runCmd:self.unzipPath args:@[@"-p", ipaPath, infoEntry] stdoutPath:infoPath];
+    NSDictionary *info = extracted ? [NSDictionary dictionaryWithContentsOfFile:infoPath] : nil;
+    NSString *bundleID = [info[@"CFBundleIdentifier"] isKindOfClass:[NSString class]] ? info[@"CFBundleIdentifier"] : nil;
 
     [fm removeItemAtPath:tmp error:nil];
-    return bundleID;
+    return bundleID.length > 0 ? bundleID : nil;
 }
 
 #pragma mark - Signing
