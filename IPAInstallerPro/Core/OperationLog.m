@@ -347,7 +347,7 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
 - (void)broadcastRecordAdded:(OperationRecord *)record {
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter] postNotificationName:@"OperationRecordAdded"
-                                                            object:self
+                                                            object:record
                                                           userInfo:@{@"record": [record dictionaryRepresentation]}];
     });
 }
@@ -355,7 +355,7 @@ static NSString * const kLogFileName = @"IPAInstallerPro_OperationLog.plist";
 - (void)broadcastRecordUpdated:(OperationRecord *)record {
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter] postNotificationName:@"OperationRecordUpdated"
-                                                            object:self
+                                                            object:record
                                                           userInfo:@{@"record": [record dictionaryRepresentation]}];
     });
 }
