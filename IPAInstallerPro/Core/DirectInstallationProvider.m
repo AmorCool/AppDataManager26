@@ -12,6 +12,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #include <spawn.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -899,7 +900,8 @@ extern char **environ;
 
         SEL directSelector = NSSelectorFromString(@"applicationForIdentifier:");
         if ([workspace respondsToSelector:directSelector]) {
-            id application = [workspace performSelector:directSelector withObject:bundleID];
+            id (*sendObject)(id, SEL, id) = (id (*)(id, SEL, id))objc_msgSend;
+            id application = sendObject(workspace, directSelector, bundleID);
             if (application != nil) return YES;
         }
 
@@ -907,7 +909,8 @@ extern char **environ;
         for (NSString *selectorName in selectors) {
             SEL selector = NSSelectorFromString(selectorName);
             if (![workspace respondsToSelector:selector]) continue;
-            NSArray *applications = [workspace performSelector:selector];
+            id (*sendNoArguments)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+            NSArray *applications = sendNoArguments(workspace, selector);
             for (id application in applications) {
                 if (![application respondsToSelector:@selector(bundleIdentifier)]) continue;
                 NSString *candidate = [application performSelector:@selector(bundleIdentifier)];
