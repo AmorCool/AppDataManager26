@@ -9,7 +9,7 @@ include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = AppDataManager
 
 AppDataManager_FILES = main.m AppDelegate.m MainViewController.m AppDetailViewController.m BackupManagerViewController.m SettingsViewController.m AppDataManager.m
-AppDataManager_FRAMEWORKS = UIKit CoreGraphics QuartzCore
+AppDataManager_FRAMEWORKS = UIKit CoreGraphics
 AppDataManager_PRIVATE_FRAMEWORKS = MobileCoreServices
 AppDataManager_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable
 AppDataManager_CODESIGN_FLAGS = -Sentitlements.plist

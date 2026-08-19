@@ -2,9 +2,6 @@
 #define ROOTLESS_H
 
 #include <sys/stat.h>
-#include <unistd.h>
-#include <limits.h>
-#include <stdio.h>
 #include <string.h>
 
 static inline const char *ROOT_PATH(const char *path) {
