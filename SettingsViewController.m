@@ -3,7 +3,6 @@
 
 static UIColor *ADMCanvas(void) { return [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]; }
 static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.082 blue:0.105 alpha:1.0]; }
-static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.105 green:0.115 blue:0.145 alpha:1.0]; }
 static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
 static UIColor *ADMMuted(void) { return [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]; }
 static UIColor *ADMBlue(void) { return [UIColor colorWithRed:0.20 green:0.67 blue:0.96 alpha:1.0]; }
