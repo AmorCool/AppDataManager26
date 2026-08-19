@@ -3,6 +3,11 @@ name: Build AppDataManager → Dev Repo
 permissions:
   contents: write
 
+# A push and a manual dispatch must never deploy repo-dev concurrently.
+concurrency:
+  group: appdata-dev-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]

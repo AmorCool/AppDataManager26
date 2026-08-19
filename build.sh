@@ -9,7 +9,7 @@
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-BUILD_MODE="${1:-all}"
+BUILD_MODE="${1:-appdatamanager}"
 
 echo "=========================================="
 echo " 📱 AppDataManager Build System"

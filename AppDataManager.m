@@ -783,6 +783,20 @@ static void ADMSetError(NSError **error,
         return @[];
     }
 
+    /*
+     * LaunchServices group-container SPI is not safe on the serialized
+     * filesystem queue. Keep the SPI call on the main thread and return a
+     * retained immutable snapshot to the caller. This removes the direct
+     * background private-API crash path used by Backup/Restore.
+     */
+    if (![NSThread isMainThread]) {
+        __block NSArray *mainThreadPaths = @[];
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            mainThreadPaths = [self groupContainerPathsForBundleID:bundleID];
+        });
+        return mainThreadPaths ?: @[];
+    }
+
     NSMutableArray *paths =
         [NSMutableArray array];
 
@@ -1922,6 +1936,7 @@ static void ADMSetError(NSError **error,
                         hasPrefix:expectedPrefix]) {
                     NSLog(@"[ADM] restore rejected: backup belongs to another app (%@)",
                           standardSelected.lastPathComponent);
+                    ADMSetError(&restoreError, 605, @"النسخة الاحتياطية تخص تطبيقاً آخر", standardSelected);
                     return;
                 }
 
@@ -2063,6 +2078,7 @@ static void ADMSetError(NSError **error,
 
                 if (!primarySource) {
                     NSLog(@"[ADM] restore failed: primary backup container not identified");
+                    ADMSetError(&restoreError, 606, @"تعذر تحديد الحاوية الرئيسية داخل النسخة الاحتياطية", standardSelected);
                     return;
                 }
 
@@ -2200,6 +2216,7 @@ static void ADMSetError(NSError **error,
                               destination,
                               contentsError.localizedDescription);
                         if (isPrimary) {
+                            ADMSetError(&restoreError, 617, contentsError.localizedDescription ?: @"تعذر قراءة الحاوية الحالية قبل الاستعادة", destination);
                             return;
                         }
                         continue;
@@ -2221,6 +2238,7 @@ static void ADMSetError(NSError **error,
                                   fullPath,
                                   removeError.localizedDescription);
                             if (isPrimary) {
+                                ADMSetError(&restoreError, 617, removeError.localizedDescription ?: @"تعذر حذف بيانات الحاوية قبل الاستعادة", fullPath);
                                 return;
                             }
                             break;
@@ -2246,6 +2264,7 @@ static void ADMSetError(NSError **error,
                               source,
                               contentsError.localizedDescription);
                         if (isPrimary) {
+                            ADMSetError(&restoreError, 618, contentsError.localizedDescription ?: @"تعذر قراءة حاوية النسخة الرئيسية", source);
                             return;
                         }
                         continue;
@@ -2272,6 +2291,7 @@ static void ADMSetError(NSError **error,
                                   childDestination,
                                   copyError.localizedDescription);
                             if (isPrimary) {
+                                ADMSetError(&restoreError, 619, copyError.localizedDescription ?: @"تعذر إزالة ملف متعارض قبل الاستعادة", childDestination);
                                 return;
                             }
                             break;
@@ -2287,6 +2307,7 @@ static void ADMSetError(NSError **error,
                                   childDestination,
                                   copyError.localizedDescription);
                             if (isPrimary) {
+                                ADMSetError(&restoreError, 620, copyError.localizedDescription ?: @"تعذر نسخ ملف من النسخة الاحتياطية", childDestination);
                                 return;
                             }
                             break;
@@ -2318,6 +2339,7 @@ static void ADMSetError(NSError **error,
                     ADMLogFileError(@"snapshot restored primary container",
                                     mainDestination,
                                     destinationSnapshotError);
+                    ADMSetError(&restoreError, 621, destinationSnapshotError.localizedDescription ?: @"تعذر فحص الحاوية بعد الاستعادة", mainDestination);
                     return;
                 }
 
@@ -3384,6 +3406,15 @@ static void ADMSetError(NSError **error,
     if (![bundleID isKindOfClass:[NSString class]] ||
         bundleID.length == 0) {
         return NO;
+    }
+
+    /* LSApplicationWorkspace must never be invoked from fileQueue. */
+    if (![NSThread isMainThread]) {
+        __block BOOL terminated = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            terminated = [self killApp:bundleID];
+        });
+        return terminated;
     }
 
     @try {

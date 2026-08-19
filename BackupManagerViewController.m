@@ -483,6 +483,7 @@
 @property (nonatomic, strong) dispatch_queue_t workerQueue;
 
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
+@property (nonatomic, assign) BOOL operationInProgress;
 
 /*
  * Prevents stale asynchronous loads from replacing newer data.
@@ -514,6 +515,7 @@
             DISPATCH_QUEUE_SERIAL);
 
     self.loadGeneration = 0;
+    self.operationInProgress = NO;
 
     [self setupNavigationBar];
     [self setupStatsView];
@@ -1530,10 +1532,12 @@ heightForHeaderInSection:(NSInteger)section {
                   path:(NSString *)path {
 
     if (bundleID.length == 0 ||
-        path.length == 0) {
+        path.length == 0 ||
+        self.operationInProgress) {
         return;
     }
 
+    self.operationInProgress = YES;
     [self.spinner startAnimating];
 
     dispatch_async(self.workerQueue, ^{
@@ -1563,6 +1567,7 @@ heightForHeaderInSection:(NSInteger)section {
                 restoreError.localizedDescription ?: @"تعذر إثبات عودة البيانات"];
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            self.operationInProgress = NO;
             [self.spinner stopAnimating];
             [self showToast:resultMessage];
 
@@ -1611,10 +1616,12 @@ heightForHeaderInSection:(NSInteger)section {
 
 - (void)performDelete:(NSString *)path {
     if (![path isKindOfClass:[NSString class]] ||
-        path.length == 0) {
+        path.length == 0 ||
+        self.operationInProgress) {
         return;
     }
 
+    self.operationInProgress = YES;
     [self.spinner startAnimating];
 
     dispatch_async(self.workerQueue, ^{
@@ -1630,6 +1637,7 @@ heightForHeaderInSection:(NSInteger)section {
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
+            self.operationInProgress = NO;
             [self.spinner stopAnimating];
 
             [self showToast:

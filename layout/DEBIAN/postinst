@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================="
-echo " 📱 AppData Manager v1.7.15"
+echo " 📱 AppData Manager v1.7.16"
 echo " Dopamine 3.0 / Rootless Compatible"
 echo "=========================================="
 
@@ -16,10 +16,11 @@ APP_PATH="${JB_ROOT}/Applications/AppDataManager.app"
 BACKUP_DIR="/var/mobile/Documents/AppDataManager/Backups"
 if [ ! -d "$BACKUP_DIR" ]; then
     mkdir -p "$BACKUP_DIR"
-    chown mobile:mobile "$BACKUP_DIR"
-    chmod 755 "$BACKUP_DIR"
     echo "✅ Backup directory created at $BACKUP_DIR"
 fi
+# Repair ownership and mode on upgrades as well as first install.
+chown mobile:mobile "$BACKUP_DIR"
+chmod 755 "$BACKUP_DIR"
 
 if command -v uicache &> /dev/null; then
     echo "🔄 Updating icon cache..."
