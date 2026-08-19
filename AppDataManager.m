@@ -859,13 +859,6 @@ static void ADMSetError(NSError **error,
         return 0;
     }
 
-    NSNumber *cached =
-        [self.sizeCache objectForKey:bundleID];
-
-    if (cached) {
-        return cached.unsignedLongLongValue;
-    }
-
     unsigned long long total = 0;
 
     @autoreleasepool {
@@ -895,13 +888,11 @@ static void ADMSetError(NSError **error,
         }
     }
 
-    NSNumber *value = @(total);
-
-    dispatch_barrier_async(self.cacheQueue, ^{
-        [self.sizeCache setObject:value
-                           forKey:bundleID];
-    });
-
+    /*
+     * This is a live filesystem statistic. Do not cache it: data can change
+     * outside this process and a cached zero is indistinguishable from an
+     * empty container in the UI.
+     */
     return total;
 }
 

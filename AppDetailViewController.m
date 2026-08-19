@@ -826,8 +826,9 @@
                                      value:version];
 
                 [self updateCardValueLabel:self.dataSizeValueLabel
-                                     value:[self.manager
-                                                formatBytes:dataSize]];
+                                     value:dataPath.length > 0
+                                          ? [self.manager formatBytes:dataSize]
+                                          : @"غير متاح"];
 
                 [self updateCardValueLabel:
                           self.documentsSizeValueLabel

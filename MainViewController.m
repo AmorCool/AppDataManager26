@@ -649,26 +649,30 @@
                     }
 
                     unsigned long long size = 0;
-                    NSString *sizeString = @"—";
+                    NSString *sizeString = @"غير متاح";
+                    BOOL sizeAvailable = NO;
 
                     @try {
-                        size =
-                            [self.manager dataSizeForBundleID:bundleID];
-
-                        @try {
+                        NSString *resolvedPath =
+                            [self.manager dataPathForBundleID:bundleID];
+                        sizeAvailable =
+                            resolvedPath.length > 0 &&
+                            [[NSFileManager defaultManager] fileExistsAtPath:resolvedPath];
+                        if (sizeAvailable) {
+                            size =
+                                [self.manager dataSizeForBundleID:bundleID];
                             sizeString =
                                 [self.manager formatBytes:size];
-                        } @catch (NSException *e) {
-                            sizeString = @"—";
                         }
                     } @catch (NSException *e) {
-                        NSLog(@"[AppDataManager] size crash isolated "
-                              @"for %@: %@", bundleID, e);
+                        NSLog(@"[AppDataManager] size measurement failed for %@: %@",
+                              bundleID, e);
                         size = 0;
-                        sizeString = @"—";
+                        sizeString = @"غير متاح";
+                        sizeAvailable = NO;
                     }
 
-                    if (totalSize <= ULLONG_MAX - size) {
+                    if (sizeAvailable && totalSize <= ULLONG_MAX - size) {
                         totalSize += size;
                     }
 

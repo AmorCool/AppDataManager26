@@ -1014,17 +1014,28 @@
                     }
 
                     unsigned long long appSize = 0;
+                    BOOL sizeAvailable = NO;
                     @try {
-                        appSize =
-                            [self.manager dataSizeForBundleID:bundleID];
+                        NSString *resolvedPath =
+                            [self.manager dataPathForBundleID:bundleID];
+                        sizeAvailable =
+                            resolvedPath.length > 0 &&
+                            [[NSFileManager defaultManager] fileExistsAtPath:resolvedPath];
+                        if (sizeAvailable) {
+                            appSize =
+                                [self.manager dataSizeForBundleID:bundleID];
+                        }
                     } @catch (NSException *exception) {
                         appSize = 0;
+                        sizeAvailable = NO;
                     }
 
-                    if (ULLONG_MAX - appsSize < appSize) {
-                        appsSize = ULLONG_MAX;
-                    } else {
-                        appsSize += appSize;
+                    if (sizeAvailable) {
+                        if (ULLONG_MAX - appsSize < appSize) {
+                            appsSize = ULLONG_MAX;
+                        } else {
+                            appsSize += appSize;
+                        }
                     }
                 }
             }
