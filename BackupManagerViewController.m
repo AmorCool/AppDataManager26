@@ -6,7 +6,8 @@ static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.090 green:0.093 
 static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.135 green:0.140 blue:0.158 alpha:1.0]; }
 static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
 static UIColor *ADMMuted(void) { return [UIColor colorWithWhite:0.66 alpha:1.0]; }
-static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithRed:0.43 green:0.56 blue:0.92 alpha:1.0]; }
+static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.17 blue:0.30 alpha:1.0]; }
 
 #pragma mark - Storage map
 
@@ -121,9 +122,9 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
         _sizeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [_cardView addSubview:_sizeLabel];
 
-        _deleteButton = [self makeButtonWithIcon:@"trash.fill" color:ADMAccent() background:ADMPanelRaised()];
+        _deleteButton = [self makeButtonWithIcon:@"trash.fill" color:ADMAccent() background:ADMAccentSoft()];
         [_cardView addSubview:_deleteButton];
-        _restoreButton = [self makeButtonWithIcon:@"arrow.counterclockwise" color:ADMAccent() background:ADMPanelRaised()];
+        _restoreButton = [self makeButtonWithIcon:@"arrow.counterclockwise" color:ADMAccent() background:ADMAccentSoft()];
         [_cardView addSubview:_restoreButton];
 
         [NSLayoutConstraint activateConstraints:@[

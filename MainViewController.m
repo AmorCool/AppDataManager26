@@ -10,7 +10,8 @@ static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.135 green:
 static UIColor *ADMLine(void) { return [UIColor colorWithWhite:0.34 alpha:0.82]; }
 static UIColor *ADMInk(void) { return [UIColor colorWithWhite:0.98 alpha:1.0]; }
 static UIColor *ADMMuted(void) { return [UIColor colorWithWhite:0.66 alpha:1.0]; }
-static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithRed:0.43 green:0.56 blue:0.92 alpha:1.0]; }
+static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.17 blue:0.30 alpha:1.0]; }
 
 #pragma mark - Application row
 
@@ -144,15 +145,15 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
 
         _subtitleLabel = [[UILabel alloc] init];
         _subtitleLabel.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightMedium];
-        _subtitleLabel.textColor = ADMMuted();
+        _subtitleLabel.textColor = ADMAccent();
         _subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_subtitleLabel];
 
         _countLabel = [[UILabel alloc] init];
         _countLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightSemibold];
-        _countLabel.textColor = ADMInk();
+        _countLabel.textColor = ADMAccent();
         _countLabel.textAlignment = NSTextAlignmentCenter;
-        _countLabel.backgroundColor = ADMPanelRaised();
+        _countLabel.backgroundColor = ADMAccentSoft();
         _countLabel.layer.cornerRadius = 11;
         _countLabel.layer.masksToBounds = YES;
         _countLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -195,14 +196,14 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
         UILabel *title = [[UILabel alloc] init];
         title.text = @"ملخص التطبيقات";
         title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-        title.textColor = ADMMuted();
+        title.textColor = ADMAccent();
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:title];
 
         UILabel *status = [[UILabel alloc] init];
         status.text = @"LIVE";
         status.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightBold];
-        status.textColor = ADMMuted();
+        status.textColor = ADMAccent();
         status.textAlignment = NSTextAlignmentRight;
         status.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:status];
@@ -215,7 +216,7 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
         _appsValueLabel = [[UILabel alloc] init];
         _appsValueLabel.text = @"—";
         _appsValueLabel.font = [UIFont monospacedDigitSystemFontOfSize:23 weight:UIFontWeightBold];
-        _appsValueLabel.textColor = ADMInk();
+        _appsValueLabel.textColor = ADMAccent();
         _appsValueLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_appsValueLabel];
 
@@ -439,30 +440,30 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
     [self.refreshControl addTarget:self action:@selector(loadApps) forControlEvents:UIControlEventValueChanged];
     self.tableView.refreshControl = self.refreshControl;
 
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 198)];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 168)];
     header.backgroundColor = ADMCanvas();
-    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 10, self.view.bounds.size.width - 32, 96)];
+    self.statsView = [[StatsHeaderView alloc] initWithFrame:CGRectMake(16, 8, self.view.bounds.size.width - 32, 94)];
     self.statsView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [header addSubview:self.statsView];
 
     self.scopeControl = [[UISegmentedControl alloc] initWithItems:@[@"تطبيقات المستخدم", @"تطبيقات النظام"]];
     self.scopeControl.selectedSegmentIndex = 0;
     self.scopeControl.backgroundColor = ADMPanel();
-    self.scopeControl.selectedSegmentTintColor = ADMPanelRaised();
+    self.scopeControl.selectedSegmentTintColor = ADMAccentSoft();
     self.scopeControl.layer.cornerRadius = 11;
     self.scopeControl.layer.borderWidth = 0.5;
-    self.scopeControl.layer.borderColor = ADMLine().CGColor;
+    self.scopeControl.layer.borderColor = [ADMAccent() colorWithAlphaComponent:0.38].CGColor;
     self.scopeControl.clipsToBounds = YES;
     [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ADMMuted(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]} forState:UIControlStateNormal];
-    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ADMInk(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
+    [self.scopeControl setTitleTextAttributes:@{NSForegroundColorAttributeName: ADMAccent(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]} forState:UIControlStateSelected];
     [self.scopeControl addTarget:self action:@selector(scopeChanged:) forControlEvents:UIControlEventValueChanged];
     self.scopeControl.translatesAutoresizingMaskIntoConstraints = NO;
     [header addSubview:self.scopeControl];
     [NSLayoutConstraint activateConstraints:@[
         [self.scopeControl.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:16],
         [self.scopeControl.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-16],
-        [self.scopeControl.topAnchor constraintEqualToAnchor:self.statsView.bottomAnchor constant:12],
-        [self.scopeControl.heightAnchor constraintEqualToConstant:42]
+        [self.scopeControl.topAnchor constraintEqualToAnchor:self.statsView.bottomAnchor constant:10],
+        [self.scopeControl.heightAnchor constraintEqualToConstant:40]
     ]];
     self.tableView.tableHeaderView = header;
 }
@@ -619,9 +620,16 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]
     cell.transform = CGAffineTransformIdentity;
 }
 
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    CGFloat offset = MAX(0.0, scrollView.contentOffset.y + scrollView.adjustedContentInset.top);
+    CGFloat progress = MIN(1.0, offset / 72.0);
+    self.statsView.alpha = 1.0 - (progress * 0.12);
+    self.statsView.transform = CGAffineTransformMakeScale(1.0 - (progress * 0.025), 1.0 - (progress * 0.025));
+}
+
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
-        self.scopeControl.alpha = 0.92;
+        self.scopeControl.alpha = 0.88;
     } completion:nil];
 }
 
