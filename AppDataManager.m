@@ -1765,7 +1765,10 @@ static void ADMSetError(NSError **error,
             [fileURL getResourceValue:&isSymlink
                                forKey:NSURLIsSymbolicLinkKey
                                 error:nil];
-            if (isSymlink.boolValue) {
+            if (isSymlink.boolValue ||
+                [fileURL.lastPathComponent
+                    isEqualToString:kContainerMetadataFile]) {
+                /* MCM metadata belongs to the current container and is intentionally preserved. */
                 continue;
             }
 
