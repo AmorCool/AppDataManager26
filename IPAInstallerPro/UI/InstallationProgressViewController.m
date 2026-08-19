@@ -2,7 +2,7 @@
 //  InstallationProgressViewController.m
 //  IPAInstallerPro
 //
-//  v2.1.23 — Event-Driven Live Installation UI
+//  v2.1.24 — Event-Driven Live Installation UI
 //  Observes OperationLog notifications for real-time phase updates.
 //  No timers. No fake progress. No auto-launch.
 //

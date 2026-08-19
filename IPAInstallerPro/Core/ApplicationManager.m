@@ -110,6 +110,64 @@
     return nil;
 }
 
+- (UIImage *)iconFromApplicationBundleURL:(NSURL *)bundleURL {
+    if (![bundleURL isKindOfClass:[NSURL class]]) return nil;
+
+    NSBundle *appBundle = [NSBundle bundleWithURL:bundleURL];
+    if (!appBundle) return nil;
+
+    NSDictionary *info = appBundle.infoDictionary;
+    NSMutableArray<NSString *> *iconNames = [NSMutableArray array];
+
+    NSString *iconName = info[@"CFBundleIconName"];
+    if ([iconName isKindOfClass:[NSString class]] && iconName.length > 0) {
+        [iconNames addObject:iconName];
+    }
+
+    for (NSString *iconsKey in @[@"CFBundleIcons~ipad", @"CFBundleIcons"]) {
+        NSDictionary *icons = info[iconsKey];
+        NSDictionary *primaryIcon = [icons isKindOfClass:[NSDictionary class]] ? icons[@"CFBundlePrimaryIcon"] : nil;
+        NSArray *files = [primaryIcon isKindOfClass:[NSDictionary class]] ? primaryIcon[@"CFBundleIconFiles"] : nil;
+        if ([files isKindOfClass:[NSArray class]]) {
+            for (id file in files) {
+                if ([file isKindOfClass:[NSString class]] && [file length] > 0 && ![iconNames containsObject:file]) {
+                    [iconNames addObject:file];
+                }
+            }
+        }
+    }
+
+    id legacyFiles = info[@"CFBundleIconFiles"];
+    if ([legacyFiles isKindOfClass:[NSString class]]) {
+        legacyFiles = @[legacyFiles];
+    }
+    if ([legacyFiles isKindOfClass:[NSArray class]]) {
+        for (id file in legacyFiles) {
+            if ([file isKindOfClass:[NSString class]] && [file length] > 0 && ![iconNames containsObject:file]) {
+                [iconNames addObject:file];
+            }
+        }
+    }
+
+    if (![iconNames containsObject:@"AppIcon"]) [iconNames addObject:@"AppIcon"];
+
+    for (NSString *name in iconNames) {
+        UIImage *candidate = [UIImage imageNamed:name inBundle:appBundle compatibleWithTraitCollection:nil];
+        if (candidate) return candidate;
+
+        NSString *resourcePath = [appBundle pathForResource:name ofType:nil];
+        if (!resourcePath && name.pathExtension.length == 0) {
+            resourcePath = [appBundle pathForResource:name ofType:@"png"];
+        }
+        if (resourcePath.length > 0) {
+            candidate = [UIImage imageWithContentsOfFile:resourcePath];
+            if (candidate) return candidate;
+        }
+    }
+
+    return nil;
+}
+
 - (UIImage *)iconForBundleID:(NSString *)bundleID {
     if (!bundleID) return nil;
     UIImage *cached = [self.iconCache objectForKey:bundleID];
@@ -142,6 +200,11 @@
                             if (icon) break;
                         }
                     }
+                }
+
+                if (!icon && [proxy respondsToSelector:@selector(bundleURL)]) {
+                    NSURL *bundleURL = [proxy performSelector:@selector(bundleURL)];
+                    icon = [self iconFromApplicationBundleURL:bundleURL];
                 }
             }
         }
