@@ -40,9 +40,9 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithRed:0.43 green:0.5
         appearance.backgroundColor = ADMAppBackground();
         appearance.shadowColor = [UIColor colorWithWhite:0.12 alpha:0.85];
         appearance.stackedLayoutAppearance.normal.iconColor = [UIColor colorWithWhite:0.64 alpha:1.0];
-        appearance.stackedLayoutAppearance.normal.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.64 alpha:1.0], NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightMedium]};
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.90 alpha:1.0], NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightMedium]};
         appearance.stackedLayoutAppearance.selected.iconColor = ADMAppAccent();
-        appearance.stackedLayoutAppearance.selected.titleTextAttributes = @{NSForegroundColorAttributeName: ADMAppAccent(), NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold]};
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = @{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold]};
         tabBarController.tabBar.standardAppearance = appearance;
         if (@available(iOS 15.0, *)) tabBarController.tabBar.scrollEdgeAppearance = appearance;
     }
@@ -75,7 +75,7 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithRed:0.43 green:0.5
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults boolForKey:@"HasLaunchedBefore"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSString *message = @"AppData Manager v1.4.7\n\n"
+            NSString *message = @"AppData Manager v1.4.8\n\n"
                 @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
                 @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
                 @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"

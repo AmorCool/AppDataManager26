@@ -188,42 +188,56 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = ADMPanel();
-        self.layer.cornerRadius = 18;
+        self.layer.cornerRadius = 16;
         self.layer.borderWidth = 0.5;
-        self.layer.borderColor = ADMLine().CGColor;
+        self.layer.borderColor = [ADMAccent() colorWithAlphaComponent:0.34].CGColor;
         self.layer.masksToBounds = YES;
 
+        CAGradientLayer *wash = [CAGradientLayer layer];
+        wash.frame = self.bounds;
+        wash.colors = @[(id)[ADMAccentSoft() colorWithAlphaComponent:0.88].CGColor, (id)ADMPanel().CGColor];
+        wash.startPoint = CGPointMake(1.0, 0.0);
+        wash.endPoint = CGPointMake(0.0, 1.0);
+        [self.layer insertSublayer:wash atIndex:0];
+
         UILabel *title = [[UILabel alloc] init];
-        title.text = @"ملخص التطبيقات";
-        title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-        title.textColor = ADMAccent();
+        title.text = @"ملخص البيانات";
+        title.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+        title.textColor = UIColor.whiteColor;
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:title];
 
         UILabel *status = [[UILabel alloc] init];
-        status.text = @"LIVE";
+        status.text = @"● LIVE";
         status.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightBold];
         status.textColor = ADMAccent();
-        status.textAlignment = NSTextAlignmentRight;
         status.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:status];
 
-        UIView *divider = [[UIView alloc] init];
-        divider.backgroundColor = ADMLine();
-        divider.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:divider];
+        UIView *rule = [[UIView alloc] init];
+        rule.backgroundColor = [ADMAccent() colorWithAlphaComponent:0.72];
+        rule.layer.cornerRadius = 1;
+        rule.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:rule];
+
+        UIView *split = [[UIView alloc] init];
+        split.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.16];
+        split.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:split];
 
         _appsValueLabel = [[UILabel alloc] init];
         _appsValueLabel.text = @"—";
-        _appsValueLabel.font = [UIFont monospacedDigitSystemFontOfSize:23 weight:UIFontWeightBold];
+        _appsValueLabel.font = [UIFont monospacedDigitSystemFontOfSize:26 weight:UIFontWeightBold];
         _appsValueLabel.textColor = ADMAccent();
+        _appsValueLabel.textAlignment = NSTextAlignmentRight;
         _appsValueLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_appsValueLabel];
 
         _sizeValueLabel = [[UILabel alloc] init];
         _sizeValueLabel.text = @"—";
-        _sizeValueLabel.font = [UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightSemibold];
-        _sizeValueLabel.textColor = ADMInk();
+        _sizeValueLabel.font = [UIFont monospacedDigitSystemFontOfSize:18 weight:UIFontWeightSemibold];
+        _sizeValueLabel.textColor = UIColor.whiteColor;
+        _sizeValueLabel.textAlignment = NSTextAlignmentLeft;
         _sizeValueLabel.adjustsFontSizeToFitWidth = YES;
         _sizeValueLabel.minimumScaleFactor = 0.65;
         _sizeValueLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -231,35 +245,43 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
 
         UILabel *appsCaption = [[UILabel alloc] init];
         appsCaption.text = @"التطبيقات المثبتة";
-        appsCaption.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
-        appsCaption.textColor = ADMMuted();
+        appsCaption.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
+        appsCaption.textColor = [UIColor colorWithWhite:1.0 alpha:0.74];
+        appsCaption.textAlignment = NSTextAlignmentRight;
         appsCaption.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:appsCaption];
 
         UILabel *sizeCaption = [[UILabel alloc] init];
         sizeCaption.text = @"حجم البيانات";
-        sizeCaption.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
-        sizeCaption.textColor = ADMMuted();
+        sizeCaption.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
+        sizeCaption.textColor = [UIColor colorWithWhite:1.0 alpha:0.74];
+        sizeCaption.textAlignment = NSTextAlignmentLeft;
         sizeCaption.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:sizeCaption];
 
         [NSLayoutConstraint activateConstraints:@[
-            [title.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:18],
-            [title.topAnchor constraintEqualToAnchor:self.topAnchor constant:15],
-            [status.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-18],
+            [title.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-18],
+            [title.topAnchor constraintEqualToAnchor:self.topAnchor constant:12],
+            [status.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:18],
             [status.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-            [divider.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:18],
-            [divider.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-18],
-            [divider.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:12],
-            [divider.heightAnchor constraintEqualToConstant:0.5],
-            [_appsValueLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:20],
-            [_appsValueLabel.topAnchor constraintEqualToAnchor:divider.bottomAnchor constant:12],
-            [appsCaption.leadingAnchor constraintEqualToAnchor:_appsValueLabel.leadingAnchor],
-            [appsCaption.topAnchor constraintEqualToAnchor:_appsValueLabel.bottomAnchor constant:1],
-            [_sizeValueLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-20],
-            [_sizeValueLabel.topAnchor constraintEqualToAnchor:_appsValueLabel.topAnchor constant:3],
-            [sizeCaption.trailingAnchor constraintEqualToAnchor:_sizeValueLabel.trailingAnchor],
-            [sizeCaption.topAnchor constraintEqualToAnchor:_sizeValueLabel.bottomAnchor constant:2]
+            [rule.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-18],
+            [rule.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:8],
+            [rule.widthAnchor constraintEqualToConstant:36],
+            [rule.heightAnchor constraintEqualToConstant:2],
+            [split.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
+            [split.topAnchor constraintEqualToAnchor:rule.bottomAnchor constant:9],
+            [split.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-13],
+            [split.widthAnchor constraintEqualToConstant:0.5],
+            [_appsValueLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-18],
+            [_appsValueLabel.topAnchor constraintEqualToAnchor:rule.bottomAnchor constant:7],
+            [_appsValueLabel.leadingAnchor constraintEqualToAnchor:split.trailingAnchor constant:16],
+            [appsCaption.trailingAnchor constraintEqualToAnchor:_appsValueLabel.trailingAnchor],
+            [appsCaption.topAnchor constraintEqualToAnchor:_appsValueLabel.bottomAnchor constant:0],
+            [_sizeValueLabel.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:18],
+            [_sizeValueLabel.topAnchor constraintEqualToAnchor:rule.bottomAnchor constant:10],
+            [_sizeValueLabel.trailingAnchor constraintEqualToAnchor:split.leadingAnchor constant:-16],
+            [sizeCaption.leadingAnchor constraintEqualToAnchor:_sizeValueLabel.leadingAnchor],
+            [sizeCaption.topAnchor constraintEqualToAnchor:_sizeValueLabel.bottomAnchor constant:0]
         ]];
     }
     return self;
@@ -620,16 +642,10 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     cell.transform = CGAffineTransformIdentity;
 }
 
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-    CGFloat offset = MAX(0.0, scrollView.contentOffset.y + scrollView.adjustedContentInset.top);
-    CGFloat progress = MIN(1.0, offset / 72.0);
-    self.statsView.alpha = 1.0 - (progress * 0.12);
-    self.statsView.transform = CGAffineTransformMakeScale(1.0 - (progress * 0.025), 1.0 - (progress * 0.025));
-}
-
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     [UIView animateWithDuration:0.16 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
-        self.scopeControl.alpha = 0.88;
+        self.scopeControl.alpha = 0.94;
+        self.statsView.alpha = 0.94;
     } completion:nil];
 }
 
@@ -637,6 +653,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
     if (!decelerate) {
         [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
             self.scopeControl.alpha = 1.0;
+        self.statsView.alpha = 1.0;
         } completion:nil];
     }
 }
@@ -644,6 +661,7 @@ static UIColor *ADMAccentSoft(void) { return [UIColor colorWithRed:0.13 green:0.
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
     [UIView animateWithDuration:0.22 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:^{
         self.scopeControl.alpha = 1.0;
+        self.statsView.alpha = 1.0;
     } completion:nil];
 }
 
