@@ -2,11 +2,11 @@
 #import "AppDataManager.h"
 
 static UIColor *ADMCanvas(void) { return [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]; }
-static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.082 blue:0.105 alpha:1.0]; }
-static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.105 green:0.115 blue:0.145 alpha:1.0]; }
+static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.090 green:0.093 blue:0.108 alpha:1.0]; }
+static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.135 green:0.140 blue:0.158 alpha:1.0]; }
 static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
-static UIColor *ADMMuted(void) { return [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]; }
-static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
+static UIColor *ADMMuted(void) { return [UIColor colorWithWhite:0.66 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]; }
 
 #pragma mark - Storage map
 

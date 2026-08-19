@@ -75,7 +75,7 @@ static UIColor *ADMAppAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if (![defaults boolForKey:@"HasLaunchedBefore"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSString *message = @"AppData Manager v1.4.4\n\n"
+            NSString *message = @"AppData Manager v1.4.5\n\n"
                 @"مجانية بالكامل — لا تُباع ولا تتطلب أي رسوم.\n\n"
                 @"إذا حاول أي شخص بيع الأداة أو طلب مبلغ مقابل الحصول عليها، فهذا غير رسمي.\n\n"
                 @"للإبلاغ عن أي حالة بيع أو استغلال للأداة:\n"

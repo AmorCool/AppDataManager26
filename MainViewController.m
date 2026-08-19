@@ -5,12 +5,12 @@
 #pragma mark - Monochrome design system
 
 static UIColor *ADMCanvas(void) { return [UIColor colorWithRed:0.028 green:0.029 blue:0.035 alpha:1.0]; }
-static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.078 blue:0.090 alpha:1.0]; }
-static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.105 green:0.109 blue:0.124 alpha:1.0]; }
-static UIColor *ADMLine(void) { return [UIColor colorWithWhite:0.22 alpha:0.72]; }
-static UIColor *ADMInk(void) { return [UIColor colorWithWhite:0.94 alpha:1.0]; }
-static UIColor *ADMMuted(void) { return [UIColor colorWithWhite:0.57 alpha:1.0]; }
-static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
+static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.090 green:0.093 blue:0.108 alpha:1.0]; }
+static UIColor *ADMPanelRaised(void) { return [UIColor colorWithRed:0.135 green:0.140 blue:0.158 alpha:1.0]; }
+static UIColor *ADMLine(void) { return [UIColor colorWithWhite:0.34 alpha:0.82]; }
+static UIColor *ADMInk(void) { return [UIColor colorWithWhite:0.98 alpha:1.0]; }
+static UIColor *ADMMuted(void) { return [UIColor colorWithWhite:0.66 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]; }
 
 #pragma mark - Application row
 
@@ -413,6 +413,12 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]
     self.tableView.backgroundColor = ADMCanvas();
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 30, 0);
+    self.tableView.alwaysBounceVertical = YES;
+    self.tableView.directionalLockEnabled = YES;
+    self.tableView.delaysContentTouches = NO;
+    self.tableView.canCancelContentTouches = YES;
+    self.tableView.decelerationRate = UIScrollViewDecelerationRateNormal;
+    self.tableView.showsVerticalScrollIndicator = YES;
     self.tableView.rowHeight = 86;
     self.tableView.estimatedRowHeight = 86;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -514,13 +520,22 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]
     self.tableView.alpha = 1.0;
 }
 
+- (BOOL)isSystemApplicationRecord:(NSDictionary *)app {
+    NSString *bundleID = [app[@"bundleID"] isKindOfClass:[NSString class]] ? app[@"bundleID"] : @"";
+    NSString *type = [[app[@"type"] description] lowercaseString];
+    if ([bundleID hasPrefix:@"com.apple."]) return YES;
+    if ([type containsString:@"system"] || [type containsString:@"internal"]) return YES;
+    if ([type containsString:@"user"]) return NO;
+    return [self.manager isSystemApp:bundleID];
+}
+
 - (void)rebuildSectionsForSearchText:(NSString *)searchText {
     NSMutableArray *users = [NSMutableArray array];
     NSMutableArray *systems = [NSMutableArray array];
     NSPredicate *matches = searchText.length > 0 ? [NSPredicate predicateWithFormat:@"name CONTAINS[c] %@ OR bundleID CONTAINS[c] %@", searchText, searchText] : nil;
     for (NSDictionary *app in self.allApps) {
         if (matches && ![matches evaluateWithObject:app]) continue;
-        if ([app[@"isSystemApp"] boolValue]) [systems addObject:app];
+        if ([self isSystemApplicationRecord:app]) [systems addObject:app];
         else [users addObject:app];
     }
     self.userApps = users;
@@ -596,12 +611,9 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
-    cell.alpha = 0.0;
-    cell.transform = CGAffineTransformMakeTranslation(0, 6);
-    [UIView animateWithDuration:0.22 delay:MIN(indexPath.row * 0.025, 0.14) options:UIViewAnimationOptionCurveEaseOut animations:^{
-        cell.alpha = 1.0;
-        cell.transform = CGAffineTransformIdentity;
-    } completion:nil];
+    // Keep scrolling fully under the user's control; transitions are handled at the scope level.
+    cell.alpha = 1.0;
+    cell.transform = CGAffineTransformIdentity;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -2,10 +2,10 @@
 #import "AppDataManager.h"
 
 static UIColor *ADMCanvas(void) { return [UIColor colorWithRed:0.025 green:0.027 blue:0.035 alpha:1.0]; }
-static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.075 green:0.082 blue:0.105 alpha:1.0]; }
-static UIColor *ADMInk(void) { return [UIColor colorWithRed:0.93 green:0.95 blue:0.98 alpha:1.0]; }
-static UIColor *ADMMuted(void) { return [UIColor colorWithRed:0.53 green:0.57 blue:0.64 alpha:1.0]; }
-static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]; }
+static UIColor *ADMPanel(void) { return [UIColor colorWithRed:0.090 green:0.093 blue:0.108 alpha:1.0]; }
+static UIColor *ADMInk(void) { return [UIColor colorWithWhite:0.98 alpha:1.0]; }
+static UIColor *ADMMuted(void) { return [UIColor colorWithWhite:0.66 alpha:1.0]; }
+static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.90 alpha:1.0]; }
 
 @interface SettingsViewController () <UITableViewDelegate, UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
@@ -76,7 +76,7 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]
 
     if (indexPath.section == 0) {
         cell.textLabel.text = @"حالة الأداة";
-        cell.detailTextLabel.text = @"v1.4.4  /  READY";
+        cell.detailTextLabel.text = @"v1.4.5  /  READY";
         cell.imageView.image = [[UIImage systemImageNamed:@"checkmark.shield.fill"] imageWithTintColor:ADMAccent()];
     } else if (indexPath.section == 1) {
         NSArray *titles = @[@"مسح كل النسخ", @"تصدير النسخ", @"استيراد النسخ"];
@@ -152,7 +152,7 @@ static UIColor *ADMAccent(void) { return [UIColor colorWithWhite:0.78 alpha:1.0]
         }
     } else if (indexPath.section == 2) {
         if (indexPath.row == 0) {
-            NSString *info = @"AppData Manager v1.4.4\n\n"
+            NSString *info = @"AppData Manager v1.4.5\n\n"
                 @"أداة احترافية لإدارة بيانات التطبيقات\n"
                 @"لأجهزة iOS Jailbreak.\n\n"
                 @"• متوافق مع Dopamine 3.0\n"
