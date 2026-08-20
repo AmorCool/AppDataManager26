@@ -146,6 +146,7 @@
         ];
 
         NSFileManager *fm = [NSFileManager defaultManager];
+        NSMutableSet<NSString *> *seenIPAPaths = [NSMutableSet set];
         for (NSString *dir in directories) {
             if (![fm fileExistsAtPath:dir]) {
                 if ([dir isEqualToString:@"/var/mobile/Documents/IPAInstaller"]) {
@@ -157,6 +158,8 @@
             for (NSString *file in contents) {
                 if ([file.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
                     NSString *path = [dir stringByAppendingPathComponent:file];
+                    if ([seenIPAPaths containsObject:path]) continue;
+                    [seenIPAPaths addObject:path];
                     IPAExtractedInfo *info = [[IPAExtractor sharedExtractor] extractInfoFromIPA:path];
                     if (info) [foundFiles addObject:info];
                 }

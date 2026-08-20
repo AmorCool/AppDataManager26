@@ -243,21 +243,36 @@ extern char **environ;
 
     NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
     NSString *executable = [info[@"CFBundleExecutable"] isKindOfClass:[NSString class]] ? info[@"CFBundleExecutable"] : nil;
+    NSString *executableEntry = nil;
     if (executable.length > 0) {
-        NSString *executableEntry = [appRootEntry stringByAppendingPathComponent:executable];
-        BOOL executableListed = NO;
+        NSString *expectedEntry = [appRootEntry stringByAppendingPathComponent:executable];
         for (NSString *rawLine in [listing componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
             NSString *entry = [rawLine stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            if ([entry isEqualToString:executableEntry]) { executableListed = YES; break; }
+            if ([entry.lowercaseString isEqualToString:expectedEntry.lowercaseString]) {
+                executableEntry = entry;
+                break;
+            }
         }
-        if (executableListed) {
-            NSString *executablePath = [appPath stringByAppendingPathComponent:executable];
-            [self runCmd:self.unzipPath
-                    args:@[@"-p", ipaPath, executableEntry]
-                  stdin:nil
-                 stdout:executablePath
-      stderrToDevNull:YES];
-        }
+    }
+
+    if (executableEntry.length == 0) {
+        [errors addObject:[NSString stringWithFormat:@"Executable %@ is not present in IPA directory", executable ?: @"(unknown)"]];
+        [fm removeItemAtPath:tmp error:nil];
+        return [self result:IPAValidationStatusMissingExecutable errors:errors warnings:warnings missing:missing ready:NO];
+    }
+
+    NSString *executablePath = [appPath stringByAppendingPathComponent:executable];
+    BOOL executableExtracted = [self runCmd:self.unzipPath
+                                      args:@[@"-p", ipaPath, executableEntry]
+                                    stdin:nil
+                                   stdout:executablePath
+                        stderrToDevNull:YES];
+    NSDictionary *executableAttrs = [fm attributesOfItemAtPath:executablePath error:nil];
+    unsigned long long executableSize = [executableAttrs[@"NSFileSize"] unsignedLongLongValue];
+    if (!executableExtracted || executableSize == 0) {
+        [errors addObject:[NSString stringWithFormat:@"Executable %@ extraction failed", executable]];
+        [fm removeItemAtPath:tmp error:nil];
+        return [self result:IPAValidationStatusMissingExecutable errors:errors warnings:warnings missing:missing ready:NO];
     }
 
     IPAValidationResult *res = [self validateExtractedAppAtPath:appPath];
