@@ -667,9 +667,7 @@ extern char **environ;
         [self runRoot:self.uicachePath args:@[@"-p", destApp] opLog:opLog recordID:rec14b];
     }
 
-    // uicache may return success before Launch Services exposes the application.
-    // Request registration explicitly, then verify the actual application registry.
-    [self registerApplicationAtPath:destApp logicalPath:logicalDest bundleID:bundleID opLog:opLog txnID:txnID];
+    // uicache is the sole registration request; final verification checks the real registry.
 
     // PHASE 9: VERIFY (comprehensive)
     NSString *rec15 = [opLog beginPhase:OperationPhaseVerify operation:@"final verify" target:destApp input:bundleID transactionID:txnID];
@@ -840,55 +838,6 @@ extern char **environ;
             }
         }
     }
-}
-
-#pragma mark - Launch Services Registration
-
-- (BOOL)registerApplicationAtPath:(NSString *)resolvedPath
-                      logicalPath:(NSString *)logicalPath
-                         bundleID:(NSString *)bundleID
-                            opLog:(OperationLog *)opLog
-                             txnID:(NSString *)txnID {
-    NSString *rec = [opLog beginPhase:OperationPhaseUICache
-                             operation:@"LSApplicationWorkspace registerApplication"
-                                target:resolvedPath
-                                 input:logicalPath ?: @""
-                         transactionID:txnID];
-    BOOL accepted = NO;
-    @try {
-        Class LS = objc_getClass("LSApplicationWorkspace");
-        id workspace = LS ? [LS performSelector:@selector(defaultWorkspace)] : nil;
-        SEL registerSelector = NSSelectorFromString(@"registerApplication:");
-        if (workspace && [workspace respondsToSelector:registerSelector]) {
-            NSMutableArray<NSString *> *paths = [NSMutableArray array];
-            if (resolvedPath.length > 0) [paths addObject:resolvedPath];
-            if (logicalPath.length > 0 && ![paths containsObject:logicalPath]) [paths addObject:logicalPath];
-
-            for (NSString *path in paths) {
-                NSURL *url = [NSURL fileURLWithPath:path];
-                NSMethodSignature *signature = [workspace methodSignatureForSelector:registerSelector];
-                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                invocation.target = workspace;
-                invocation.selector = registerSelector;
-                [invocation setArgument:&url atIndex:2];
-                [invocation invoke];
-                BOOL result = NO;
-                [invocation getReturnValue:&result];
-                if (result) { accepted = YES; break; }
-            }
-        }
-    } @catch (NSException *exception) {
-        NSLog(@"[IPAInstallerPro] registerApplication exception: %@", exception.reason);
-    }
-
-    [opLog endPhase:rec
-           exitCode:accepted ? 0 : 1
-          rawOutput:@""
-           rawError:accepted ? @"" : @"Launch Services rejected registration request"
-       verification:accepted ? @"Registration request accepted" : @"Registration request not accepted"
-           verified:accepted
-           duration:0];
-    return accepted;
 }
 
 - (BOOL)isApplicationRegisteredWithBundleID:(NSString *)bundleID {
