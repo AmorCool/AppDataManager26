@@ -1,0 +1,26 @@
+Origin: A-ZAIN Repo
+Label: A-ZAIN
+Suite: stable
+Version: 1.0
+Codename: ios
+Architectures: iphoneos-arm64
+Components: main
+Description: A-ZAIN Repo - Jailbreak tools and utilities
+
+MD5Sum:
+ b05192ad694cb7c14a8f03ca4a089cb4 599 Packages
+ 13a29b5871904d7943d89ec67ab5f4c7 429 Packages.gz
+ 3f43f762b7af6b79986b35501bdc9a2d 478 Packages.bz2
+ e34a1160756911b932b5bd8656d04e75 496 Packages.xz
+
+SHA1:
+ 2be24697de6882be793366331aa7eb3067ac5d1c 599 Packages
+ 3346b6254e9f9568ec7a1aae9de9619b533cc79a 429 Packages.gz
+ e9f12afc2d73b201d6bce9abfebd4c9e2984d76b 478 Packages.bz2
+ 59313a1f5b1971b361d69e41f03c060d9a6ca1e0 496 Packages.xz
+
+SHA256:
+ 79d182e9fd8bdf1978c785d9fb4eebcb2f511f16aa63da6c24bbab90fe900b04 599 Packages
+ 20bf55d6e3d1accdd592bc761a1358e800d58879f5e1f2f40318d2c076e99979 429 Packages.gz
+ 7b3e70467578aaf09249d61b99eaa4f3f7f8aa5c0901de9056303d661f13f59f 478 Packages.bz2
+ 5fb638b74385945854d7695d8d92f63608c0a884cdc1ffd26ffdeb2f7473a1d9 496 Packages.xz
